@@ -30,32 +30,43 @@ class ComparativeAnalyzer:
         """Detailed year-over-year comparison"""
         
         yoy_analysis = {}
-        years = sorted(yearly_data.keys())
+        # Create a mapping of integer years to original keys
+        year_map = {}
+        for key in yearly_data.keys():
+            int_year = int(key) if isinstance(key, str) else key
+            year_map[int_year] = key
         
-        for i in range(1, len(years)):
-            prev_year = years[i-1]
-            curr_year = years[i]
+        # Sort by integer years
+        sorted_years = sorted(year_map.keys())
+        
+        for i in range(1, len(sorted_years)):
+            prev_year_int = sorted_years[i-1]
+            curr_year_int = sorted_years[i]
+            
+            # Use the original keys to access data
+            prev_year_key = year_map[prev_year_int]
+            curr_year_key = year_map[curr_year_int]
             
             comparison = {
                 'revenue': self._calculate_change(
-                    yearly_data[prev_year].get('revenue', {}),
-                    yearly_data[curr_year].get('revenue', {})
+                    yearly_data[prev_year_key].get('revenue', {}),
+                    yearly_data[curr_year_key].get('revenue', {})
                 ),
                 'costs': self._calculate_change(
-                    yearly_data[prev_year].get('costs', {}),
-                    yearly_data[curr_year].get('costs', {})
+                    yearly_data[prev_year_key].get('costs', {}),
+                    yearly_data[curr_year_key].get('costs', {})
                 ),
                 'margins': self._calculate_margin_change(
-                    yearly_data[prev_year].get('margins', {}),
-                    yearly_data[curr_year].get('margins', {})
+                    yearly_data[prev_year_key].get('margins', {}),
+                    yearly_data[curr_year_key].get('margins', {})
                 ),
                 'monthly_changes': self._monthly_comparison(
-                    yearly_data[prev_year],
-                    yearly_data[curr_year]
+                    yearly_data[prev_year_key],
+                    yearly_data[curr_year_key]
                 )
             }
             
-            yoy_analysis[f"{prev_year}_to_{curr_year}"] = comparison
+            yoy_analysis[f"{prev_year_int}_to_{curr_year_int}"] = comparison
         
         return yoy_analysis
     
@@ -147,20 +158,29 @@ class ComparativeAnalyzer:
     def _analyze_growth_patterns(self, yearly_data: Dict[int, Dict]) -> Dict:
         """Analyze growth acceleration/deceleration patterns"""
         
-        years = sorted(yearly_data.keys())
+        # Create a mapping of integer years to original keys
+        year_map = {}
+        for key in yearly_data.keys():
+            int_year = int(key) if isinstance(key, str) else key
+            year_map[int_year] = key
+        
+        # Sort by integer years
+        sorted_years = sorted(year_map.keys())
         growth_rates = []
         
-        for i in range(1, len(years)):
-            prev_year = years[i-1]
-            curr_year = years[i]
+        for i in range(1, len(sorted_years)):
+            prev_year_int = sorted_years[i-1]
+            curr_year_int = sorted_years[i]
+            prev_year_key = year_map[prev_year_int]
+            curr_year_key = year_map[curr_year_int]
             
-            prev_revenue = yearly_data[prev_year].get('revenue', {}).get('ANNUAL', 0)
-            curr_revenue = yearly_data[curr_year].get('revenue', {}).get('ANNUAL', 0)
+            prev_revenue = yearly_data[prev_year_key].get('revenue', {}).get('ANNUAL', 0)
+            curr_revenue = yearly_data[curr_year_key].get('revenue', {}).get('ANNUAL', 0)
             
             if prev_revenue > 0:
                 growth_rate = ((curr_revenue - prev_revenue) / prev_revenue) * 100
                 growth_rates.append({
-                    'period': f"{prev_year}-{curr_year}",
+                    'period': f"{prev_year_int}-{curr_year_int}",
                     'growth_rate': growth_rate
                 })
         
@@ -275,10 +295,16 @@ class ComparativeAnalyzer:
                 }
         
         # Trend in volatility
-        years = sorted(volatility_analysis.keys())
-        volatility_trend = 'increasing' if len(years) > 1 and \
-            volatility_analysis[years[-1]]['revenue_volatility']['cv'] > \
-            volatility_analysis[years[0]]['revenue_volatility']['cv'] else 'decreasing'
+        # Create mapping for volatility analysis keys
+        vol_year_map = {}
+        for key in volatility_analysis.keys():
+            int_year = int(key) if isinstance(key, str) else key
+            vol_year_map[int_year] = key
+        
+        sorted_vol_years = sorted(vol_year_map.keys())
+        volatility_trend = 'increasing' if len(sorted_vol_years) > 1 and \
+            volatility_analysis[vol_year_map[sorted_vol_years[-1]]]['revenue_volatility']['cv'] > \
+            volatility_analysis[vol_year_map[sorted_vol_years[0]]]['revenue_volatility']['cv'] else 'decreasing'
         
         return {
             'yearly_volatility': volatility_analysis,

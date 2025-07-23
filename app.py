@@ -17,6 +17,9 @@ import json
 from typing import Dict, List
 import numpy as np
 from modules.database_manager import DatabaseManager
+from gerenciador_arquivos import GerenciadorArquivos
+from core.financial_processor import FinancialProcessor
+import google.generativeai as genai
 
 # Load environment variables
 load_dotenv()
@@ -374,6 +377,16 @@ if 'charts' not in st.session_state:
     st.session_state.charts = InteractiveCharts()
 if 'month_analytics' not in st.session_state:
     st.session_state.month_analytics = MonthAnalytics()
+if 'file_manager' not in st.session_state:
+    st.session_state.file_manager = GerenciadorArquivos()
+    # Sync existing files
+    st.session_state.file_manager.sincronizar_arquivos_existentes()
+if 'ai_data_extractor' not in st.session_state:
+    st.session_state.ai_data_extractor = None
+if 'flexible_data' not in st.session_state:
+    st.session_state.flexible_data = None
+if 'processed_data' not in st.session_state:
+    st.session_state.processed_data = None
 
 # Try to load data from database FIRST
 data_loaded = db.auto_load_state(st.session_state)
@@ -411,6 +424,11 @@ with st.sidebar:
     show_filters = st.checkbox("Mostrar Filtros Avançados", value=True)
     show_chat = st.checkbox("Ativar Chat com IA", value=True)
     show_interactive = st.checkbox("Charts Interativos", value=True)
+    use_flexible_extractor = st.checkbox(
+        "🆕 Usar Extrator Flexível", 
+        value=False,
+        help="Detecta automaticamente TODAS as categorias de despesas nos arquivos Excel"
+    )
     
     st.markdown("### 🎨 Tema")
     theme = st.selectbox("Escolha o tema", ["Profissional", "Colorido", "Minimalista"])
@@ -448,13 +466,9 @@ with st.sidebar:
     else:
         st.caption("❌ Nenhum dado salvo")
 
-# Main header
-st.markdown("""
-    <div class="main-header">
-        <h1 class="main-title">🌊 Marine Seguros Analytics</h1>
-        <p class="main-subtitle">Plataforma Inteligente com IA, Filtros Interativos e Chat</p>
-    </div>
-""", unsafe_allow_html=True)
+# Title and description
+st.title("🏢 Marine Seguros - Financial Analytics Platform")
+st.markdown("### Análise Financeira Inteligente com IA | 2018-2025")
 
 # Check if we have data either in session or database
 has_data = (st.session_state.extracted_data and len(st.session_state.extracted_data) > 0)
@@ -467,19 +481,206 @@ if not has_data:
         if db.auto_load_state(st.session_state):
             st.rerun()
 
-# Main content
+# Main content with conditional tabs
+if use_flexible_extractor and st.session_state.flexible_data:
+    # 7 tabs when using flexible extractor
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+        "📁 Upload", 
+        "📊 Dashboard", 
+        "🔍 Detalhamento", 
+        "🤖 AI Insights", 
+        "💬 AI Chat",
+        "📈 Previsões", 
+        "⚡ Integração"
+    ])
+else:
+    # 6 tabs for normal mode (no Detalhamento)
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "📁 Upload", 
+        "📊 Dashboard", 
+        "🤖 AI Insights", 
+        "💬 AI Chat",
+        "📈 Previsões", 
+        "⚡ Integração"
+    ])
+    
+# Tab 1: File Upload
+with tab1:
+    st.header("📊 Gerenciamento de Dados Financeiros")
+    
+    # File management bar
+    col1, col2, col3 = st.columns([3, 1, 1])
+    
+    with col1:
+        # Year filter
+        anos_disponiveis = st.session_state.file_manager.obter_anos_disponiveis()
+        if anos_disponiveis:
+            anos_selecionados = st.multiselect(
+                "Filtrar por anos",
+                anos_disponiveis,
+                default=anos_disponiveis[-2:] if len(anos_disponiveis) >= 2 else anos_disponiveis
+            )
+        else:
+            anos_selecionados = []
+    
+    with col2:
+        if st.button("🔄 Atualizar", use_container_width=True):
+            st.session_state.file_manager.sincronizar_arquivos_existentes()
+            st.rerun()
+    
+    with col3:
+        gerenciar_arquivos = st.checkbox("📁 Gerenciar", value=False)
+    
+    # File upload section
+    st.subheader("📤 Upload de Novos Arquivos")
+    
+    uploaded_files = st.file_uploader(
+        "Selecione arquivos Excel (.xlsx, .xls)",
+        type=['xlsx', 'xls'],
+        accept_multiple_files=True,
+        help="Faça upload de arquivos contendo dados financeiros"
+    )
+    
+    if uploaded_files:
+        for uploaded_file in uploaded_files:
+            if st.button(f"📥 Processar {uploaded_file.name}", use_container_width=True):
+                with st.spinner(f"Enviando {uploaded_file.name}..."):
+                    if st.session_state.file_manager.enviar_arquivo(uploaded_file):
+                        st.success(f"✅ {uploaded_file.name} enviado com sucesso!")
+                        st.rerun()
+                    else:
+                        st.error(f"❌ Erro ao enviar {uploaded_file.name}")
+    
+    # Process files button
+    if st.button("🚀 Processar Dados", type="primary", use_container_width=True):
+        if not gemini_api_key:
+            st.error("Por favor, configure sua Gemini API key")
+        else:
+            with st.spinner("Processando dados..."):
+                if use_flexible_extractor:
+                    # Use flexible extractor
+                    from core.flexible_extractor import FlexibleFinancialExtractor
+                    extractor = FlexibleFinancialExtractor()
+                else:
+                    # Use direct extractor
+                    extractor = DirectDataExtractor()
+                
+                # Start with existing data if available
+                extracted_data = st.session_state.extracted_data.copy() if st.session_state.extracted_data else {}
+                errors = []
+                
+                # Get all Excel files to process
+                arquivos = st.session_state.file_manager.obter_todos_arquivos()
+                files_to_process = []
+                
+                for arquivo in arquivos:
+                    if not anos_selecionados or any(ano in arquivo['anos_incluidos'] for ano in anos_selecionados):
+                        caminho = os.path.join(st.session_state.file_manager.caminho_armazenamento, arquivo['nome'])
+                        files_to_process.append(caminho)
+                
+                # Process each file
+                for file_path in files_to_process:
+                    try:
+                        st.info(f"📄 Processando: {os.path.basename(file_path)}")
+                        file_data = extractor.extract_from_excel(file_path)
+                        
+                        if file_data:
+                            extracted_data.update(file_data)
+                            st.success(f"✅ {os.path.basename(file_path)}: {len(file_data)} anos extraídos")
+                        else:
+                            st.warning(f"⚠️ {os.path.basename(file_path)}: Nenhum dado extraído")
+                            
+                    except Exception as e:
+                        st.error(f"❌ {os.path.basename(file_path)}: Erro - {str(e)}")
+                        errors.append(str(e))
+                
+                if extracted_data:
+                    st.session_state.extracted_data = extracted_data
+                    
+                    # Initialize AI Data Extractor if API key is available
+                    if gemini_api_key and not st.session_state.ai_data_extractor:
+                        st.session_state.ai_data_extractor = AIDataExtractor(gemini_api_key)
+                    
+                    # If using flexible extractor, store that data too
+                    if use_flexible_extractor:
+                        st.session_state.flexible_data = extracted_data
+                        
+                        # Create FinancialProcessor instance
+                        processor = FinancialProcessor()
+                        # Consolidate data
+                        consolidated_df, all_data = processor.consolidate_all_years_flexible({"dummy": extracted_data})
+                        
+                        st.session_state.processed_data = {
+                            'consolidated': consolidated_df,
+                            'raw_data': all_data,
+                            'summary': processor.get_financial_summary(consolidated_df),
+                            'anomalies': processor.detect_anomalies(consolidated_df)
+                        }
+                    
+                    # Perform comparative analysis if multiple years
+                    if len(extracted_data) >= 2 and gemini_api_key:
+                        analyzer = ComparativeAnalyzer(gemini_api_key)
+                        st.session_state.comparative_analysis = analyzer.analyze_all_years(extracted_data)
+                    
+                    # Save to database
+                    db.auto_save_state(st.session_state)
+                    st.success("✅ Dados processados e salvos com sucesso!")
+                    st.balloons()
+                    st.rerun()
+                else:
+                    st.error("❌ Nenhum dado foi extraído!")
+    
+    # File management section
+    st.divider()
+    st.subheader("📂 Arquivos Disponíveis")
+    
+    arquivos = st.session_state.file_manager.obter_todos_arquivos()
+    
+    if arquivos:
+        # Filter files by selected years
+        if anos_selecionados:
+            arquivos_filtrados = [
+                arquivo for arquivo in arquivos 
+                if any(ano in arquivo['anos_incluidos'] for ano in anos_selecionados)
+            ]
+        else:
+            arquivos_filtrados = arquivos
+        
+        if arquivos_filtrados:
+            if anos_selecionados and len(arquivos) != len(arquivos_filtrados):
+                st.info(f"📊 {len(arquivos_filtrados)} arquivo(s) encontrado(s) para os anos selecionados (Total: {len(arquivos)} arquivos)")
+            else:
+                st.info(f"📊 {len(arquivos)} arquivo(s) encontrado(s)")
+            
+            for arquivo in arquivos_filtrados:
+                with st.expander(f"📄 {arquivo['nome']}", expanded=False):
+                    col1, col2 = st.columns([3, 1])
+                    
+                    with col1:
+                        st.write(f"**ID:** {arquivo['id']}")
+                        st.write(f"**Data de envio:** {arquivo['data_envio']}")
+                        st.write(f"**Tamanho:** {arquivo['tamanho']}")
+                        st.write(f"**Anos incluídos:** {', '.join(map(str, arquivo['anos_incluidos']))}")
+                        if arquivo.get('status'):
+                            st.write(f"**Status:** {arquivo['status']}")
+                    
+                    with col2:
+                        if gerenciar_arquivos:
+                            if st.button(f"🗑️ Excluir", key=f"del_{arquivo['id']}"):
+                                if st.session_state.file_manager.excluir_arquivo(arquivo['id']):
+                                    st.success("Arquivo excluído!")
+                                    st.rerun()
+        else:
+            st.warning("Nenhum arquivo encontrado para os anos selecionados")
+    else:
+        st.info("Nenhum arquivo disponível. Faça upload de arquivos Excel.")
+
+# Only show other tabs if we have data
 if st.session_state.extracted_data and len(st.session_state.extracted_data) > 0:
-    # Create tabs FIRST, before filters
-    tab_list = ["📊 Dashboard", "🔍 Análise", "📈 Tendências", "🗓️ Análise Mensal"]
-    if show_chat:
-        tab_list.append("💬 Chat IA")
-    
-    tabs = st.tabs(tab_list)
-    
-    # Dashboard Tab
-    with tabs[0]:
+    # Tab 2: Dashboard
+    with tab2:
         if show_filters:
-            # Filters section INSIDE the dashboard tab
+            # Filters section
             st.markdown('<div class="section-header"><span class="section-icon">📅</span>Filtros de Período</div>', unsafe_allow_html=True)
             
             # Year filters
@@ -714,7 +915,7 @@ if st.session_state.extracted_data and len(st.session_state.extracted_data) > 0:
             st.plotly_chart(fig, use_container_width=True)
     
     # Analysis Tab
-    with tabs[1]:
+    with tab2:
         st.markdown("### 🔍 Análise Comparativa")
         
         if filtered_data and len(filtered_data) > 1:
@@ -925,7 +1126,7 @@ if st.session_state.extracted_data and len(st.session_state.extracted_data) > 0:
             st.info("Nenhum dado disponível para análise.")
     
     # Trends Tab
-    with tabs[2]:
+    with tab3:
         st.markdown("### 📈 Análise de Tendências")
         
         if filtered_data and len(filtered_data) > 1:
@@ -1209,7 +1410,7 @@ if st.session_state.extracted_data and len(st.session_state.extracted_data) > 0:
             st.warning("Selecione pelo menos 2 anos para visualizar tendências.")
     
     # Monthly Analysis Tab
-    with tabs[3]:
+    with tab4:
         st.markdown("### 🗓️ Análise Mensal Detalhada")
         
         if filtered_data:
@@ -1430,127 +1631,223 @@ if st.session_state.extracted_data and len(st.session_state.extracted_data) > 0:
         else:
             st.info("Selecione pelo menos um ano para análise mensal detalhada.")
     
-    # Chat Tab (if enabled)
-    if show_chat and len(tabs) > 4:
-        with tabs[4]:
-            st.markdown("### 💬 Assistente de IA")
+    # Tab 3: AI Insights
+    with tab3:
+        st.header("🤖 AI-Powered Insights")
+        
+        if gemini_api_key and st.session_state.extracted_data:
+            # Initialize Gemini
+            genai.configure(api_key=gemini_api_key)
+            model = genai.GenerativeModel('gemini-pro')
             
-            if st.session_state.chat_assistant:
-                filter_context = f"Filtros ativos: Anos {st.session_state.selected_years}, Meses {st.session_state.selected_months}"
-                st.session_state.chat_assistant.render_chat_interface(
-                    filtered_data,
-                    filter_context
-                )
+            # Prepare data summary for AI
+            data_summary = {
+                'years': sorted(st.session_state.extracted_data.keys()),
+                'total_years': len(st.session_state.extracted_data),
+                'metrics': {}
+            }
+            
+            # Calculate key metrics
+            for year, year_data in st.session_state.extracted_data.items():
+                revenue = sum(v for k, v in year_data.get('revenue', {}).items() 
+                            if k != 'ANNUAL' and isinstance(v, (int, float)))
+                costs = sum(v for k, v in year_data.get('costs', {}).items() 
+                          if k != 'ANNUAL' and isinstance(v, (int, float)))
+                
+                data_summary['metrics'][year] = {
+                    'revenue': revenue,
+                    'costs': costs,
+                    'profit': revenue - costs,
+                    'margin': ((revenue - costs) / revenue * 100) if revenue > 0 else 0
+                }
+            
+            # Generate insights button
+            if st.button("🔮 Gerar Insights com IA", type="primary", use_container_width=True):
+                with st.spinner("Analisando dados com IA..."):
+                    try:
+                        prompt = f"""
+                        Analise os seguintes dados financeiros da Marine Seguros e forneça insights estratégicos:
+                        
+                        {json.dumps(data_summary, indent=2)}
+                        
+                        Por favor, forneça:
+                        1. Análise de tendências de receita e custos
+                        2. Identificação de padrões sazonais
+                        3. Pontos de atenção e oportunidades
+                        4. Recomendações estratégicas
+                        5. Previsões baseadas nas tendências observadas
+                        
+                        Formato: Use markdown com headers e bullet points.
+                        """
+                        
+                        response = model.generate_content(prompt)
+                        st.session_state.gemini_insights = response.text
+                        
+                    except Exception as e:
+                        st.error(f"Erro ao gerar insights: {str(e)}")
+            
+            # Display insights if available
+            if hasattr(st.session_state, 'gemini_insights') and st.session_state.gemini_insights:
+                st.markdown("### 📊 Insights Gerados pela IA")
+                st.markdown(st.session_state.gemini_insights)
+                
+                # Save insights button
+                if st.button("💾 Salvar Insights"):
+                    db.auto_save_state(st.session_state)
+                    st.success("Insights salvos com sucesso!")
+            
+            # Comparative analysis section
+            if hasattr(st.session_state, 'comparative_analysis') and st.session_state.comparative_analysis:
+                st.divider()
+                st.subheader("📈 Análise Comparativa")
+                
+                for year_pair, analysis in st.session_state.comparative_analysis.items():
+                    with st.expander(f"Comparação {year_pair}", expanded=True):
+                        st.markdown(analysis)
+        else:
+            if not gemini_api_key:
+                st.warning("⚠️ Configure sua Gemini API Key na barra lateral para usar insights com IA")
             else:
+                st.info("📊 Carregue dados financeiros para gerar insights com IA")
+    
+    # Tab 4: AI Chat
+    with tab4:
+        st.markdown("### 💬 Assistente de IA")
+        
+        if st.session_state.chat_assistant and st.session_state.extracted_data:
+            filter_context = f"Dados disponíveis: {len(st.session_state.extracted_data)} anos"
+            st.session_state.chat_assistant.render_chat_interface(
+                st.session_state.extracted_data,
+                filter_context
+            )
+        else:
+            if not gemini_api_key:
                 st.warning("Configure sua API key para usar o chat")
+            else:
+                st.info("Carregue dados para começar a conversar")
+    
+    # Tab 5: Previsões
+    with tab5:
+        st.header("📈 Previsões e Projeções")
+        
+        if st.session_state.extracted_data and len(st.session_state.extracted_data) >= 2:
+            # Prepare time series data
+            years = sorted(st.session_state.extracted_data.keys())
+            revenues = []
+            costs = []
+            
+            for year in years:
+                year_data = st.session_state.extracted_data[year]
+                revenue = sum(v for k, v in year_data.get('revenue', {}).items() 
+                            if k != 'ANNUAL' and isinstance(v, (int, float)))
+                cost = sum(v for k, v in year_data.get('costs', {}).items() 
+                         if k != 'ANNUAL' and isinstance(v, (int, float)))
+                revenues.append(revenue)
+                costs.append(cost)
+            
+            # Forecast settings
+            col1, col2 = st.columns(2)
+            with col1:
+                forecast_years = st.slider("Anos para projetar", 1, 5, 3)
+            with col2:
+                forecast_method = st.selectbox(
+                    "Método de previsão",
+                    ["Linear", "Exponencial", "Média Móvel"]
+                )
+            
+            # Calculate forecasts
+            if st.button("📊 Gerar Previsões", type="primary"):
+                # Simple linear projection
+                years_numeric = list(range(len(years)))
+                future_years = list(range(len(years), len(years) + forecast_years))
+                
+                # Fit linear trend
+                revenue_trend = np.poly1d(np.polyfit(years_numeric, revenues, 1))
+                costs_trend = np.poly1d(np.polyfit(years_numeric, costs, 1))
+                
+                # Project future values
+                future_revenues = [revenue_trend(y) for y in future_years]
+                future_costs = [costs_trend(y) for y in future_years]
+                future_year_labels = [str(int(years[-1]) + i + 1) for i in range(forecast_years)]
+                
+                # Create forecast chart
+                fig = go.Figure()
+                
+                # Historical data
+                fig.add_trace(go.Scatter(
+                    x=years,
+                    y=revenues,
+                    mode='lines+markers',
+                    name='Receita Histórica',
+                    line=dict(color='#4CAF50', width=3)
+                ))
+                
+                fig.add_trace(go.Scatter(
+                    x=years,
+                    y=costs,
+                    mode='lines+markers',
+                    name='Custos Históricos',
+                    line=dict(color='#FF5252', width=3)
+                ))
+                
+                # Forecasted data
+                fig.add_trace(go.Scatter(
+                    x=future_year_labels,
+                    y=future_revenues,
+                    mode='lines+markers',
+                    name='Receita Projetada',
+                    line=dict(color='#4CAF50', width=3, dash='dash'),
+                    marker=dict(symbol='circle-open', size=10)
+                ))
+                
+                fig.add_trace(go.Scatter(
+                    x=future_year_labels,
+                    y=future_costs,
+                    mode='lines+markers',
+                    name='Custos Projetados',
+                    line=dict(color='#FF5252', width=3, dash='dash'),
+                    marker=dict(symbol='circle-open', size=10)
+                ))
+                
+                fig.update_layout(
+                    title="Previsão Financeira",
+                    xaxis_title="Ano",
+                    yaxis_title="Valores (R$)",
+                    hovermode='x unified',
+                    template="plotly_white"
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Forecast summary
+                st.subheader("📊 Resumo das Previsões")
+                
+                forecast_data = []
+                for i, year in enumerate(future_year_labels):
+                    forecast_data.append({
+                        'Ano': year,
+                        'Receita Prevista': f"R$ {future_revenues[i]:,.0f}",
+                        'Custos Previstos': f"R$ {future_costs[i]:,.0f}",
+                        'Lucro Previsto': f"R$ {future_revenues[i] - future_costs[i]:,.0f}",
+                        'Margem Prevista': f"{((future_revenues[i] - future_costs[i]) / future_revenues[i] * 100):.1f}%"
+                    })
+                
+                st.table(pd.DataFrame(forecast_data))
+        else:
+            st.info("📊 É necessário pelo menos 2 anos de dados para gerar previsões")
+    
+    # Tab 6: Integração (empty for now as Make.com is not needed)
+    with tab6:
+        st.header("⚡ Integrações")
+        st.info("🚧 Módulo de integrações em desenvolvimento")
+        st.markdown("""
+        Futuras integrações planejadas:
+        - 📊 Export para Excel/PDF
+        - 📧 Envio automático de relatórios
+        - 🔗 APIs externas
+        - 📱 Notificações
+        """)
 
 else:
-    # Data upload section
-    st.markdown("### 📁 Carregar Dados")
-    
-    # Check if there's data in the database
-    stats = db.get_data_stats()
-    if stats.get('financial_data', {}).get('count', 0) > 0:
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            st.warning(f"📊 Existem {stats['financial_data']['count']} anos de dados salvos no banco de dados!")
-        with col2:
-            if st.button("🔄 Carregar Dados Salvos", type="primary", use_container_width=True):
-                if db.auto_load_state(st.session_state):
-                    st.success("✅ Dados carregados!")
-                    st.rerun()
-    
-    uploaded_files = st.file_uploader(
-        "Arraste seus arquivos Excel aqui",
-        type=['xlsx', 'xls'],
-        accept_multiple_files=True
-    )
-    
-    use_existing = st.checkbox("Usar dados da Marine Seguros (2018-2025)", value=True)
-    
-    if st.button("🚀 Processar Dados", type="primary", disabled=not gemini_api_key):
-        if not gemini_api_key:
-            st.error("Por favor, configure sua Gemini API key")
-        else:
-            with st.spinner("Processando dados..."):
-                direct_extractor = DirectDataExtractor()
-                
-                files_to_process = []
-                if use_existing:
-                    files_to_process = [
-                        'Análise de Resultado Financeiro 2018_2023.xlsx',
-                        'Resultado Financeiro - 2024.xlsx',
-                        'Resultado Financeiro - 2025.xlsx'
-                    ]
-                else:
-                    for uploaded_file in uploaded_files:
-                        with open(uploaded_file.name, 'wb') as f:
-                            f.write(uploaded_file.getbuffer())
-                        files_to_process.append(uploaded_file.name)
-                
-                extracted_data = {}
-                errors = []
-                
-                for file in files_to_process:
-                    try:
-                        st.info(f"📄 Processando: {file}")
-                        file_data = direct_extractor.extract_from_excel(file)
-                        
-                        if file_data:
-                            extracted_data.update(file_data)
-                            st.success(f"✅ {file}: {len(file_data)} anos extraídos")
-                        else:
-                            warning_msg = f"⚠️ {file}: Nenhum dado extraído"
-                            st.warning(warning_msg)
-                            errors.append(warning_msg)
-                            
-                    except FileNotFoundError:
-                        error_msg = f"❌ {file}: Arquivo não encontrado"
-                        st.error(error_msg)
-                        errors.append(error_msg)
-                    except Exception as e:
-                        error_msg = f"❌ {file}: Erro - {str(e)}"
-                        st.error(error_msg)
-                        errors.append(error_msg)
-                        import traceback
-                        st.error(f"Detalhes do erro:\n```\n{traceback.format_exc()}\n```")
-                
-                # Validate extracted data before saving
-                if extracted_data:
-                    st.info(f"📊 Total de dados extraídos: {len(extracted_data)} anos")
-                    for year, data in extracted_data.items():
-                        revenue_count = len(data.get('revenue', {}))
-                        costs_count = len(data.get('costs', {}))
-                        st.caption(f"   {year}: {revenue_count} meses de receita, {costs_count} meses de custos")
-                else:
-                    st.error("❌ Nenhum dado foi extraído com sucesso!")
-                    if errors:
-                        st.error("Erros encontrados:")
-                        for error in errors:
-                            st.caption(f"  • {error}")
-                
-                st.session_state.extracted_data = extracted_data
-                
-                if len(extracted_data) >= 2 and gemini_api_key:
-                    analyzer = ComparativeAnalyzer(gemini_api_key)
-                    st.session_state.comparative_analysis = analyzer.analyze_all_years(extracted_data)
-                
-                # Save all extracted data and analysis to persistent storage
-                if extracted_data:
-                    try:
-                        db.auto_save_state(st.session_state)
-                        st.success("✅ Dados processados e salvos com sucesso!")
-                        
-                        # Verify data was saved
-                        stats = db.get_data_stats()
-                        saved_count = stats.get('financial_data', {}).get('count', 0)
-                        st.info(f"💾 {saved_count} anos de dados salvos no banco de dados")
-                        
-                        st.balloons()
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"❌ Erro ao salvar dados: {str(e)}")
-                        import traceback
-                        st.error(f"Detalhes:\n```\n{traceback.format_exc()}\n```")
-                else:
-                    st.error("❌ Não há dados para salvar!")
+    # No data message
+    st.info("📊 Carregue dados na aba Upload para começar a análise")

@@ -15,6 +15,9 @@ class DirectDataExtractor:
             # First pass: collect all potential year sheets
             year_sheets = {}
             
+            print(f"Processing file: {file_path}")
+            print(f"Available sheets: {excel_file.sheet_names}")
+            
             for sheet_name in excel_file.sheet_names:
                 # Skip non-year sheets
                 if any(skip in sheet_name.lower() for skip in ['comparativo', 'gráfico', 'projeç', 'dre']):
@@ -25,15 +28,23 @@ class DirectDataExtractor:
                 if sheet_name.isdigit() and 2000 <= int(sheet_name) <= 2030:
                     year = int(sheet_name)
                 elif 'resultado' in sheet_name.lower() or 'previsão' in sheet_name.lower():
+                    # For sheets with names like "Resultado 2024", extract year from sheet name first
                     import re
-                    year_match = re.search(r'20\d{2}', file_path)
+                    year_match = re.search(r'20\d{2}', sheet_name)
                     if year_match:
                         year = int(year_match.group())
+                    else:
+                        # If no year in sheet name, try filename
+                        year_match = re.search(r'20\d{2}', file_path)
+                        if year_match:
+                            year = int(year_match.group())
                 
                 if year:
                     if year not in year_sheets:
                         year_sheets[year] = []
                     year_sheets[year].append(sheet_name)
+            
+            print(f"Found year sheets: {year_sheets}")
             
             # Second pass: process sheets with priority (Resultado > specific year > Previsão)
             for year, sheets in year_sheets.items():
