@@ -3,20 +3,20 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from ai_data_extractor import AIDataExtractor
-from comparative_analyzer import ComparativeAnalyzer
+from modules.ai_data_extractor import AIDataExtractor
+from modules.comparative_analyzer import ComparativeAnalyzer
 from core.direct_extractor import DirectDataExtractor
-from filter_system import FilterSystem, FilterState
-from ai_chat_assistant import AIChatAssistant
-from interactive_charts import InteractiveCharts
-from month_analytics import MonthAnalytics
+from modules.filter_system import FilterSystem, FilterState
+from modules.ai_chat_assistant import AIChatAssistant
+from modules.interactive_charts import InteractiveCharts
+from modules.month_analytics import MonthAnalytics
 from datetime import datetime
 import os
 from dotenv import load_dotenv
 import json
 from typing import Dict, List
 import numpy as np
-from database_manager import DatabaseManager
+from modules.database_manager import DatabaseManager
 
 # Load environment variables
 load_dotenv()

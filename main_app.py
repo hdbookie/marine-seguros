@@ -1,0 +1,2146 @@
+import streamlit as st
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import google.generativeai as genai
+from core import FinancialProcessor
+from datetime import datetime
+import os
+from dotenv import load_dotenv
+import json
+from typing import Dict, List, Tuple
+from gerenciador_arquivos import GerenciadorArquivos
+from ai_chat_assistant import AIChatAssistant
+from database_manager import DatabaseManager
+from core.direct_extractor import DirectDataExtractor
+
+# Load environment variables
+load_dotenv()
+
+# Initialize database manager
+db = DatabaseManager()
+
+# Page configuration
+st.set_page_config(
+    page_title="Marine Seguros - Financial Analytics",
+    page_icon="📊",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Custom CSS
+st.markdown("""
+    <style>
+    .main > div {
+        padding-top: 2rem;
+    }
+    .stButton>button {
+        width: 100%;
+    }
+    .metric-card {
+        background-color: #f0f2f6;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        margin: 0.5rem 0;
+    }
+    .category-header {
+        background-color: #e1e4e8;
+        padding: 0.5rem 1rem;
+        border-radius: 0.5rem;
+        margin: 0.5rem 0;
+        cursor: pointer;
+        font-weight: bold;
+    }
+    .category-item {
+        padding-left: 2rem;
+        margin: 0.25rem 0;
+    }
+    .new-badge {
+        background-color: #28a745;
+        color: white;
+        padding: 0.2rem 0.5rem;
+        border-radius: 0.25rem;
+        font-size: 0.8rem;
+        margin-left: 0.5rem;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+# Helper functions for data conversion (must be defined before use)
+def convert_extracted_to_processed(extracted_data):
+    """Convert extracted_data format (from database) to processed_data format (for app)"""
+    if not extracted_data:
+        return None
+    
+    try:
+        # Create a DataFrame from extracted_data
+        consolidated_data = []
+        for year, year_data in sorted(extracted_data.items()):
+            revenue = year_data.get('revenue', {}).get('ANNUAL', 0)
+            costs = year_data.get('costs', {}).get('ANNUAL', 0)
+            
+            # Calculate other metrics
+            if revenue > 0:
+                margin = ((revenue - costs) / revenue) * 100
+            else:
+                margin = 0
+            
+            consolidated_data.append({
+                'year': int(year),
+                'revenue': revenue,
+                'variable_costs': costs,
+                'gross_profit': revenue - costs,
+                'gross_margin': margin,
+                'fixed_costs': year_data.get('fixed_costs', 0),
+                'operational_costs': year_data.get('operational_costs', 0)
+            })
+        
+        if consolidated_data:
+            consolidated_df = pd.DataFrame(consolidated_data)
+            
+            # Calculate growth metrics
+            processor = FinancialProcessor()
+            consolidated_df = processor.calculate_growth_metrics(consolidated_df)
+            
+            return {
+                'raw_data': extracted_data,
+                'consolidated': consolidated_df,
+                'summary': processor.get_financial_summary(consolidated_df),
+                'anomalies': []
+            }
+    except Exception as e:
+        print(f"Error converting data: {e}")
+        return None
+
+def sync_processed_to_extracted():
+    """Sync processed_data to extracted_data format for database saving"""
+    if hasattr(st.session_state, 'processed_data') and st.session_state.processed_data and 'raw_data' in st.session_state.processed_data:
+        # If we have raw_data, it's already in extracted format with all monthly data
+        st.session_state.extracted_data = st.session_state.processed_data['raw_data']
+    elif hasattr(st.session_state, 'processed_data') and st.session_state.processed_data and 'consolidated' in st.session_state.processed_data:
+        # If we don't have raw_data, but we have monthly_data, use that
+        if (hasattr(st.session_state, 'monthly_data') and 
+            st.session_state.monthly_data is not None and
+            not st.session_state.monthly_data.empty and
+            'year' in st.session_state.monthly_data.columns):
+            extracted = {}
+            monthly_df = st.session_state.monthly_data
+            
+            # Group by year and rebuild the extracted format with monthly data
+            for year in monthly_df['year'].unique():
+                year_data = monthly_df[monthly_df['year'] == year]
+                revenue_dict = {}
+                costs_dict = {}
+                
+                # Add monthly data
+                for _, row in year_data.iterrows():
+                    month = row['month']
+                    revenue_dict[month] = row.get('revenue', 0)
+                    # Handle both 'costs' and 'variable_costs' columns
+                    if 'variable_costs' in row:
+                        costs_dict[month] = row.get('variable_costs', 0)
+                    else:
+                        costs_dict[month] = row.get('costs', 0)
+                
+                # Add annual totals
+                revenue_dict['ANNUAL'] = sum(v for k, v in revenue_dict.items() if k != 'ANNUAL')
+                costs_dict['ANNUAL'] = sum(v for k, v in costs_dict.items() if k != 'ANNUAL')
+                
+                extracted[str(year)] = {
+                    'revenue': revenue_dict,
+                    'costs': costs_dict,
+                    'year': int(year)
+                }
+            
+            st.session_state.extracted_data = extracted
+        else:
+            # Fallback: only ANNUAL data available
+            extracted = {}
+            df = st.session_state.processed_data.get('consolidated', pd.DataFrame())
+            
+            for _, row in df.iterrows():
+                year = str(int(row['year']))
+                extracted[year] = {
+                    'revenue': {'ANNUAL': row.get('revenue', 0)},
+                    'costs': {'ANNUAL': row.get('variable_costs', 0)},
+                    'fixed_costs': row.get('fixed_costs', 0),
+                    'operational_costs': row.get('operational_costs', 0),
+                    'year': int(year)
+                }
+            
+            st.session_state.extracted_data = extracted
+
+# Try to load data from database FIRST
+data_loaded = db.auto_load_state(st.session_state)
+
+# If data was loaded from database, convert it to processed format
+if data_loaded and hasattr(st.session_state, 'extracted_data') and st.session_state.extracted_data:
+    print(f"DEBUG: About to convert {len(st.session_state.extracted_data)} years to processed format")
+    processed = convert_extracted_to_processed(st.session_state.extracted_data)
+    if processed:
+        st.session_state.processed_data = processed
+        print(f"DEBUG: Successfully converted to processed format with {len(processed['consolidated'])} rows")
+    
+    # Also need to generate monthly data from extracted data
+    try:
+        # Create monthly DataFrame from extracted data
+        monthly_data = []
+        for year, year_data in st.session_state.extracted_data.items():
+            revenue_data = year_data.get('revenue', {})
+            costs_data = year_data.get('costs', {})
+            
+            for month in ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ']:
+                if month in revenue_data:
+                    monthly_data.append({
+                        'year': int(year),
+                        'month': month,
+                        'revenue': revenue_data.get(month, 0),
+                        'costs': costs_data.get(month, 0)
+                    })
+        
+        if monthly_data:
+            st.session_state.monthly_data = pd.DataFrame(monthly_data)
+    except Exception as e:
+        print(f"Error generating monthly data: {e}")
+
+# Initialize session state
+if 'file_manager' not in st.session_state:
+    st.session_state.file_manager = GerenciadorArquivos()
+    # Sincronizar arquivos existentes
+    st.session_state.file_manager.sincronizar_arquivos_existentes()
+if 'ai_chat_assistant' not in st.session_state:
+    st.session_state.ai_chat_assistant = None
+
+# Only initialize empty defaults if nothing was loaded from database
+if not data_loaded:
+    if 'processed_data' not in st.session_state:
+        st.session_state.processed_data = None
+    if 'gemini_insights' not in st.session_state:
+        st.session_state.gemini_insights = None
+    if 'flexible_data' not in st.session_state:
+        st.session_state.flexible_data = None
+    if 'monthly_data' not in st.session_state:
+        st.session_state.monthly_data = None
+    if 'extracted_data' not in st.session_state:
+        st.session_state.extracted_data = {}
+    if 'selected_years' not in st.session_state:
+        st.session_state.selected_years = []
+    if 'selected_months' not in st.session_state:
+        st.session_state.selected_months = []
+
+# Debug: Show loaded data status
+if data_loaded and hasattr(st.session_state, 'extracted_data') and st.session_state.extracted_data:
+    print(f"DEBUG: Successfully loaded {len(st.session_state.extracted_data)} years from database")
+    if hasattr(st.session_state, 'processed_data') and st.session_state.processed_data and 'consolidated' in st.session_state.processed_data:
+        df = st.session_state.processed_data.get('consolidated', pd.DataFrame())
+        print(f"DEBUG: Processed data contains {len(df)} years: {sorted(df['year'].tolist())}")
+    else:
+        print("DEBUG: WARNING - No processed_data despite successful database load")
+
+# Helper functions
+def format_currency(value):
+    """Format value as Brazilian currency"""
+    return f"R$ {value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+def calculate_percentage_change(old_value, new_value):
+    """Calculate percentage change between two values"""
+    if old_value == 0:
+        return 0
+    return ((new_value - old_value) / old_value) * 100
+
+
+def get_category_icon(category):
+    """Get icon for each category"""
+    icons = {
+        'revenue': '💰',
+        'variable_costs': '📦',
+        'fixed_costs': '🏢',
+        'admin_expenses': '📋',
+        'operational_expenses': '⚙️',
+        'marketing_expenses': '📢',
+        'financial_expenses': '💳',
+        'tax_expenses': '📊',
+        'other_expenses': '📌',
+        'other_costs': '📍',
+        'results': '📈',
+        'margins': '📊',
+        'calculated_results': '🧮',
+        'other': '📄'
+    }
+    return icons.get(category, '📄')
+
+def get_category_name(category):
+    """Get friendly name for category"""
+    names = {
+        'revenue': 'Receitas',
+        'variable_costs': 'Custos Variáveis',
+        'fixed_costs': 'Custos Fixos',
+        'admin_expenses': 'Despesas Administrativas',
+        'operational_expenses': 'Despesas Operacionais',
+        'marketing_expenses': 'Despesas de Marketing',
+        'financial_expenses': 'Despesas Financeiras',
+        'tax_expenses': 'Impostos e Taxas',
+        'other_expenses': 'Outras Despesas',
+        'other_costs': 'Outros Custos',
+        'results': 'Resultados',
+        'margins': 'Margens',
+        'calculated_results': 'Resultados Calculados',
+        'other': 'Outros'
+    }
+    return names.get(category, category.title())
+
+
+def prepare_x_axis(df, view_type):
+    """Prepare x-axis column and title based on view type"""
+    if view_type == "Anual":
+        return 'year', 'Ano'
+    elif view_type == "Mensal":
+        # Check if we actually have monthly data (with 'month' column)
+        if 'month' in df.columns:
+            if 'period' not in df.columns:
+                # Create more readable period format
+                month_abbr = {
+                    'JAN': 'Jan', 'FEV': 'Fev', 'MAR': 'Mar', 'ABR': 'Abr',
+                    'MAI': 'Mai', 'JUN': 'Jun', 'JUL': 'Jul', 'AGO': 'Ago',
+                    'SET': 'Set', 'OUT': 'Out', 'NOV': 'Nov', 'DEZ': 'Dez'
+                }
+                df['period'] = df.apply(lambda x: f"{month_abbr.get(x['month'], x['month'])}/{str(int(x['year']))[-2:]}", axis=1)
+            return 'period', 'Período'
+        else:
+            # Fallback to annual view when monthly data is not available
+            return 'year', 'Ano'
+    elif view_type in ["Trimestral", "Trimestre Personalizado", "Semestral"]:
+        return 'period', 'Período'
+    else:
+        return 'year', 'Ano'
+
+# Title and description
+st.title("🏢 Marine Seguros - Financial Analytics Platform")
+st.markdown("### Análise Financeira Inteligente com IA | 2018-2025")
+
+# Sidebar for configuration
+with st.sidebar:
+    st.header("⚙️ Configurações")
+    
+    # Database status
+    st.markdown("### 💾 Status do Banco de Dados")
+    stats = db.get_data_stats()
+    
+    if stats.get('financial_data', {}).get('count', 0) > 0:
+        st.success(f"✅ {stats['financial_data']['count']} anos de dados salvos")
+        
+        # Show last update times
+        for data_type, info in stats.items():
+            if info.get('last_update'):
+                try:
+                    last_update = datetime.fromisoformat(info['last_update'].replace('Z', '+00:00'))
+                    time_diff = datetime.now() - last_update.replace(tzinfo=None)
+                    
+                    if time_diff.days > 0:
+                        age_str = f"{time_diff.days} dias atrás"
+                    elif time_diff.seconds > 3600:
+                        age_str = f"{time_diff.seconds // 3600} horas atrás"
+                    else:
+                        age_str = f"{time_diff.seconds // 60} minutos atrás"
+                    
+                    display_name = data_type.replace('_', ' ').title()
+                    st.caption(f"📝 {display_name}: {age_str}")
+                except:
+                    pass
+        
+        # Add reload button
+        if st.button("🔄 Recarregar Dados Salvos", use_container_width=True):
+            if db.auto_load_state(st.session_state):
+                # Convert loaded data
+                if hasattr(st.session_state, 'extracted_data') and st.session_state.extracted_data:
+                    processed = convert_extracted_to_processed(st.session_state.extracted_data)
+                    if processed:
+                        st.session_state.processed_data = processed
+                st.success("✅ Dados carregados!")
+                st.rerun()
+    else:
+        st.warning("❌ Nenhum dado salvo")
+    
+    st.divider()
+    
+    # Gemini API Key input
+    gemini_api_key = st.text_input(
+        "Gemini API Key",
+        type="password",
+        value=os.getenv("GEMINI_API_KEY", ""),
+        help="Insira sua chave API do Google Gemini"
+    )
+    
+    # Language selection
+    language = st.selectbox(
+        "Idioma / Language",
+        ["Português", "English"],
+        index=0
+    )
+    
+    # Analysis options
+    st.subheader("Opções de Análise")
+    show_predictions = st.checkbox("Mostrar Previsões", value=True)
+    show_anomalies = st.checkbox("Detectar Anomalias", value=True)
+    use_flexible_extractor = st.checkbox(
+        "🆕 Usar Extrator Flexível", 
+        value=False,
+        help="Detecta automaticamente TODAS as categorias de despesas nos arquivos Excel"
+    )
+    show_all_categories = st.checkbox("Mostrar Todas as Categorias", value=True)
+    
+    # Export options
+    st.subheader("Exportar Dados")
+    export_format = st.selectbox(
+        "Formato de Exportação",
+        ["PDF", "Excel", "PowerPoint"]
+    )
+
+# Main content area with conditional tabs
+if use_flexible_extractor:
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+        "📁 Upload", 
+        "📊 Dashboard", 
+        "🔍 Detalhamento", 
+        "🤖 AI Insights", 
+        "💬 AI Chat",
+        "📈 Previsões", 
+        "⚡ Integração"
+    ])
+else:
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "📁 Upload", 
+        "📊 Dashboard", 
+        "🤖 AI Insights", 
+        "💬 AI Chat",
+        "📈 Previsões", 
+        "⚡ Integração"
+    ])
+
+# Tab 1: File Upload
+with tab1:
+    st.header("📊 Gerenciamento de Dados Financeiros")
+    
+    # File management bar
+    col1, col2, col3 = st.columns([3, 1, 1])
+    
+    with col1:
+        # Year filter
+        anos_disponiveis = st.session_state.file_manager.obter_anos_disponiveis() if hasattr(st.session_state, 'file_manager') else []
+        if anos_disponiveis:
+            anos_selecionados = st.multiselect(
+                "Filtrar por Anos:",
+                options=sorted(anos_disponiveis),
+                default=sorted(anos_disponiveis),
+                key="file_year_filter"
+            )
+        else:
+            anos_selecionados = []
+    
+    with col2:
+        if st.button("🔄 Atualizar", help="Atualizar lista de arquivos"):
+            if hasattr(st.session_state, 'file_manager'):
+                st.session_state.file_manager.sincronizar_arquivos_existentes()
+            st.rerun()
+    
+    with col3:
+        gerenciar_mode = st.checkbox("📁 Gerenciar", help="Ativar modo de gerenciamento")
+    
+    st.markdown("---")
+    
+    # Upload section
+    with st.expander("➕ Enviar Novos Arquivos", expanded=False):
+        uploaded_files = st.file_uploader(
+            "Selecione arquivos Excel",
+            type=['xlsx', 'xls'],
+            accept_multiple_files=True,
+            help="Formatos suportados: .xlsx, .xls | Você pode selecionar múltiplos arquivos"
+        )
+        
+        if uploaded_files:
+            if st.button(f"📤 Enviar {len(uploaded_files)} arquivo(s)"):
+                success_count = 0
+                error_count = 0
+                
+                for uploaded_file in uploaded_files:
+                    if hasattr(st.session_state, 'file_manager') and st.session_state.file_manager.enviar_arquivo(uploaded_file):
+                        success_count += 1
+                    else:
+                        error_count += 1
+                
+                if success_count > 0:
+                    st.success(f"✅ {success_count} arquivo(s) enviado(s) com sucesso!")
+                if error_count > 0:
+                    st.error(f"❌ {error_count} arquivo(s) com erro")
+                
+                st.rerun()
+    
+    # Display available files
+    st.subheader("📁 Fontes de Dados Disponíveis")
+    
+    # Clear all button when in manage mode
+    if gerenciar_mode and 'arquivos' in locals() and arquivos:
+        col1, col2 = st.columns([3, 1])
+        with col2:
+            if st.button("🗑️ Limpar Todos", type="secondary", help="Remover todos os arquivos", use_container_width=True):
+                if hasattr(st.session_state, 'file_manager'):
+                    for arquivo in arquivos:
+                        st.session_state.file_manager.excluir_arquivo(arquivo['id'])
+                st.success("Todos os arquivos foram removidos!")
+                st.rerun()
+    
+    # Get files filtered by years
+    if anos_selecionados and hasattr(st.session_state, 'file_manager'):
+        arquivos = st.session_state.file_manager.obter_arquivos_por_anos(anos_selecionados)
+    elif hasattr(st.session_state, 'file_manager'):
+        arquivos = st.session_state.file_manager.obter_todos_arquivos()
+    else:
+        arquivos = []
+    
+    if arquivos:
+        for arquivo in arquivos:
+            with st.container():
+                col1, col2 = st.columns([4, 1])
+                
+                with col1:
+                    st.markdown(f"### ✅ {arquivo['nome']}")
+                    
+                    # File info
+                    anos_str = ", ".join(map(str, sorted(arquivo['anos_incluidos'])))
+                    st.markdown(f"""
+                    **Anos:** {anos_str}  
+                    **Enviado:** {arquivo['data_envio']} | **Tamanho:** {arquivo['tamanho']}
+                    """)
+                
+                with col2:
+                    if gerenciar_mode:
+                        if st.button("🗑️ Excluir", key=f"del_{arquivo['id']}"):
+                            if hasattr(st.session_state, 'file_manager') and st.session_state.file_manager.excluir_arquivo(arquivo['id']):
+                                st.success("Arquivo excluído!")
+                                st.rerun()
+                
+                st.markdown("---")
+    else:
+        st.info("📭 Nenhum arquivo encontrado. Envie arquivos Excel para começar.")
+    
+    # Process data button
+    if arquivos:
+        st.markdown("### 🚀 Processar Dados")
+        
+        if st.button("Analisar Dados Financeiros", type="primary", use_container_width=True):
+            with st.spinner("Processando arquivos..."):
+                processor = FinancialProcessor()
+                
+                # Get file paths
+                file_paths = st.session_state.file_manager.obter_caminhos_arquivos() if hasattr(st.session_state, 'file_manager') else []
+                
+                # Load Excel files
+                excel_data = processor.load_excel_files(file_paths)
+                
+                # Consolidate data
+                if use_flexible_extractor:
+                    # Use flexible extractor for dynamic categories
+                    consolidated_df, flexible_data = processor.consolidate_all_years_flexible(excel_data)
+                    st.session_state.flexible_data = flexible_data
+                else:
+                    # Use standard extractor
+                    consolidated_df = processor.consolidate_all_years(excel_data)
+                    st.session_state.flexible_data = None
+                
+                # Check if data extraction was successful
+                if consolidated_df.empty:
+                    st.error("❌ Não foi possível extrair dados dos arquivos Excel.")
+                    st.info("Verifique se os arquivos contêm as seguintes informações:")
+                    st.markdown("""
+                    - Sheets com anos (ex: 2018, 2019, 2020, etc.)
+                    - Linha com 'FATURAMENTO' para receitas
+                    - Linha com 'CUSTOS VARIÁVEIS' para custos
+                    - Colunas com meses (JAN, FEV, MAR, etc.)
+                    - Coluna 'ANUAL' para totais anuais
+                    """)
+                else:
+                    consolidated_df = processor.calculate_growth_metrics(consolidated_df)
+                    
+                    # Get monthly data
+                    monthly_df = processor.get_monthly_data(excel_data)
+                    
+                    # Store in session state
+                    st.session_state.processed_data = {
+                        'raw_data': excel_data,
+                        'consolidated': consolidated_df,
+                        'summary': processor.get_financial_summary(consolidated_df),
+                        'anomalies': processor.detect_anomalies(consolidated_df) if show_anomalies else []
+                    }
+                    st.session_state.monthly_data = monthly_df
+                    
+                    # Sync to extracted_data format and save to database
+                    sync_processed_to_extracted()
+                    
+                    # Save to database
+                    try:
+                        db.auto_save_state(st.session_state)
+                        save_success = True
+                    except Exception as e:
+                        st.error(f"⚠️ Erro ao salvar no banco de dados: {str(e)}")
+                        save_success = False
+                    
+                    if use_flexible_extractor and flexible_data:
+                        # Show summary of detected categories
+                        all_categories = set()
+                        for year_data in flexible_data.values():
+                            all_categories.update(year_data['categories'].keys())
+                        
+                        st.success(f"✅ Dados processados com sucesso!")
+                        if save_success:
+                            st.success("💾 Dados salvos no banco de dados!")
+                        st.info(f"📊 {len(consolidated_df)} anos encontrados | "
+                               f"📁 {len(all_categories)} categorias detectadas automaticamente")
+                        
+                        # Show detected categories
+                        with st.expander("Categorias Detectadas"):
+                            cols = st.columns(3)
+                            for idx, category in enumerate(sorted(all_categories)):
+                                col_idx = idx % 3
+                                cols[col_idx].write(f"{get_category_icon(category)} {get_category_name(category)}")
+                    else:
+                        st.success(f"✅ Dados processados com sucesso! {len(consolidated_df)} anos encontrados.")
+                        if save_success:
+                            st.success("💾 Dados salvos no banco de dados!")
+
+# Tab 2: Dashboard
+with tab2:
+    st.header("Dashboard Financeiro")
+    
+    if hasattr(st.session_state, 'processed_data') and st.session_state.processed_data is not None:
+        data = st.session_state.processed_data
+        df = data.get('consolidated', pd.DataFrame())
+        summary = data.get('summary', {})
+        
+        # Debug section - always show current status
+        with st.expander("🔍 Status dos Dados", expanded=False):
+            st.write(f"**Dados consolidados:** {len(df)} registros")
+            st.write(f"**Dados mensais disponíveis:** {hasattr(st.session_state, 'monthly_data') and st.session_state.monthly_data is not None and not st.session_state.monthly_data.empty}")
+            if hasattr(st.session_state, 'monthly_data') and st.session_state.monthly_data is not None:
+                st.write(f"**Registros mensais:** {len(st.session_state.monthly_data)}")
+            st.write(f"**Dados brutos disponíveis:** {'raw_data' in data}")
+            
+            if st.button("🔄 Forçar recarregar dados mensais"):
+                if 'raw_data' in data:
+                    with st.spinner("Recarregando dados mensais..."):
+                        processor = FinancialProcessor()
+                        monthly_data = processor.get_monthly_data(data['raw_data'])
+                        st.session_state.monthly_data = monthly_data
+                        st.success(f"✅ Dados mensais recarregados: {len(monthly_data)} registros")
+                        st.rerun()
+                else:
+                    st.error("❌ Dados brutos não disponíveis")
+        
+        # Ensure monthly data is available and has all required columns
+        required_monthly_cols = ['variable_costs', 'fixed_costs', 'net_profit', 'profit_margin']
+        monthly_data_invalid = (
+            not hasattr(st.session_state, 'monthly_data') or 
+            st.session_state.monthly_data is None or 
+            st.session_state.monthly_data.empty or
+            not all(col in st.session_state.monthly_data.columns for col in required_monthly_cols)
+        )
+        
+        if monthly_data_invalid:
+            if 'raw_data' in data:
+                # Regenerate monthly data from raw data
+                with st.spinner("Carregando dados mensais..."):
+                    try:
+                        processor = FinancialProcessor()
+                        st.info(f"🔍 Processando {len(data['raw_data'])} arquivos para dados mensais...")
+                        monthly_data = processor.get_monthly_data(data['raw_data'])
+                        
+                        if monthly_data.empty:
+                            st.error("❌ Não foi possível carregar dados mensais dos arquivos.")
+                            st.warning("Possíveis causas:")
+                            st.write("- Arquivos Excel não contêm dados mensais (colunas JAN, FEV, MAR, etc.)")
+                            st.write("- Formato dos dados não foi reconhecido")
+                            st.write("- Dados mensais não foram extraídos corretamente")
+                            
+                            # Show raw data structure for debugging
+                            if st.checkbox("Mostrar estrutura dos dados brutos"):
+                                st.write("Arquivos disponíveis:")
+                                for filename in data['raw_data'].keys():
+                                    st.write(f"- {filename}")
+                        else:
+                            st.success(f"✅ Dados mensais carregados: {len(monthly_data)} registros")
+                            st.info(f"Colunas geradas: {monthly_data.columns.tolist()}")
+                        
+                        st.session_state.monthly_data = monthly_data
+                        
+                    except Exception as e:
+                        st.error(f"❌ Erro ao processar dados mensais: {str(e)}")
+                        import traceback
+                        if st.checkbox("Mostrar detalhes do erro"):
+                            st.code(traceback.format_exc())
+            else:
+                st.error("❌ Dados brutos não disponíveis para gerar dados mensais.")
+        
+        
+        # Time Period Filters
+        st.subheader("🗓️ Filtros de Período")
+        
+        col_filter1, col_filter2, col_filter3, col_filter4 = st.columns(4)
+        
+        with col_filter1:
+            view_type = st.selectbox(
+                "Visualização",
+                ["Anual", "Mensal", "Trimestral", "Trimestre Personalizado", "Semestral", "Personalizado"],
+                key="view_type"
+            )
+        
+        with col_filter2:
+            if view_type in ["Mensal", "Trimestral", "Trimestre Personalizado", "Semestral", "Personalizado"]:
+                available_years = sorted(df['year'].unique())
+                selected_years = st.multiselect(
+                    "Anos",
+                    available_years,
+                    default=available_years[-3:] if len(available_years) >= 3 else available_years,
+                    key="dashboard_selected_years"
+                )
+            else:
+                selected_years = sorted(df['year'].unique())
+        
+        with col_filter3:
+            if view_type == "Mensal":
+                month_names = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+                              "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
+                selected_months = st.multiselect(
+                    "Meses",
+                    month_names,
+                    default=month_names,
+                    key="dashboard_selected_months"
+                )
+            elif view_type == "Trimestral":
+                selected_quarter = st.multiselect(
+                    "Trimestres",
+                    ["Q1 (Jan-Mar)", "Q2 (Abr-Jun)", "Q3 (Jul-Set)", "Q4 (Out-Dez)"],
+                    default=["Q1 (Jan-Mar)", "Q2 (Abr-Jun)", "Q3 (Jul-Set)", "Q4 (Out-Dez)"],
+                    key="dashboard_selected_quarters"
+                )
+            elif view_type == "Trimestre Personalizado":
+                month_names = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+                              "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
+                start_month = st.selectbox(
+                    "Mês Inicial",
+                    month_names,
+                    key="start_month_custom"
+                )
+            elif view_type == "Semestral":
+                selected_semester = st.multiselect(
+                    "Semestres",
+                    ["1º Semestre (Jan-Jun)", "2º Semestre (Jul-Dez)"],
+                    default=["1º Semestre (Jan-Jun)", "2º Semestre (Jul-Dez)"],
+                    key="dashboard_selected_semesters"
+                )
+        
+        with col_filter4:
+            if view_type == "Trimestre Personalizado":
+                # Calculate end month options (3 months from start)
+                month_map = {
+                    "Janeiro": 1, "Fevereiro": 2, "Março": 3, "Abril": 4,
+                    "Maio": 5, "Junho": 6, "Julho": 7, "Agosto": 8,
+                    "Setembro": 9, "Outubro": 10, "Novembro": 11, "Dezembro": 12
+                }
+                month_names = list(month_map.keys())
+                start_idx = month_names.index(start_month)
+                
+                # End month is exactly 2 months after start (for a 3-month period)
+                end_idx = (start_idx + 2) % 12
+                end_month_display = month_names[end_idx]
+                
+                st.info(f"Trimestre: {start_month} a {end_month_display} (3 meses)")
+                end_month = end_month_display
+            elif view_type == "Personalizado":
+                date_range = st.date_input(
+                    "Período",
+                    value=(pd.Timestamp(selected_years[0], 1, 1), pd.Timestamp(selected_years[-1], 12, 31)),
+                    key="date_range"
+                )
+        
+        # Prepare data based on view type
+        if view_type == "Anual":
+            display_df = df[df['year'].isin(selected_years)]
+        elif view_type == "Mensal":
+            if not hasattr(st.session_state, 'monthly_data') or st.session_state.monthly_data is None or st.session_state.monthly_data.empty:
+                st.warning("📋 Dados mensais não disponíveis. Mostrando visualização anual.")
+                # Debug info
+                if st.checkbox("Mostrar informações de debug"):
+                    st.info(f"Debug: monthly_data exists: {hasattr(st.session_state, 'monthly_data')}")
+                    if hasattr(st.session_state, 'monthly_data'):
+                        st.info(f"Debug: monthly_data is None: {st.session_state.monthly_data is None}")
+                        if st.session_state.monthly_data is not None:
+                            st.info(f"Debug: monthly_data empty: {st.session_state.monthly_data.empty}")
+                            st.info(f"Debug: monthly_data shape: {st.session_state.monthly_data.shape}")
+                display_df = df[df['year'].isin(selected_years)]
+            else:
+                # Use monthly data
+                monthly_df = st.session_state.monthly_data
+                
+                # Ensure month_num column exists
+                if 'month_num' not in monthly_df.columns and 'month' in monthly_df.columns:
+                    # Create month_num from month names
+                    month_to_num = {
+                        'JAN': 1, 'FEV': 2, 'MAR': 3, 'ABR': 4, 'MAI': 5, 'JUN': 6,
+                        'JUL': 7, 'AGO': 8, 'SET': 9, 'OUT': 10, 'NOV': 11, 'DEZ': 12
+                    }
+                    monthly_df['month_num'] = monthly_df['month'].map(month_to_num)
+                
+                # Map month names to numbers
+                month_map = {
+                    "Janeiro": 1, "Fevereiro": 2, "Março": 3, "Abril": 4,
+                    "Maio": 5, "Junho": 6, "Julho": 7, "Agosto": 8,
+                    "Setembro": 9, "Outubro": 10, "Novembro": 11, "Dezembro": 12
+                }
+                selected_month_nums = [month_map[m] for m in selected_months]
+                
+                display_df = monthly_df[
+                    (monthly_df['year'].isin(selected_years)) &
+                    (monthly_df['month_num'].isin(selected_month_nums))
+                ]
+                
+                # Debug monthly data availability
+                if st.checkbox("Debug dados mensais", key="debug_monthly"):
+                    st.success(f"✅ Dados mensais carregados! Shape: {monthly_df.shape}")
+                    st.info(f"Colunas disponíveis: {monthly_df.columns.tolist()}")
+                    st.info(f"Anos disponíveis: {sorted(monthly_df['year'].unique())}")
+                    st.info(f"Dados filtrados: {len(display_df)} registros")
+                    
+                    # Check if critical columns are missing
+                    required_cols = ['variable_costs', 'fixed_costs', 'net_profit', 'profit_margin']
+                    missing_cols = [col for col in required_cols if col not in monthly_df.columns]
+                    if missing_cols:
+                        st.error(f"❌ Colunas ausentes: {missing_cols}")
+                        st.info("🔄 Clique no botão 'Forçar recarregar dados mensais' acima para corrigir")
+                    else:
+                        st.success("✅ Todas as colunas necessárias estão presentes")
+                    
+                    if display_df.empty:
+                        st.warning("⚠️ Nenhum dado encontrado para os filtros selecionados")
+                        st.info(f"Anos selecionados: {selected_years}")
+                        st.info(f"Meses selecionados: {selected_months}")
+                        st.info(f"Anos únicos nos dados: {sorted(monthly_df['year'].unique())}")
+                        st.info(f"Meses únicos nos dados: {sorted(monthly_df['month_num'].unique()) if 'month_num' in monthly_df.columns else 'month_num não encontrado'}")
+                    
+                    # Show sample data
+                    st.write("**Sample data:**")
+                    st.dataframe(monthly_df.head())
+        elif view_type == "Trimestral":
+            if not hasattr(st.session_state, 'monthly_data') or st.session_state.monthly_data is None or st.session_state.monthly_data.empty:
+                st.warning("📋 Dados mensais não disponíveis para visualização trimestral. Mostrando visualização anual.")
+                display_df = df[df['year'].isin(selected_years)]
+            else:
+                # Aggregate monthly data by quarter
+                monthly_df = st.session_state.monthly_data
+            
+                # Ensure month_num column exists
+                if 'month_num' not in monthly_df.columns and 'month' in monthly_df.columns:
+                    month_to_num = {
+                        'JAN': 1, 'FEV': 2, 'MAR': 3, 'ABR': 4, 'MAI': 5, 'JUN': 6,
+                        'JUL': 7, 'AGO': 8, 'SET': 9, 'OUT': 10, 'NOV': 11, 'DEZ': 12
+                    }
+                    monthly_df['month_num'] = monthly_df['month'].map(month_to_num)
+                
+                quarter_map = {
+                    "Q1 (Jan-Mar)": [1, 2, 3],
+                    "Q2 (Abr-Jun)": [4, 5, 6],
+                    "Q3 (Jul-Set)": [7, 8, 9],
+                    "Q4 (Out-Dez)": [10, 11, 12]
+                }
+                selected_months_for_quarters = []
+                for q in selected_quarter:
+                    selected_months_for_quarters.extend(quarter_map[q])
+                
+                filtered_monthly = monthly_df[
+                    (monthly_df['year'].isin(selected_years)) &
+                    (monthly_df['month_num'].isin(selected_months_for_quarters))
+                ]
+                
+                # Aggregate by quarter
+                filtered_monthly['quarter'] = (filtered_monthly['month_num'] - 1) // 3 + 1
+                display_df = filtered_monthly.groupby(['year', 'quarter']).agg({
+                    'revenue': 'sum',
+                    'variable_costs': 'sum',
+                    'fixed_costs': 'sum',
+                    'operational_costs': 'sum',
+                    'contribution_margin': 'sum',
+                    'net_profit': 'sum'
+                }).reset_index()
+                display_df['period'] = display_df.apply(lambda x: f"{int(x['year'])}-Q{int(x['quarter'])}", axis=1)
+        elif view_type == "Trimestre Personalizado":
+            if not hasattr(st.session_state, 'monthly_data') or st.session_state.monthly_data is None or st.session_state.monthly_data.empty:
+                st.warning("📋 Dados mensais não disponíveis para trimestre personalizado. Mostrando visualização anual.")
+                display_df = df[df['year'].isin(selected_years)]
+            else:
+                # Custom trimester logic
+                monthly_df = st.session_state.monthly_data
+            
+                # Ensure month_num column exists
+                if 'month_num' not in monthly_df.columns and 'month' in monthly_df.columns:
+                    month_to_num = {
+                        'JAN': 1, 'FEV': 2, 'MAR': 3, 'ABR': 4, 'MAI': 5, 'JUN': 6,
+                        'JUL': 7, 'AGO': 8, 'SET': 9, 'OUT': 10, 'NOV': 11, 'DEZ': 12
+                    }
+                    monthly_df['month_num'] = monthly_df['month'].map(month_to_num)
+                
+                month_map = {
+                    "Janeiro": 1, "Fevereiro": 2, "Março": 3, "Abril": 4,
+                    "Maio": 5, "Junho": 6, "Julho": 7, "Agosto": 8,
+                    "Setembro": 9, "Outubro": 10, "Novembro": 11, "Dezembro": 12
+                }
+                
+                start_month_num = month_map[start_month]
+                end_month_num = month_map[end_month]
+                
+                # Handle year wrap-around
+                if end_month_num < start_month_num:
+                    # Trimester crosses year boundary
+                    selected_months_nums = list(range(start_month_num, 13)) + list(range(1, end_month_num + 1))
+                else:
+                    selected_months_nums = list(range(start_month_num, end_month_num + 1))
+                
+                # Filter data
+                filtered_monthly = monthly_df[
+                    (monthly_df['year'].isin(selected_years)) &
+                    (monthly_df['month_num'].isin(selected_months_nums))
+                ].copy()
+                
+                # Group by year and custom trimester
+                def get_custom_trimester(row):
+                    if row['month_num'] in selected_months_nums:
+                        # If the trimester crosses year boundary
+                        if end_month_num < start_month_num and row['month_num'] < start_month_num:
+                            return f"{int(row['year']-1)}/{int(row['year'])}"
+                        else:
+                            return str(int(row['year']))
+                    return None
+                
+                filtered_monthly['custom_period'] = filtered_monthly.apply(get_custom_trimester, axis=1)
+                
+                # Aggregate by custom period
+                display_df = filtered_monthly.groupby('custom_period').agg({
+                    'revenue': 'sum',
+                    'variable_costs': 'sum',
+                    'fixed_costs': 'sum',
+                    'operational_costs': 'sum',
+                    'contribution_margin': 'sum',
+                    'net_profit': 'sum'
+                }).reset_index()
+                
+                # Add period label
+                display_df['period'] = display_df['custom_period'].apply(
+                    lambda x: f"{x} ({start_month[:3]}-{end_month[:3]})"
+                )
+                display_df['year'] = display_df['custom_period']  # For compatibility
+        elif view_type == "Semestral":
+            if not hasattr(st.session_state, 'monthly_data') or st.session_state.monthly_data is None or st.session_state.monthly_data.empty:
+                st.warning("📋 Dados mensais não disponíveis para visualização semestral. Mostrando visualização anual.")
+                display_df = df[df['year'].isin(selected_years)]
+            else:
+                # Aggregate monthly data by semester
+                monthly_df = st.session_state.monthly_data
+            
+                # Ensure month_num column exists
+                if 'month_num' not in monthly_df.columns and 'month' in monthly_df.columns:
+                    month_to_num = {
+                        'JAN': 1, 'FEV': 2, 'MAR': 3, 'ABR': 4, 'MAI': 5, 'JUN': 6,
+                        'JUL': 7, 'AGO': 8, 'SET': 9, 'OUT': 10, 'NOV': 11, 'DEZ': 12
+                    }
+                    monthly_df['month_num'] = monthly_df['month'].map(month_to_num)
+                
+                semester_map = {
+                    "1º Semestre (Jan-Jun)": [1, 2, 3, 4, 5, 6],
+                    "2º Semestre (Jul-Dez)": [7, 8, 9, 10, 11, 12]
+                }
+                selected_months_for_semesters = []
+                for s in selected_semester:
+                    selected_months_for_semesters.extend(semester_map[s])
+                
+                filtered_monthly = monthly_df[
+                    (monthly_df['year'].isin(selected_years)) &
+                    (monthly_df['month_num'].isin(selected_months_for_semesters))
+                ]
+                
+                # Aggregate by semester
+                filtered_monthly['semester'] = (filtered_monthly['month_num'] - 1) // 6 + 1
+                display_df = filtered_monthly.groupby(['year', 'semester']).agg({
+                    'revenue': 'sum',
+                    'variable_costs': 'sum',
+                    'fixed_costs': 'sum',
+                    'operational_costs': 'sum',
+                    'contribution_margin': 'sum',
+                    'net_profit': 'sum'
+                }).reset_index()
+                display_df['period'] = display_df.apply(lambda x: f"{int(x['year'])}-S{int(x['semester'])}", axis=1)
+        else:
+            # Default to annual view if monthly data not available
+            display_df = df[df['year'].isin(selected_years)]
+        
+        # Debug: Show what data is being displayed
+        if not display_df.empty:
+            st.caption(f"📊 Exibindo {len(display_df)} {'registros mensais' if view_type == 'Mensal' else 'anos' if view_type == 'Anual' else 'períodos'} | Colunas: {list(display_df.columns)}")
+            
+            # Ensure profit_margin column exists for all views
+            if 'profit_margin' not in display_df.columns and 'revenue' in display_df.columns and 'net_profit' in display_df.columns:
+                display_df['profit_margin'] = display_df.apply(
+                    lambda row: (row['net_profit'] / row['revenue'] * 100) if row['revenue'] > 0 else 0,
+                    axis=1
+                )
+        else:
+            st.caption("⚠️ Nenhum dado disponível para o período selecionado")
+        
+        # Key metrics - Calculate based on filtered data
+        col1, col2, col3, col4 = st.columns(4)
+        
+        # Debug info for profit calculation
+        if st.checkbox("🔍 Debug cálculo de lucro", key="debug_profit_calc"):
+            st.write("### Colunas disponíveis em display_df:")
+            st.write(display_df.columns.tolist())
+            if not display_df.empty:
+                st.write("### Amostra dos dados (primeiro ano):")
+                first_row = display_df.iloc[0]
+                for col in ['revenue', 'variable_costs', 'gross_profit', 'fixed_costs', 'operational_costs', 'net_profit', 'profit_margin']:
+                    if col in display_df.columns:
+                        st.write(f"- {col}: {first_row[col]:,.2f}")
+                    else:
+                        st.write(f"- {col}: NÃO ENCONTRADO")
+        
+        # Calculate net_profit if missing
+        if 'net_profit' not in display_df.columns and not display_df.empty:
+            display_df = display_df.copy()
+            
+            # Check if operational_costs exists and has values
+            if 'operational_costs' in display_df.columns:
+                operational_costs = display_df['operational_costs']
+            else:
+                operational_costs = 0
+                if st.checkbox("⚠️ Aviso: operational_costs não encontrado", key="warn_op_costs"):
+                    st.warning("Coluna 'operational_costs' não encontrada. Usando 0 para custos operacionais.")
+            
+            # Calculate net profit from available columns
+            if all(col in display_df.columns for col in ['revenue', 'variable_costs', 'fixed_costs']):
+                display_df['net_profit'] = display_df['revenue'] - display_df['variable_costs'] - display_df['fixed_costs'] - operational_costs
+            elif 'gross_profit' in display_df.columns and 'fixed_costs' in display_df.columns:
+                display_df['net_profit'] = display_df['gross_profit'] - display_df['fixed_costs'] - operational_costs
+        
+        # Calculate profit_margin only if missing
+        if 'profit_margin' not in display_df.columns and 'net_profit' in display_df.columns and not display_df.empty:
+            display_df = display_df.copy()
+            display_df['profit_margin'] = (display_df['net_profit'] / display_df['revenue'] * 100).fillna(0)
+        
+        # Calculate metrics from filtered display_df
+        total_revenue = display_df['revenue'].sum() if 'revenue' in display_df.columns and not display_df.empty else 0
+        total_profit = display_df['net_profit'].sum() if 'net_profit' in display_df.columns and not display_df.empty else 0
+        avg_profit = display_df['net_profit'].mean() if 'net_profit' in display_df.columns and not display_df.empty else 0
+        avg_margin = display_df['profit_margin'].mean() if 'profit_margin' in display_df.columns and not display_df.empty else 0
+        
+        # For period views, show period count
+        period_label = f"{len(display_df)} {'meses' if view_type == 'Mensal' else 'períodos'}" if view_type != 'Anual' else f"{summary['metrics'].get('revenue', {}).get('cagr', 0):.1f}% CAGR"
+        
+        with col1:
+            st.metric(
+                "Receita Total",
+                format_currency(total_revenue),
+                period_label
+            )
+        
+        with col2:
+            st.metric(
+                "Lucro Total" if view_type != "Anual" else "Lucro Médio",
+                format_currency(total_profit if view_type != "Anual" else avg_profit),
+                f"{(total_profit / total_revenue * 100) if total_revenue > 0 else 0:.1f}% da receita"
+            )
+        
+        with col3:
+            margin_range = display_df['profit_margin'].max() - display_df['profit_margin'].min() if 'profit_margin' in display_df.columns and not display_df.empty else 0
+            st.metric(
+                "Margem de Lucro Média",
+                f"{avg_margin:.1f}%",
+                f"{margin_range:.1f}pp variação"
+            )
+        
+        with col4:
+            if hasattr(st.session_state, 'flexible_data') and st.session_state.flexible_data:
+                total_items = sum(
+                    len(year_data['line_items']) 
+                    for year_data in st.session_state.flexible_data.values()
+                ) / len(st.session_state.flexible_data)
+                st.metric(
+                    "Linhas de Dados",
+                    f"{int(total_items)}",
+                    "Média por ano"
+                )
+            else:
+                st.metric(
+                    "Anos Analisados",
+                    summary['total_years'],
+                    summary['years_range']
+                )
+        
+        # Debug display_df
+        if view_type == "Mensal":
+            st.info(f"🔍 Debug display_df: {len(display_df)} registros, empty: {display_df.empty}")
+            if not display_df.empty:
+                st.info(f"Colunas: {display_df.columns.tolist()}")
+                st.info(f"Receita total: {display_df['revenue'].sum() if 'revenue' in display_df.columns else 'Coluna revenue não encontrada'}")
+        
+        # Revenue Evolution Chart
+        st.subheader("📈 Evolução da Receita")
+        if not display_df.empty and 'revenue' in display_df.columns and display_df['revenue'].sum() > 0:
+            x_col, x_title = prepare_x_axis(display_df, view_type)
+            
+            fig_revenue = px.line(
+                display_df, 
+                x=x_col, 
+                y='revenue',
+                title=f'Receita {view_type}',
+                markers=True
+            )
+            
+            # Add text annotations with smart positioning for monthly view
+            if view_type == "Mensal" and len(display_df) > 20:
+                # For crowded monthly view, show values on hover only
+                fig_revenue.update_traces(
+                    hovertemplate='<b>%{x}</b><br>Receita: R$ %{y:,.0f}<extra></extra>'
+                )
+            else:
+                # For less crowded views, show selected values
+                fig_revenue.add_trace(go.Scatter(
+                    x=display_df[x_col],
+                    y=display_df['revenue'],
+                    mode='text',
+                    text=[f'R$ {v:,.0f}' if i % 3 == 0 or v == display_df['revenue'].max() or v == display_df['revenue'].min() 
+                          else '' for i, v in enumerate(display_df['revenue'])],
+                    textposition='top center',
+                    textfont=dict(size=10),
+                    showlegend=False
+                ))
+            fig_revenue.update_layout(
+                yaxis_title="Receita (R$)",
+                xaxis_title=x_title,
+                hovermode='x unified',
+                xaxis=dict(
+                    tickangle=-45 if view_type == "Mensal" else 0,
+                    tickmode='linear',
+                    dtick=2 if view_type == "Mensal" and len(display_df) > 24 else None
+                ),
+                height=500 if view_type == "Mensal" else 400,
+                margin=dict(t=50, b=100 if view_type == "Mensal" else 50)
+            )
+            st.plotly_chart(fig_revenue, use_container_width=True)
+        else:
+            if display_df.empty:
+                st.info("📊 Nenhum dado disponível para o período selecionado. Verifique os filtros.")
+            else:
+                st.info("📊 Dados de receita não disponíveis")
+        
+        # Profit Margin Evolution
+        if not display_df.empty and 'profit_margin' in display_df.columns:
+            st.subheader("📊 Margem de Lucro")
+            x_col, x_title = prepare_x_axis(display_df, view_type)
+            
+            # Calculate profit margin for aggregated data if needed
+            if view_type != "Anual":
+                display_df['profit_margin'] = (display_df['net_profit'] / display_df['revenue'] * 100).fillna(0)
+            
+            fig_margin = px.bar(
+                display_df,
+                x=x_col,
+                y='profit_margin',
+                title=f'Margem de Lucro {view_type} (%)',
+                color='profit_margin',
+                color_continuous_scale='RdYlGn'
+            )
+            
+            # Smart text positioning for monthly view
+            if view_type == "Mensal" and len(display_df) > 20:
+                fig_margin.update_traces(
+                    texttemplate='',
+                    hovertemplate='<b>%{x}</b><br>Margem de Lucro: %{y:.1f}%<extra></extra>'
+                )
+            else:
+                fig_margin.update_traces(
+                    text=display_df['profit_margin'].apply(lambda x: f'{x:.1f}%'),
+                    textposition='outside'
+                )
+            
+            fig_margin.update_layout(
+                yaxis_title="Margem de Lucro (%)",
+                xaxis_title=x_title,
+                xaxis=dict(
+                    tickangle=-45 if view_type == "Mensal" else 0,
+                    tickmode='linear',
+                    dtick=2 if view_type == "Mensal" and len(display_df) > 24 else None
+                ),
+                height=450 if view_type == "Mensal" else 400,
+                margin=dict(t=50, b=100 if view_type == "Mensal" else 50),
+                showlegend=False
+            )
+            st.plotly_chart(fig_margin, use_container_width=True)
+        
+        # Growth Analysis (only for annual view)
+        if view_type == "Anual":
+            st.subheader("📊 Análise de Crescimento")
+            growth_cols = [col for col in display_df.columns if '_growth' in col]
+            if growth_cols:
+                fig_growth = go.Figure()
+                for col in growth_cols:
+                    metric_name = col.replace('_growth', '').title()
+                    fig_growth.add_trace(go.Scatter(
+                        x=display_df['year'],
+                        y=display_df[col],
+                    mode='lines+markers',
+                    name=metric_name,
+                    line=dict(width=3)
+                ))
+            fig_growth.update_layout(
+                title="Taxa de Crescimento Anual (%)",
+                xaxis_title="Ano",
+                yaxis_title="Crescimento (%)",
+                hovermode='x unified'
+            )
+            st.plotly_chart(fig_growth, use_container_width=True)
+        
+        # New Financial Metrics Graphs
+        st.subheader("📊 Análise de Custos e Margens")
+        
+        # 1. Variable Costs Evolution - Full width
+        if not display_df.empty and 'variable_costs' in display_df.columns:
+            x_col, x_title = prepare_x_axis(display_df, view_type)
+            
+            fig_var_costs = px.line(
+                display_df, 
+                x=x_col, 
+                y='variable_costs',
+                title='💸 Custos Variáveis',
+                markers=True,
+                color_discrete_sequence=['#ff7f0e']
+            )
+            
+            # Apply same smart positioning as revenue
+            if view_type == "Mensal" and len(display_df) > 20:
+                fig_var_costs.update_traces(
+                    hovertemplate='<b>%{x}</b><br>Custos Variáveis: R$ %{y:,.0f}<extra></extra>'
+                )
+            else:
+                fig_var_costs.add_trace(go.Scatter(
+                    x=display_df[x_col],
+                    y=display_df['variable_costs'],
+                    mode='text',
+                    text=[f'R$ {v:,.0f}' if i % 3 == 0 or v == display_df['variable_costs'].max() or v == display_df['variable_costs'].min() 
+                          else '' for i, v in enumerate(display_df['variable_costs'])],
+                    textposition='top center',
+                    textfont=dict(size=10),
+                    showlegend=False
+                ))
+            
+            fig_var_costs.update_layout(
+                yaxis_title="Custos Variáveis (R$)",
+                xaxis_title=x_title,
+                xaxis=dict(
+                    tickangle=-45 if view_type == "Mensal" else 0,
+                    tickmode='linear',
+                    dtick=2 if view_type == "Mensal" and len(display_df) > 24 else None
+                ),
+                height=450 if view_type == "Mensal" else 400,
+                margin=dict(t=50, b=100 if view_type == "Mensal" else 50)
+            )
+            st.plotly_chart(fig_var_costs, use_container_width=True)
+        
+        # 2. Fixed Costs - Full width
+        if not display_df.empty and 'fixed_costs' in display_df.columns:
+            x_col, x_title = prepare_x_axis(display_df, view_type)
+            
+            fig_fixed = px.bar(
+                display_df,
+                x=x_col,
+                y='fixed_costs',
+                title='🏢 Custos Fixos',
+                color_discrete_sequence=['#2ca02c']
+            )
+            
+            # Smart text positioning for bars
+            if view_type == "Mensal" and len(display_df) > 20:
+                fig_fixed.update_traces(
+                    texttemplate='',
+                    hovertemplate='<b>%{x}</b><br>Custos Fixos: R$ %{y:,.0f}<extra></extra>'
+                )
+            else:
+                fig_fixed.update_traces(
+                    text=[f'R$ {v:,.0f}' if i % 2 == 0 else '' for i, v in enumerate(display_df['fixed_costs'])],
+                    textposition='outside'
+                )
+            
+            fig_fixed.update_layout(
+                yaxis_title="Custos Fixos (R$)",
+                xaxis_title=x_title,
+                xaxis=dict(
+                    tickangle=-45 if view_type == "Mensal" else 0,
+                    tickmode='linear',
+                    dtick=2 if view_type == "Mensal" and len(display_df) > 24 else None
+                ),
+                height=450 if view_type == "Mensal" else 400,
+                margin=dict(t=50, b=100 if view_type == "Mensal" else 50)
+            )
+            st.plotly_chart(fig_fixed, use_container_width=True)
+        
+        # 3. Contribution Margin - Full width
+        if not display_df.empty and 'contribution_margin' in display_df.columns:
+            x_col, x_title = prepare_x_axis(display_df, view_type)
+            
+            fig_contrib = px.bar(
+                display_df,
+                x=x_col,
+                y='contribution_margin',
+                title='📈 Margem de Contribuição',
+                color='contribution_margin',
+                color_continuous_scale='Greens'
+            )
+            
+            # Smart text positioning
+            if view_type == "Mensal" and len(display_df) > 20:
+                fig_contrib.update_traces(
+                    texttemplate='',
+                    hovertemplate='<b>%{x}</b><br>Margem de Contribuição: R$ %{y:,.0f}<extra></extra>'
+                )
+            else:
+                fig_contrib.update_traces(
+                    text=[f'R$ {v:,.0f}' if i % 2 == 0 else '' for i, v in enumerate(display_df['contribution_margin'])],
+                    textposition='outside'
+                )
+            
+            fig_contrib.update_layout(
+                yaxis_title="Margem de Contribuição (R$)",
+                xaxis_title=x_title,
+                showlegend=False,
+                xaxis=dict(
+                    tickangle=-45 if view_type == "Mensal" else 0,
+                    tickmode='linear',
+                    dtick=2 if view_type == "Mensal" and len(display_df) > 24 else None
+                ),
+                height=450 if view_type == "Mensal" else 400,
+                margin=dict(t=50, b=100 if view_type == "Mensal" else 50)
+            )
+            st.plotly_chart(fig_contrib, use_container_width=True)
+        
+        # 4. Operational Costs - Full width  
+        if not display_df.empty and 'operational_costs' in display_df.columns:
+            x_col, x_title = prepare_x_axis(display_df, view_type)
+            
+            fig_op_costs = px.area(
+                display_df,
+                x=x_col,
+                y='operational_costs',
+                title='⚙️ Custos Operacionais',
+                color_discrete_sequence=['#d62728']
+            )
+            
+            fig_op_costs.update_layout(
+                yaxis_title="Custos Operacionais (R$)",
+                xaxis_title=x_title,
+                xaxis=dict(
+                    tickangle=-45 if view_type == "Mensal" else 0,
+                    tickmode='linear',
+                    dtick=2 if view_type == "Mensal" and len(display_df) > 24 else None
+                ),
+                height=450 if view_type == "Mensal" else 400,
+                margin=dict(t=50, b=100 if view_type == "Mensal" else 50),
+                hovermode='x unified'
+            )
+            st.plotly_chart(fig_op_costs, use_container_width=True)
+        
+        # 5. Result (Profit) - Full width
+        st.subheader("💰 Resultado (Lucro Líquido)")
+        if not display_df.empty and 'net_profit' in display_df.columns:
+            x_col, x_title = prepare_x_axis(display_df, view_type)
+            
+            # Create a color scale based on positive/negative values
+            colors = ['red' if x < 0 else 'green' for x in display_df['net_profit']]
+            
+            fig_result = go.Figure()
+            fig_result.add_trace(go.Bar(
+                x=display_df[x_col],
+                y=display_df['net_profit'],
+                text=display_df['net_profit'].apply(lambda x: f'R$ {x:,.0f}'),
+                textposition='outside',
+                marker_color=colors,
+                name='Resultado'
+            ))
+            
+            # Add a zero line
+            fig_result.add_hline(y=0, line_dash="dash", line_color="gray")
+            
+            fig_result.update_layout(
+                title=f'Resultado {view_type} (Lucro/Prejuízo)',
+                yaxis_title="Resultado (R$)",
+                xaxis_title=x_title,
+                height=500,
+                showlegend=False
+            )
+            st.plotly_chart(fig_result, use_container_width=True)
+        
+        # Cost Structure Comparison
+        st.subheader("📊 Estrutura de Custos")
+        if not display_df.empty and all(col in display_df.columns for col in ['variable_costs', 'fixed_costs', 'revenue']):
+            x_col, x_title = prepare_x_axis(display_df, view_type)
+            
+            # Calculate total costs and profit margins
+            display_df['total_costs'] = display_df['variable_costs'] + display_df['fixed_costs']
+            display_df['profit'] = display_df['revenue'] - display_df['total_costs']
+            display_df['cost_percentage'] = (display_df['total_costs'] / display_df['revenue'] * 100).fillna(0)
+            
+            # Create stacked bar chart with improved styling
+            fig_cost_structure = go.Figure()
+            
+            # Add costs bars with better colors and formatting
+            fig_cost_structure.add_trace(go.Bar(
+                name='Custos Variáveis',
+                x=display_df[x_col],
+                y=display_df['variable_costs'],
+                text=display_df['variable_costs'].apply(lambda x: format_currency(x).replace('R$ ', '')),
+                textposition='inside',
+                textfont=dict(color='white', size=11),
+                marker=dict(
+                    color='#6366F1',  # Modern purple/indigo for variable costs
+                    line=dict(color='#4F46E5', width=1)
+                ),
+                hovertemplate='<b>Custos Variáveis</b><br>' +
+                             'Valor: R$ %{y:,.0f}<br>' +
+                             '<extra></extra>'
+            ))
+            
+            fig_cost_structure.add_trace(go.Bar(
+                name='Custos Fixos',
+                x=display_df[x_col],
+                y=display_df['fixed_costs'],
+                text=display_df['fixed_costs'].apply(lambda x: format_currency(x).replace('R$ ', '')),
+                textposition='inside',
+                textfont=dict(color='white', size=11),
+                marker=dict(
+                    color='#F59E0B',  # Professional amber for fixed costs
+                    line=dict(color='#D97706', width=1)
+                ),
+                hovertemplate='<b>Custos Fixos</b><br>' +
+                             'Valor: R$ %{y:,.0f}<br>' +
+                             '<extra></extra>'
+            ))
+            
+            # Add revenue line with markers
+            fig_cost_structure.add_trace(go.Scatter(
+                name='Receita',
+                x=display_df[x_col],
+                y=display_df['revenue'],
+                mode='lines+markers+text',
+                text=display_df['revenue'].apply(lambda x: format_currency(x)),
+                textposition='top center',
+                textfont=dict(color='#047857', size=10, weight='bold'),
+                line=dict(color='#10B981', width=4),
+                marker=dict(size=10, color='#10B981', line=dict(color='#047857', width=2)),
+                yaxis='y2',
+                hovertemplate='<b>Receita</b><br>' +
+                             'Valor: R$ %{y:,.0f}<br>' +
+                             '<extra></extra>'
+            ))
+            
+            # Add profit margin annotations with improved positioning
+            max_revenue = display_df['revenue'].max()
+            for idx, row in display_df.iterrows():
+                margin = (row['profit'] / row['revenue'] * 100) if row['revenue'] > 0 else 0
+                
+                # Use consistent green color for all positive margins
+                # Position labels well above the revenue line with arrows
+                y_position = row['revenue'] + (max_revenue * 0.15)  # 15% above revenue line
+                
+                fig_cost_structure.add_annotation(
+                    x=row[x_col],
+                    y=y_position,
+                    text=f"<b>{margin:.1f}%</b>",
+                    showarrow=True,
+                    arrowhead=2,
+                    arrowsize=1,
+                    arrowwidth=2,
+                    arrowcolor='#059669',  # Darker green for arrow
+                    ax=0,
+                    ay=-40,  # Longer arrow
+                    font=dict(size=14, color='#059669', weight='bold'),  # Larger, darker green text
+                    bgcolor='#D1FAE5',  # Light green background
+                    bordercolor='#059669',  # Dark green border
+                    borderwidth=2,
+                    borderpad=8,  # More padding
+                    yref='y2'  # Reference the revenue axis
+                )
+            
+            
+            # Update layout with improved styling
+            fig_cost_structure.update_layout(
+                title={
+                    'text': '💰 Estrutura de Custos vs Receita',
+                    'font': {'size': 24, 'color': '#1F2937'}
+                },
+                barmode='stack',
+                yaxis=dict(
+                    title=dict(
+                        text="Custos (R$)",
+                        font=dict(size=16, color='#1F2937', weight='bold')
+                    ),
+                    side='left',
+                    tickformat=',.0f',
+                    tickfont=dict(size=12, color='#374151'),
+                    showgrid=True,
+                    gridcolor='rgba(0,0,0,0.1)'
+                ),
+                yaxis2=dict(
+                    title=dict(
+                        text="Receita (R$)",
+                        font=dict(size=16, color='#047857', weight='bold')
+                    ),
+                    overlaying='y',
+                    side='right',
+                    tickformat=',.0f',
+                    tickfont=dict(size=12, color='#047857'),
+                    showgrid=False
+                ),
+                xaxis=dict(
+                    title=dict(
+                        text=x_title,
+                        font=dict(size=16, color='#1F2937', weight='bold')
+                    ),
+                    tickfont=dict(size=14, color='#374151'),
+                    showgrid=False
+                ),
+                height=600,
+                hovermode='x unified',
+                plot_bgcolor='rgba(248,249,250,0.8)',
+                paper_bgcolor='white',
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="center",
+                    x=0.5,
+                    bgcolor="rgba(255,255,255,0.9)",
+                    bordercolor="rgba(0,0,0,0.1)",
+                    borderwidth=1,
+                    font=dict(size=14, color='#374151', weight='bold')
+                ),
+                margin=dict(t=100, b=50)
+            )
+            
+            # Add shapes for visual appeal
+            fig_cost_structure.update_xaxes(showline=True, linewidth=2, linecolor='#E5E7EB')
+            fig_cost_structure.update_yaxes(showline=True, linewidth=2, linecolor='#E5E7EB')
+            
+            st.plotly_chart(fig_cost_structure, use_container_width=True)
+            
+            # Add cost analysis metrics below the chart with clearer descriptions
+            st.markdown("### 📊 Análise de Custos - Período Mais Recente")
+            
+            col1, col2, col3, col4 = st.columns(4)
+            
+            latest_year = display_df.iloc[-1]
+            latest_period = latest_year.get('period', latest_year.get(x_col, 'Último período'))
+            
+            with col1:
+                st.metric(
+                    "💵 Custo Total",
+                    format_currency(latest_year['total_costs']),
+                    f"↑ {latest_year['cost_percentage']:.1f}% da receita",
+                    help=f"Soma de todos os custos (variáveis + fixos) em {latest_period}"
+                )
+            
+            with col2:
+                variable_pct = (latest_year['variable_costs'] / latest_year['total_costs'] * 100) if latest_year['total_costs'] > 0 else 0
+                st.metric(
+                    "📊 Custos Variáveis",
+                    f"{variable_pct:.1f}%",
+                    "↑ do total de custos",
+                    help=f"Proporção dos custos variáveis em relação ao custo total em {latest_period}"
+                )
+            
+            with col3:
+                fixed_pct = (latest_year['fixed_costs'] / latest_year['total_costs'] * 100) if latest_year['total_costs'] > 0 else 0
+                st.metric(
+                    "🏢 Custos Fixos",
+                    f"{fixed_pct:.1f}%",
+                    "↑ do total de custos",
+                    help=f"Proporção dos custos fixos em relação ao custo total em {latest_period}"
+                )
+            
+            with col4:
+                avg_margin = display_df['profit_margin'].mean() if 'profit_margin' in display_df.columns else 0
+                st.metric(
+                    "📈 Margem de Lucro Média",
+                    f"{avg_margin:.1f}%",
+                    "↑ período selecionado",
+                    help=f"Margem de lucro média considerando todo o período analisado"
+                )
+        
+        # Anomalies
+        if show_anomalies and data['anomalies']:
+            st.subheader("⚠️ Anomalias Detectadas")
+            for anomaly in data['anomalies']:
+                st.warning(
+                    f"**{anomaly['year']}**: {anomaly['metric']} - "
+                    f"Valor: {anomaly['value']:.2f}% ({anomaly['type']})"
+                )
+        
+        # Data table
+        with st.expander("📋 Ver Dados Detalhados"):
+            st.dataframe(display_df, use_container_width=True)
+    
+    else:
+        st.info("👆 Por favor, faça upload dos arquivos na aba 'Upload' primeiro.")
+
+# Tab 3: Detailed Breakdown (only for flexible mode)
+if use_flexible_extractor:
+    with tab3:
+        st.header("🔍 Detalhamento por Categoria")
+        
+        if hasattr(st.session_state, 'flexible_data') and st.session_state.flexible_data is not None:
+            flexible_data = st.session_state.flexible_data
+            
+            # Year selector
+            years = sorted(flexible_data.keys())
+            selected_year = st.selectbox("Selecione o Ano", years, index=len(years)-1)
+            
+            year_data = flexible_data[selected_year]
+            
+            # Summary metrics for the year
+            col1, col2, col3 = st.columns(3)
+            
+            # Calculate totals
+            total_revenue = sum(
+                item['annual'] for item in year_data['line_items'].values()
+                if item['category'] == 'revenue'
+            )
+            total_costs = sum(
+                item['annual'] for item in year_data['line_items'].values()
+                if item['category'] in ['variable_costs', 'fixed_costs', 'other_costs']
+            )
+            total_expenses = sum(
+                item['annual'] for item in year_data['line_items'].values()
+                if 'expense' in item['category']
+            )
+            
+            with col1:
+                st.metric("Receita Total", format_currency(total_revenue))
+            with col2:
+                st.metric("Custos Totais", format_currency(total_costs))
+            with col3:
+                st.metric("Despesas Totais", format_currency(total_expenses))
+            
+            st.markdown("---")
+            
+            # Detailed breakdown by category
+            st.subheader("Detalhamento por Categoria")
+            
+            # Create expandable sections for each category
+            for category in sorted(year_data['categories'].keys()):
+                if not show_all_categories and category in ['calculated_results', 'margins']:
+                    continue
+                    
+                items = year_data['categories'][category]
+                
+                # Calculate category total
+                category_total = sum(
+                    year_data['line_items'][item]['annual'] 
+                    for item in items
+                )
+                
+                # Create expander for category
+                icon = get_category_icon(category)
+                name = get_category_name(category)
+                
+                with st.expander(f"{icon} {name} - {format_currency(category_total)}", expanded=False):
+                    # Show items in this category
+                    item_df = []
+                    for item_key in items:
+                        item_data = year_data['line_items'][item_key]
+                        item_df.append({
+                            'Descrição': item_data['label'],
+                            'Valor Anual': item_data['annual'],
+                            '% da Receita': (item_data['annual'] / total_revenue * 100) if total_revenue > 0 else 0
+                        })
+                    
+                    item_df = pd.DataFrame(item_df)
+                    item_df = item_df.sort_values('Valor Anual', ascending=False)
+                    
+                    # Format columns
+                    st.dataframe(
+                        item_df.style.format({
+                            'Valor Anual': lambda x: format_currency(x),
+                            '% da Receita': '{:.1f}%'
+                        }),
+                        use_container_width=True,
+                        hide_index=True
+                    )
+                    
+                    # Show monthly breakdown if available
+                    if st.checkbox(f"Mostrar detalhamento mensal", key=f"monthly_{category}"):
+                        monthly_data = []
+                        months = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 
+                                 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ']
+                        
+                        for item_key in items:
+                            item_data = year_data['line_items'][item_key]
+                            monthly = item_data['monthly']
+                            
+                            if monthly:
+                                row = {'Item': item_data['label']}
+                                for month in months:
+                                    row[month] = monthly.get(month, 0)
+                                monthly_data.append(row)
+                        
+                        if monthly_data:
+                            monthly_df = pd.DataFrame(monthly_data)
+                            st.dataframe(
+                                monthly_df.style.format({
+                                    month: lambda x: format_currency(x) if x != 0 else '-'
+                                    for month in months
+                                }),
+                                use_container_width=True,
+                                hide_index=True
+                            )
+            
+            # Waterfall chart showing path to profit
+            st.subheader("💧 Análise Waterfall - Caminho para o Lucro")
+            
+            # Prepare data for waterfall
+            waterfall_data = [
+                ('Receita', total_revenue, 'relative'),
+                ('Custos Variáveis', -total_costs, 'relative'),
+                ('Despesas Operacionais', -total_expenses, 'relative'),
+            ]
+            
+            # Add other expense categories
+            other_expenses = sum(
+                item['annual'] for item in year_data['line_items'].values()
+                if item['category'] not in ['revenue', 'variable_costs', 'fixed_costs', 
+                                           'calculated_results', 'margins']
+                and 'expense' not in item['category']
+            )
+            if other_expenses > 0:
+                waterfall_data.append(('Outras Despesas', -other_expenses, 'relative'))
+            
+            # Final result
+            net_result = total_revenue - total_costs - total_expenses - other_expenses
+            waterfall_data.append(('Resultado Líquido', net_result, 'total'))
+            
+            # Create waterfall chart
+            labels = [item[0] for item in waterfall_data]
+            values = [item[1] for item in waterfall_data]
+            
+            fig_waterfall = go.Figure(go.Waterfall(
+                name="",
+                orientation="v",
+                measure=[item[2] for item in waterfall_data],
+                x=labels,
+                textposition="outside",
+                text=[format_currency(v) for v in values],
+                y=values,
+                connector={"line": {"color": "rgb(63, 63, 63)"}},
+            ))
+            
+            fig_waterfall.update_layout(
+                title=f"Fluxo Financeiro - {selected_year}",
+                showlegend=False,
+                height=500
+            )
+            
+            st.plotly_chart(fig_waterfall, use_container_width=True)
+            
+            # Year-over-year comparison
+            if len(years) > 1:
+                st.subheader("📊 Comparação com Ano Anterior")
+                
+                if years.index(selected_year) > 0:
+                    prev_year = years[years.index(selected_year) - 1]
+                    prev_data = flexible_data[prev_year]
+                    
+                    # Compare categories
+                    comparison_data = []
+                    
+                    all_categories_both_years = set(year_data['categories'].keys()) | set(prev_data['categories'].keys())
+                    
+                    for category in sorted(all_categories_both_years):
+                        current_total = 0
+                        previous_total = 0
+                        
+                        if category in year_data['categories']:
+                            current_total = sum(
+                                year_data['line_items'][item]['annual'] 
+                                for item in year_data['categories'][category]
+                            )
+                        
+                        if category in prev_data['categories']:
+                            previous_total = sum(
+                                prev_data['line_items'][item]['annual'] 
+                                for item in prev_data['categories'][category]
+                            )
+                        
+                        change = current_total - previous_total
+                        change_pct = calculate_percentage_change(previous_total, current_total)
+                        
+                        comparison_data.append({
+                            'Categoria': f"{get_category_icon(category)} {get_category_name(category)}",
+                            f'{prev_year}': previous_total,
+                            f'{selected_year}': current_total,
+                            'Variação R$': change,
+                            'Variação %': change_pct
+                        })
+                    
+                    comparison_df = pd.DataFrame(comparison_data)
+                    
+                    st.dataframe(
+                        comparison_df.style.format({
+                            f'{prev_year}': lambda x: format_currency(x),
+                            f'{selected_year}': lambda x: format_currency(x),
+                            'Variação R$': lambda x: format_currency(x),
+                            'Variação %': '{:.1f}%'
+                        }).background_gradient(subset=['Variação %'], cmap='RdYlGn', vmin=-50, vmax=50),
+                        use_container_width=True,
+                        hide_index=True
+                    )
+            
+        else:
+            st.info("👆 Por favor, faça upload dos arquivos na aba 'Upload' primeiro.")
+
+# Tab 3/4: AI Insights
+tab_ai = tab4 if use_flexible_extractor else tab3
+with tab_ai:
+    st.header("🤖 Insights com Gemini AI")
+    
+    if hasattr(st.session_state, 'processed_data') and st.session_state.processed_data is not None and gemini_api_key:
+        if st.button("Gerar Insights com IA", type="primary"):
+            with st.spinner("Analisando dados com Gemini..."):
+                try:
+                    # Configure Gemini
+                    genai.configure(api_key=gemini_api_key)
+                    model = genai.GenerativeModel('gemini-1.5-flash')
+                    
+                    # Prepare data for analysis
+                    df = st.session_state.processed_data.get('consolidated', pd.DataFrame())
+                    summary = st.session_state.processed_data.get('summary', {})
+                    
+                    # Include flexible data insights
+                    flexible_summary = ""
+                    if hasattr(st.session_state, 'flexible_data') and st.session_state.flexible_data:
+                        all_categories = set()
+                        all_items = set()
+                        for year_data in st.session_state.flexible_data.values():
+                            all_categories.update(year_data['categories'].keys())
+                            all_items.update(item['label'] for item in year_data['line_items'].values())
+                        
+                        flexible_summary = f"\n\nCategorias detectadas: {len(all_categories)}\nTotal de linhas de dados: {len(all_items)}"
+                    
+                    # Create prompt
+                    prompt = f"""
+                    Analise os seguintes dados financeiros da Marine Seguros e forneça insights detalhados em {language}:
+                    
+                    Dados Resumidos:
+                    - Período: {summary['years_range']}
+                    - Receita Total: R$ {summary['metrics'].get('revenue', {}).get('total', 0):,.2f}
+                    - CAGR da Receita: {summary['metrics'].get('revenue', {}).get('cagr', 0):.1f}%
+                    - Margem de Lucro Média: {summary['metrics'].get('profit_margin', {}).get('average', 0):.1f}%
+                    {flexible_summary}
+                    
+                    Dados Anuais:
+                    {df.to_string()}
+                    
+                    Por favor, forneça:
+                    1. Análise de tendências principais
+                    2. Pontos fortes do desempenho financeiro
+                    3. Áreas de preocupação ou risco
+                    4. Recomendações estratégicas{' para novas categorias de despesas detectadas' if hasattr(st.session_state, 'flexible_data') and st.session_state.flexible_data else ''}
+                    5. Previsões para os próximos anos
+                    
+                    Formato: Use markdown com títulos claros e bullet points.
+                    """
+                    
+                    # Generate insights
+                    response = model.generate_content(prompt)
+                    st.session_state.gemini_insights = response.text
+                    
+                except Exception as e:
+                    st.error(f"Erro ao gerar insights: {str(e)}")
+        
+        # Display insights
+        if hasattr(st.session_state, 'gemini_insights') and st.session_state.gemini_insights:
+            st.markdown(st.session_state.gemini_insights)
+            
+            # Export insights button
+            st.download_button(
+                label="📥 Baixar Insights",
+                data=st.session_state.gemini_insights,
+                file_name=f"insights_marine_seguros_{datetime.now().strftime('%Y%m%d')}.md",
+                mime="text/markdown"
+            )
+    else:
+        if not gemini_api_key:
+            st.warning("⚠️ Por favor, insira sua chave API do Gemini na barra lateral.")
+        else:
+            st.info("👆 Por favor, faça upload dos arquivos primeiro.")
+
+# Tab 4/5: AI Chat
+tab_chat = tab5 if use_flexible_extractor else tab4
+with tab_chat:
+    st.header("💬 Chat com IA")
+    
+    if hasattr(st.session_state, 'processed_data') and st.session_state.processed_data is not None and gemini_api_key:
+        # Initialize chat assistant if not already done
+        if not hasattr(st.session_state, 'ai_chat_assistant') or st.session_state.ai_chat_assistant is None:
+            st.session_state.ai_chat_assistant = AIChatAssistant(gemini_api_key)
+        
+        # Prepare filter context
+        filter_context = "Visualizando todos os dados"
+        if 'view_type' in st.session_state:
+            filter_context = f"Visualização: {st.session_state.view_type}"
+            if 'selected_years' in st.session_state and hasattr(st.session_state, 'selected_years'):
+                years = st.session_state.selected_years
+                filter_context += f" | Anos: {', '.join(map(str, years))}"
+        
+        # Prepare data for AI chat
+        if use_flexible_extractor and hasattr(st.session_state, 'flexible_data') and st.session_state.flexible_data:
+            # Use flexible data format
+            chat_data = st.session_state.flexible_data
+        else:
+            # Convert standard data to the format expected by AI chat
+            # The AI chat expects data in format: {year: {revenue: {...}, costs: {...}, ...}}
+            chat_data = {}
+            if (hasattr(st.session_state, 'monthly_data') and 
+                st.session_state.monthly_data is not None and 
+                not st.session_state.monthly_data.empty and
+                'year' in st.session_state.monthly_data.columns):
+                # Group monthly data by year
+                monthly_df = st.session_state.monthly_data
+                for year in monthly_df['year'].unique():
+                    year_data = monthly_df[monthly_df['year'] == year]
+                    # Convert numpy int64 to regular int
+                    year_int = int(year)
+                    # Check which cost column exists (could be 'costs' or 'variable_costs')
+                    if 'variable_costs' in year_data.columns:
+                        costs_col = 'variable_costs'
+                    elif 'costs' in year_data.columns:
+                        costs_col = 'costs'
+                    else:
+                        costs_col = None
+                    
+                    chat_data[year_int] = {
+                        'revenue': dict(zip(year_data['month'], year_data['revenue'])),
+                        'costs': dict(zip(year_data['month'], year_data[costs_col])) if costs_col else {},
+                        'fixed_costs': year_data['fixed_costs'].iloc[0] if 'fixed_costs' in year_data.columns and len(year_data) > 0 else 0,
+                        'operational_costs': year_data['operational_costs'].iloc[0] if 'operational_costs' in year_data.columns and len(year_data) > 0 else 0
+                    }
+                    # Add annual totals
+                    chat_data[year_int]['revenue']['ANNUAL'] = year_data['revenue'].sum()
+                    chat_data[year_int]['costs']['ANNUAL'] = year_data[costs_col].sum() if costs_col else 0
+            
+            # If monthly data is not available, use consolidated data
+            if not chat_data and 'consolidated' in st.session_state.processed_data:
+                consolidated_df = st.session_state.processed_data.get('consolidated', pd.DataFrame())
+                for _, row in consolidated_df.iterrows():
+                    year = int(row['year'])  # Convert to regular int
+                    chat_data[year] = {
+                        'revenue': {'ANNUAL': row.get('revenue', 0)},
+                        'costs': {'ANNUAL': row.get('variable_costs', 0)},
+                        'fixed_costs': row.get('fixed_costs', 0),
+                        'operational_costs': row.get('operational_costs', 0),
+                        'net_profit': row.get('net_profit', 0),
+                        'profit_margin': row.get('profit_margin', 0)
+                    }
+        
+        # Render chat interface
+        st.session_state.ai_chat_assistant.render_chat_interface(
+            data=chat_data,
+            filter_context=filter_context
+        )
+    else:
+        if not gemini_api_key:
+            st.warning("⚠️ Por favor, insira sua chave API do Gemini na barra lateral.")
+        else:
+            st.info("👆 Por favor, faça upload dos arquivos primeiro.")
+
+# Tab 5/6: Predictions
+tab_pred = tab6 if use_flexible_extractor else tab5
+with tab_pred:
+    st.header("📈 Previsões e Cenários")
+    
+    if hasattr(st.session_state, 'processed_data') and st.session_state.processed_data is not None and show_predictions:
+        df = st.session_state.processed_data.get('consolidated', pd.DataFrame())
+        
+        if 'revenue' in df.columns:
+            # Simple forecast
+            st.subheader("Previsão Simples")
+            
+            # Calculate trend
+            if len(df) >= 2:
+                # Linear regression for revenue
+                from sklearn.linear_model import LinearRegression
+                
+                X = df['year'].values.reshape(-1, 1)
+                y = df['revenue'].values
+                
+                model = LinearRegression()
+                model.fit(X, y)
+                
+                # Predict next 3 years
+                future_years = [2026, 2027, 2028]
+                predictions = model.predict([[year] for year in future_years])
+                
+                # Create forecast dataframe
+                forecast_df = pd.DataFrame({
+                    'year': future_years,
+                    'revenue_forecast': predictions,
+                    'type': 'Previsão'
+                })
+                
+                # Combine with historical data
+                historical_df = df[['year', 'revenue']].copy()
+                historical_df['type'] = 'Histórico'
+                historical_df.rename(columns={'revenue': 'revenue_forecast'}, inplace=True)
+                
+                combined_df = pd.concat([historical_df, forecast_df])
+                
+                # Plot
+                fig_forecast = px.line(
+                    combined_df,
+                    x='year',
+                    y='revenue_forecast',
+                    color='type',
+                    title='Previsão de Receita (2026-2028)',
+                    markers=True
+                )
+                fig_forecast.update_layout(
+                    yaxis_title="Receita (R$)",
+                    xaxis_title="Ano"
+                )
+                st.plotly_chart(fig_forecast, use_container_width=True)
+                
+                # Scenario analysis
+                st.subheader("Análise de Cenários")
+                
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    growth_rate_optimistic = st.slider(
+                        "Crescimento Otimista (%)",
+                        0, 50, 20
+                    )
+                
+                with col2:
+                    growth_rate_realistic = st.slider(
+                        "Crescimento Realista (%)",
+                        0, 30, 10
+                    )
+                
+                with col3:
+                    growth_rate_pessimistic = st.slider(
+                        "Crescimento Pessimista (%)",
+                        -20, 10, 0
+                    )
+                
+                # Calculate scenarios
+                last_revenue = df['revenue'].iloc[-1]
+                
+                scenarios_df = pd.DataFrame({
+                    'Cenário': ['Otimista', 'Realista', 'Pessimista'],
+                    '2026': [
+                        last_revenue * (1 + growth_rate_optimistic/100),
+                        last_revenue * (1 + growth_rate_realistic/100),
+                        last_revenue * (1 + growth_rate_pessimistic/100)
+                    ],
+                    '2027': [
+                        last_revenue * (1 + growth_rate_optimistic/100)**2,
+                        last_revenue * (1 + growth_rate_realistic/100)**2,
+                        last_revenue * (1 + growth_rate_pessimistic/100)**2
+                    ],
+                    '2028': [
+                        last_revenue * (1 + growth_rate_optimistic/100)**3,
+                        last_revenue * (1 + growth_rate_realistic/100)**3,
+                        last_revenue * (1 + growth_rate_pessimistic/100)**3
+                    ]
+                })
+                
+                st.dataframe(
+                    scenarios_df.style.format({
+                        '2026': 'R$ {:,.2f}',
+                        '2027': 'R$ {:,.2f}',
+                        '2028': 'R$ {:,.2f}'
+                    }),
+                    use_container_width=True
+                )
+        else:
+            st.warning("Dados de receita não encontrados para fazer previsões.")
+    else:
+        st.info("👆 Por favor, faça upload dos arquivos primeiro.")
+
+# Tab 6/7: Integration
+tab_int = tab7 if use_flexible_extractor else tab6
+with tab_int:
+    st.header("⚡ Integração Make.com")
+    
+    st.markdown("""
+    ### Como configurar a integração bancária
+    
+    1. **Crie uma conta no Make.com** (se ainda não tiver)
+    2. **Configure o webhook** abaixo
+    3. **Conecte sua conta bancária** através do Make
+    4. **Automatize atualizações** dos dados financeiros
+    """)
+    
+    # Webhook configuration
+    webhook_url = st.text_input(
+        "Webhook URL",
+        placeholder="https://hook.make.com/...",
+        help="Cole aqui a URL do webhook do Make.com"
+    )
+    
+    if webhook_url:
+        st.code(f"""
+# Exemplo de payload para o webhook:
+{{
+    "company": "Marine Seguros",
+    "year": {datetime.now().year},
+    "month": {datetime.now().month},
+    "revenue": 250000.00,
+    "costs": 150000.00,
+    "profit": 100000.00
+}}
+        """, language="json")
+        
+        if st.button("Testar Webhook"):
+            st.info("Funcionalidade de teste será implementada na versão completa.")
+    
+    # Make.com template
+    st.subheader("📋 Template Make.com")
+    st.markdown("""
+    Baixe nosso template pronto para Make.com que inclui:
+    - Conexão com bancos via Plaid/TrueLayer
+    - Processamento de transações
+    - Atualização automática de Excel
+    - Disparo de análises
+    """)
+    
+    # Download template button (placeholder)
+    st.download_button(
+        label="📥 Baixar Template Make.com",
+        data="Template será gerado na versão completa",
+        file_name="marine_seguros_make_template.json",
+        mime="application/json"
+    )
+
+# Footer
+st.markdown("---")
+st.markdown(
+    """
+    <div style='text-align: center'>
+        <p>{'Sistema Flexível - Detecta automaticamente novas categorias de despesas' if use_flexible_extractor else 'Sistema Padrão - Categorias Fixas'}</p>
+        <p>Desenvolvido para Marine Seguros | Powered by Gemini AI</p>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
