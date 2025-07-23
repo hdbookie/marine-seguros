@@ -241,7 +241,15 @@ if data_loaded and hasattr(st.session_state, 'extracted_data') and st.session_st
 # Helper functions
 def format_currency(value):
     """Format value as Brazilian currency"""
-    return f"R$ {value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    if abs(value) >= 1_000_000:
+        # For millions, show 1 decimal place and 'M' suffix
+        return f"R$ {value/1_000_000:,.1f}M".replace(",", "X").replace(".", ",").replace("X", ".")
+    elif abs(value) >= 1_000:
+        # For thousands, show as full number with thousands separator
+        return f"R$ {value:,.0f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    else:
+        # For smaller amounts, show 2 decimal places
+        return f"R$ {value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 def calculate_percentage_change(old_value, new_value):
     """Calculate percentage change between two values"""
@@ -617,24 +625,6 @@ with tab2:
         df = data.get('consolidated', pd.DataFrame())
         summary = data.get('summary', {})
         
-        # Debug section - always show current status
-        with st.expander("🔍 Status dos Dados", expanded=False):
-            st.write(f"**Dados consolidados:** {len(df)} registros")
-            st.write(f"**Dados mensais disponíveis:** {hasattr(st.session_state, 'monthly_data') and st.session_state.monthly_data is not None and not st.session_state.monthly_data.empty}")
-            if hasattr(st.session_state, 'monthly_data') and st.session_state.monthly_data is not None:
-                st.write(f"**Registros mensais:** {len(st.session_state.monthly_data)}")
-            st.write(f"**Dados brutos disponíveis:** {'raw_data' in data}")
-            
-            if st.button("🔄 Forçar recarregar dados mensais"):
-                if 'raw_data' in data:
-                    with st.spinner("Recarregando dados mensais..."):
-                        processor = FinancialProcessor()
-                        monthly_data = processor.get_monthly_data(data['raw_data'])
-                        st.session_state.monthly_data = monthly_data
-                        st.success(f"✅ Dados mensais recarregados: {len(monthly_data)} registros")
-                        st.rerun()
-                else:
-                    st.error("❌ Dados brutos não disponíveis")
         
         # Ensure monthly data is available and has all required columns
         required_monthly_cols = ['variable_costs', 'fixed_costs', 'net_profit', 'profit_margin']
@@ -647,38 +637,14 @@ with tab2:
         
         if monthly_data_invalid:
             if 'raw_data' in data:
-                # Regenerate monthly data from raw data
-                with st.spinner("Carregando dados mensais..."):
-                    try:
-                        processor = FinancialProcessor()
-                        st.info(f"🔍 Processando {len(data['raw_data'])} arquivos para dados mensais...")
-                        monthly_data = processor.get_monthly_data(data['raw_data'])
-                        
-                        if monthly_data.empty:
-                            st.error("❌ Não foi possível carregar dados mensais dos arquivos.")
-                            st.warning("Possíveis causas:")
-                            st.write("- Arquivos Excel não contêm dados mensais (colunas JAN, FEV, MAR, etc.)")
-                            st.write("- Formato dos dados não foi reconhecido")
-                            st.write("- Dados mensais não foram extraídos corretamente")
-                            
-                            # Show raw data structure for debugging
-                            if st.checkbox("Mostrar estrutura dos dados brutos"):
-                                st.write("Arquivos disponíveis:")
-                                for filename in data['raw_data'].keys():
-                                    st.write(f"- {filename}")
-                        else:
-                            st.success(f"✅ Dados mensais carregados: {len(monthly_data)} registros")
-                            st.info(f"Colunas geradas: {monthly_data.columns.tolist()}")
-                        
-                        st.session_state.monthly_data = monthly_data
-                        
-                    except Exception as e:
-                        st.error(f"❌ Erro ao processar dados mensais: {str(e)}")
-                        import traceback
-                        if st.checkbox("Mostrar detalhes do erro"):
-                            st.code(traceback.format_exc())
-            else:
-                st.error("❌ Dados brutos não disponíveis para gerar dados mensais.")
+                # Regenerate monthly data from raw data silently
+                try:
+                    processor = FinancialProcessor()
+                    monthly_data = processor.get_monthly_data(data['raw_data'])
+                    st.session_state.monthly_data = monthly_data
+                except Exception as e:
+                    # Silently handle the error - monthly data is optional for yearly view
+                    st.session_state.monthly_data = pd.DataFrame()
         
         
         # Time Period Filters
@@ -996,18 +962,6 @@ with tab2:
         # Key metrics - Calculate based on filtered data
         col1, col2, col3, col4 = st.columns(4)
         
-        # Debug info for profit calculation
-        if st.checkbox("🔍 Debug cálculo de lucro", key="debug_profit_calc"):
-            st.write("### Colunas disponíveis em display_df:")
-            st.write(display_df.columns.tolist())
-            if not display_df.empty:
-                st.write("### Amostra dos dados (primeiro ano):")
-                first_row = display_df.iloc[0]
-                for col in ['revenue', 'variable_costs', 'gross_profit', 'fixed_costs', 'operational_costs', 'net_profit', 'profit_margin']:
-                    if col in display_df.columns:
-                        st.write(f"- {col}: {first_row[col]:,.2f}")
-                    else:
-                        st.write(f"- {col}: NÃO ENCONTRADO")
         
         # Calculate net_profit if missing
         if 'net_profit' not in display_df.columns and not display_df.empty:
@@ -1034,9 +988,30 @@ with tab2:
         
         # Calculate metrics from filtered display_df
         total_revenue = display_df['revenue'].sum() if 'revenue' in display_df.columns and not display_df.empty else 0
-        total_profit = display_df['net_profit'].sum() if 'net_profit' in display_df.columns and not display_df.empty else 0
-        avg_profit = display_df['net_profit'].mean() if 'net_profit' in display_df.columns and not display_df.empty else 0
-        avg_margin = display_df['profit_margin'].mean() if 'profit_margin' in display_df.columns and not display_df.empty else 0
+        
+        # Calculate profit properly - use our calculation instead of potentially wrong DataFrame values
+        if not display_df.empty and all(col in display_df.columns for col in ['revenue', 'variable_costs', 'fixed_costs']):
+            # Calculate profit correctly: Revenue - Variable Costs - Fixed Costs
+            calculated_profits = display_df['revenue'] - display_df['variable_costs'] - display_df['fixed_costs']
+            total_profit = calculated_profits.sum()
+            avg_profit = calculated_profits.mean()
+            
+            # Recalculate profit margin based on corrected profits
+            if 'revenue' in display_df.columns:
+                avg_margin = (calculated_profits / display_df['revenue'] * 100).mean()
+            else:
+                avg_margin = 0
+                
+            # Also update the DataFrame with correct net_profit for consistency
+            display_df = display_df.copy()
+            display_df['net_profit'] = calculated_profits
+            display_df['profit_margin'] = (calculated_profits / display_df['revenue'] * 100).fillna(0)
+            
+        else:
+            # Fallback to DataFrame values if we can't calculate
+            total_profit = display_df['net_profit'].sum() if 'net_profit' in display_df.columns and not display_df.empty else 0
+            avg_profit = display_df['net_profit'].mean() if 'net_profit' in display_df.columns and not display_df.empty else 0
+            avg_margin = display_df['profit_margin'].mean() if 'profit_margin' in display_df.columns and not display_df.empty else 0
         
         # For period views, show period count
         period_label = f"{len(display_df)} {'meses' if view_type == 'Mensal' else 'períodos'}" if view_type != 'Anual' else f"{summary['metrics'].get('revenue', {}).get('cagr', 0):.1f}% CAGR"
@@ -1049,10 +1024,20 @@ with tab2:
             )
         
         with col2:
+            # For yearly view, show total profit and clarify it's total across all years
+            if view_type == "Anual":
+                profit_label = "Lucro Total (Todos os Anos)"
+                profit_value = total_profit
+                profit_delta = f"Média anual: {format_currency(avg_profit)}"
+            else:
+                profit_label = "Lucro Total"
+                profit_value = total_profit
+                profit_delta = f"{(total_profit / total_revenue * 100) if total_revenue > 0 else 0:.1f}% da receita"
+            
             st.metric(
-                "Lucro Total" if view_type != "Anual" else "Lucro Médio",
-                format_currency(total_profit if view_type != "Anual" else avg_profit),
-                f"{(total_profit / total_revenue * 100) if total_revenue > 0 else 0:.1f}% da receita"
+                profit_label,
+                format_currency(profit_value),
+                profit_delta
             )
         
         with col3:
