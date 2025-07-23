@@ -679,240 +679,385 @@ with tab1:
 if st.session_state.extracted_data and len(st.session_state.extracted_data) > 0:
     # Tab 2: Dashboard
     with tab2:
-        if show_filters:
-            # Filters section
-            st.markdown('<div class="section-header"><span class="section-icon">📅</span>Filtros de Período</div>', unsafe_allow_html=True)
-            
-            # Year filters
-            years = sorted(st.session_state.extracted_data.keys())
-            year_cols = st.columns(len(years))
-            
-            if not st.session_state.selected_years:
-                st.session_state.selected_years = years
-            
-            for idx, year in enumerate(years):
-                with year_cols[idx]:
-                    if st.checkbox(str(year), value=year in st.session_state.selected_years, key=f"year_{year}"):
-                        if year not in st.session_state.selected_years:
-                            st.session_state.selected_years.append(year)
-                            db.auto_save_state(st.session_state)
-                    else:
-                        if year in st.session_state.selected_years:
-                            st.session_state.selected_years.remove(year)
-                            db.auto_save_state(st.session_state)
-            
-            col1, col2 = st.columns([10, 2])
-            with col2:
-                if st.button("Todos", key="all_years"):
-                    st.session_state.selected_years = years
-                    db.auto_save_state(st.session_state)
-                    st.rerun()
-                if st.button("Limpar", key="clear_years"):
-                    st.session_state.selected_years = []
-                    db.auto_save_state(st.session_state)
-                    st.rerun()
-            
-            # Month filters with performance indicators
-            st.markdown('<div class="section-header"><span class="section-icon">📅</span>Filtros de Mês</div>', unsafe_allow_html=True)
-            
-            months = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ']
-            month_performance = {}
-            
-            # Calculate month performance across all years
-            for month in months:
-                total_growth = 0
-                count = 0
-                for year in st.session_state.selected_years:
-                    if year in st.session_state.extracted_data:
-                        year_data = st.session_state.extracted_data[year]
-                        if 'revenue' in year_data and month in year_data['revenue']:
-                            # Simple growth indicator (you can make this more sophisticated)
-                            count += 1
+        st.header("📊 Dashboard Financeiro")
+        
+        # Time Period Filters
+        st.subheader("🗓️ Filtros de Período")
+        
+        col_filter1, col_filter2, col_filter3, col_filter4 = st.columns(4)
+        
+        with col_filter1:
+            view_type = st.selectbox(
+                "Tipo de Visualização",
+                ["Anual", "Mensal", "Trimestral", "Trimestre Personalizado", "Semestral", "Personalizado"],
+                key="view_type"
+            )
+        
+        # Get available years
+        years = sorted(st.session_state.extracted_data.keys())
+        
+        with col_filter2:
+            if view_type in ["Mensal", "Trimestral", "Trimestre Personalizado", "Semestral", "Personalizado"]:
+                selected_years = st.multiselect(
+                    "Anos",
+                    years,
+                    default=years[-3:] if len(years) >= 3 else years,
+                    key="dashboard_selected_years"
+                )
+            else:
+                selected_years = years
+        
+        with col_filter3:
+            if view_type == "Mensal":
+                month_names = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+                              "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
+                selected_months = st.multiselect(
+                    "Meses",
+                    month_names,
+                    default=month_names,
+                    key="dashboard_selected_months"
+                )
+            elif view_type == "Trimestral":
+                selected_quarter = st.multiselect(
+                    "Trimestres",
+                    ["Q1 (Jan-Mar)", "Q2 (Abr-Jun)", "Q3 (Jul-Set)", "Q4 (Out-Dez)"],
+                    default=["Q1 (Jan-Mar)", "Q2 (Abr-Jun)", "Q3 (Jul-Set)", "Q4 (Out-Dez)"],
+                    key="dashboard_selected_quarters"
+                )
+            elif view_type == "Trimestre Personalizado":
+                month_names = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+                              "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
+                start_month = st.selectbox(
+                    "Mês Inicial",
+                    month_names,
+                    key="start_month_custom"
+                )
+            elif view_type == "Semestral":
+                selected_semester = st.multiselect(
+                    "Semestres",
+                    ["1º Semestre (Jan-Jun)", "2º Semestre (Jul-Dez)"],
+                    default=["1º Semestre (Jan-Jun)", "2º Semestre (Jul-Dez)"],
+                    key="dashboard_selected_semesters"
+                )
+        
+        with col_filter4:
+            if view_type == "Trimestre Personalizado":
+                # Calculate end month options (3 months from start)
+                month_map = {
+                    "Janeiro": 1, "Fevereiro": 2, "Março": 3, "Abril": 4,
+                    "Maio": 5, "Junho": 6, "Julho": 7, "Agosto": 8,
+                    "Setembro": 9, "Outubro": 10, "Novembro": 11, "Dezembro": 12
+                }
+                month_names = list(month_map.keys())
+                start_idx = month_names.index(start_month)
                 
-                # Mock performance data for demo (replace with real calculations)
-                month_performance[month] = np.random.randint(-30, 40)
-            
-            if not st.session_state.selected_months:
-                st.session_state.selected_months = months
-            
-            # Display months in a 3x4 grid
-            for row in range(0, 12, 4):
-                cols = st.columns(4)
-                for col_idx, month_idx in enumerate(range(row, min(row + 4, 12))):
-                    month = months[month_idx]
-                    perf = month_performance[month]
-                    
-                    with cols[col_idx]:
-                        # Create custom button-like display
-                        is_selected = month in st.session_state.selected_months
-                        
-                        button_html = f"""
-                        <div class="month-button {'active' if is_selected else ''}" style="margin-bottom: 0.5rem;">
-                            <span>{month}</span>
-                            <span class="month-indicator {'negative' if perf < 0 else ''}"></span>
-                            <span style="font-size: 0.8rem; color: {'#4ade80' if perf >= 0 else '#ef4444'};">
-                                {'+' if perf >= 0 else ''}{perf}%
-                            </span>
-                        </div>
-                        """
-                        st.markdown(button_html, unsafe_allow_html=True)
-                        
-                        # Actual checkbox (hidden visually but functional)
-                        if st.checkbox(month, value=is_selected, key=f"month_{month}", label_visibility="collapsed"):
-                            if month not in st.session_state.selected_months:
-                                st.session_state.selected_months.append(month)
-                                db.auto_save_state(st.session_state)
-                        else:
-                            if month in st.session_state.selected_months:
-                                st.session_state.selected_months.remove(month)
-                                db.auto_save_state(st.session_state)
-            
-            # Quick filters section
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                st.markdown('<div class="section-header"><span class="section-icon">🎯</span>Filtros Rápidos</div>', unsafe_allow_html=True)
-                if st.button("Top 3 Meses", key="top3", use_container_width=True):
-                    # Select top 3 performing months
-                    sorted_months = sorted(month_performance.items(), key=lambda x: x[1], reverse=True)[:3]
-                    st.session_state.selected_months = [m[0] for m in sorted_months]
-                    db.auto_save_state(st.session_state)
-                    st.rerun()
+                # End month is exactly 2 months after start (for a 3-month period)
+                end_idx = (start_idx + 2) % 12
+                end_month_display = month_names[end_idx]
                 
-                if st.button("Bottom 3 Meses", key="bottom3", use_container_width=True):
-                    sorted_months = sorted(month_performance.items(), key=lambda x: x[1])[:3]
-                    st.session_state.selected_months = [m[0] for m in sorted_months]
-                    db.auto_save_state(st.session_state)
-                    st.rerun()
-            
-            with col2:
-                st.markdown('<div class="section-header"><span class="section-icon">🌊</span>Sazonalidade</div>', unsafe_allow_html=True)
-                season = st.selectbox("Período", ["Nenhum", "Q1", "Q2", "Q3", "Q4", "Verão", "Inverno"])
-                
-                if season == "Q1":
-                    st.session_state.selected_months = ['JAN', 'FEV', 'MAR']
-                    db.auto_save_state(st.session_state)
-                    st.rerun()
-                elif season == "Q2":
-                    st.session_state.selected_months = ['ABR', 'MAI', 'JUN']
-                    db.auto_save_state(st.session_state)
-                    st.rerun()
-                elif season == "Q3":
-                    st.session_state.selected_months = ['JUL', 'AGO', 'SET']
-                    db.auto_save_state(st.session_state)
-                    st.rerun()
-                elif season == "Q4":
-                    st.session_state.selected_months = ['OUT', 'NOV', 'DEZ']
-                    db.auto_save_state(st.session_state)
-                    st.rerun()
-            
-            with col3:
-                st.markdown('<div class="section-header"><span class="section-icon">📊</span>Métricas</div>', unsafe_allow_html=True)
-                show_revenue = st.checkbox("Revenue", value=True)
-                show_costs = st.checkbox("Costs", value=False)
-                show_margins = st.checkbox("Margins", value=True)
-                show_profit = st.checkbox("Profit", value=False)
+                st.info(f"Trimestre: {start_month} a {end_month_display} (3 meses)")
+                end_month = end_month_display
+            elif view_type == "Personalizado":
+                date_range = st.date_input(
+                    "Período",
+                    value=(pd.Timestamp(int(selected_years[0]), 1, 1), pd.Timestamp(int(selected_years[-1]), 12, 31)),
+                    key="date_range"
+                )
         
         # Apply filters
         filtered_data = {}
-        for year in st.session_state.selected_years:
+        for year in selected_years:
             if year in st.session_state.extracted_data:
                 filtered_data[year] = st.session_state.extracted_data[year]
         
         if filtered_data:
-            # KPI Cards
-            st.markdown('<div class="section-header"><span class="section-icon">📈</span>Key Performance Indicators</div>', unsafe_allow_html=True)
+            # Financial Overview Cards
+            st.markdown("### 💰 Visão Geral Financeira")
             
             col1, col2, col3, col4 = st.columns(4)
             
-            # Calculate KPIs
+            # Calculate metrics based on view type
             total_revenue = 0
-            avg_margin = 0
-            years_count = len(filtered_data)
+            total_costs = 0
+            total_profit = 0
+            periods_count = 0
             
-            for year_data in filtered_data.values():
-                revenue = sum(v for k, v in year_data.get('revenue', {}).items() 
-                            if k != 'ANNUAL' and isinstance(v, (int, float)))
-                total_revenue += revenue
-                
-                margins = [v for k, v in year_data.get('margins', {}).items() 
-                          if k != 'ANNUAL' and isinstance(v, (int, float))]
-                if margins:
-                    avg_margin += sum(margins) / len(margins)
+            if view_type == "Anual":
+                # Annual view - aggregate by year
+                for year, year_data in filtered_data.items():
+                    revenue = sum(v for k, v in year_data.get('revenue', {}).items() 
+                                if k != 'ANNUAL' and isinstance(v, (int, float)))
+                    costs = sum(v for k, v in year_data.get('costs', {}).items() 
+                              if k != 'ANNUAL' and isinstance(v, (int, float)))
+                    total_revenue += revenue
+                    total_costs += costs
+                    total_profit += revenue - costs
+                    periods_count += 1
+            elif view_type == "Mensal":
+                # Monthly view - filter by selected months
+                month_map = {
+                    "Janeiro": "JAN", "Fevereiro": "FEV", "Março": "MAR", "Abril": "ABR",
+                    "Maio": "MAI", "Junho": "JUN", "Julho": "JUL", "Agosto": "AGO",
+                    "Setembro": "SET", "Outubro": "OUT", "Novembro": "NOV", "Dezembro": "DEZ"
+                }
+                for year, year_data in filtered_data.items():
+                    for month_name in selected_months:
+                        month_key = month_map.get(month_name, month_name)
+                        revenue = year_data.get('revenue', {}).get(month_key, 0)
+                        costs = year_data.get('costs', {}).get(month_key, 0)
+                        if revenue > 0 or costs > 0:
+                            total_revenue += revenue
+                            total_costs += costs
+                            total_profit += revenue - costs
+                            periods_count += 1
+            elif view_type == "Trimestral":
+                # Quarterly view
+                quarter_months = {
+                    "Q1 (Jan-Mar)": ["JAN", "FEV", "MAR"],
+                    "Q2 (Abr-Jun)": ["ABR", "MAI", "JUN"],
+                    "Q3 (Jul-Set)": ["JUL", "AGO", "SET"],
+                    "Q4 (Out-Dez)": ["OUT", "NOV", "DEZ"]
+                }
+                for year, year_data in filtered_data.items():
+                    for quarter in selected_quarter:
+                        quarter_revenue = 0
+                        quarter_costs = 0
+                        for month in quarter_months[quarter]:
+                            quarter_revenue += year_data.get('revenue', {}).get(month, 0)
+                            quarter_costs += year_data.get('costs', {}).get(month, 0)
+                        if quarter_revenue > 0 or quarter_costs > 0:
+                            total_revenue += quarter_revenue
+                            total_costs += quarter_costs
+                            total_profit += quarter_revenue - quarter_costs
+                            periods_count += 1
             
-            if years_count > 0:
-                avg_margin = avg_margin / years_count
+            # Calculate averages and margins
+            avg_margin = (total_profit / total_revenue * 100) if total_revenue > 0 else 0
+            avg_revenue = total_revenue / periods_count if periods_count > 0 else 0
             
+            # Display metrics
             with col1:
-                st.markdown(f"""
-                    <div class="kpi-card">
-                        <div class="kpi-label">Receita Total</div>
-                        <div class="kpi-value">R$ {total_revenue/1e6:.1f}M</div>
-                        <div class="kpi-change positive">↑ 12.5% YoY</div>
-                    </div>
-                """, unsafe_allow_html=True)
+                st.metric(
+                    "Receita Total",
+                    f"R$ {total_revenue/1e6:.2f}M",
+                    f"{periods_count} {'anos' if view_type == 'Anual' else 'períodos'}"
+                )
             
             with col2:
-                st.markdown(f"""
-                    <div class="kpi-card">
-                        <div class="kpi-label">Margem Média</div>
-                        <div class="kpi-value">{avg_margin:.1f}%</div>
-                        <div class="kpi-change {'positive' if avg_margin > 15 else 'negative'}">
-                            {'↑' if avg_margin > 15 else '↓'} Target: 15%
-                        </div>
-                    </div>
-                """, unsafe_allow_html=True)
+                st.metric(
+                    "Lucro Total",
+                    f"R$ {total_profit/1e6:.2f}M",
+                    f"{avg_margin:.1f}% margem"
+                )
             
             with col3:
-                st.markdown(f"""
-                    <div class="kpi-card">
-                        <div class="kpi-label">Período Analisado</div>
-                        <div class="kpi-value">{years_count}</div>
-                        <div class="kpi-change positive">Anos</div>
-                    </div>
-                """, unsafe_allow_html=True)
+                st.metric(
+                    "Média Mensal",
+                    f"R$ {avg_revenue/12/1e3:.0f}K",
+                    "por mês" if view_type == "Anual" else "por período"
+                )
             
             with col4:
-                st.markdown(f"""
-                    <div class="kpi-card">
-                        <div class="kpi-label">Melhor Mês</div>
-                        <div class="kpi-value">DEZ</div>
-                        <div class="kpi-change positive">↑ 38% avg</div>
-                    </div>
-                """, unsafe_allow_html=True)
+                # Find best performing period
+                best_period = ""
+                best_value = 0
+                
+                if view_type == "Anual":
+                    for year, year_data in filtered_data.items():
+                        year_revenue = sum(v for k, v in year_data.get('revenue', {}).items() 
+                                         if k != 'ANNUAL' and isinstance(v, (int, float)))
+                        if year_revenue > best_value:
+                            best_value = year_revenue
+                            best_period = str(year)
+                elif view_type == "Mensal":
+                    for month in ["JAN", "FEV", "MAR", "ABR", "MAI", "JUN", "JUL", "AGO", "SET", "OUT", "NOV", "DEZ"]:
+                        month_total = sum(year_data.get('revenue', {}).get(month, 0) 
+                                        for year_data in filtered_data.values())
+                        if month_total > best_value:
+                            best_value = month_total
+                            best_period = month
+                
+                st.metric(
+                    "Melhor Período",
+                    best_period,
+                    f"R$ {best_value/1e6:.1f}M"
+                )
             
-            # Charts
-            st.markdown('<div class="section-header"><span class="section-icon">📊</span>Visualizações</div>', unsafe_allow_html=True)
+            # Charts Section
+            st.markdown("### 📊 Visualizações")
             
-            # Revenue chart
-            years = sorted(filtered_data.keys())
-            revenues = []
-            for year in years:
-                revenue = sum(v for k, v in filtered_data[year].get('revenue', {}).items() 
-                            if k != 'ANNUAL' and isinstance(v, (int, float)))
-                revenues.append(revenue)
+            # Prepare data for charts based on view type
+            if view_type == "Anual":
+                # Annual chart
+                chart_data = []
+                for year in sorted(filtered_data.keys()):
+                    year_data = filtered_data[year]
+                    revenue = sum(v for k, v in year_data.get('revenue', {}).items() 
+                                if k != 'ANNUAL' and isinstance(v, (int, float)))
+                    costs = sum(v for k, v in year_data.get('costs', {}).items() 
+                              if k != 'ANNUAL' and isinstance(v, (int, float)))
+                    profit = revenue - costs
+                    margin = (profit / revenue * 100) if revenue > 0 else 0
+                    
+                    chart_data.append({
+                        'Período': str(year),
+                        'Receita': revenue,
+                        'Custos': costs,
+                        'Lucro': profit,
+                        'Margem (%)': margin
+                    })
+                
+                df_chart = pd.DataFrame(chart_data)
+                
+                # Revenue and Costs Chart
+                fig = go.Figure()
+                
+                fig.add_trace(go.Bar(
+                    name='Receita',
+                    x=df_chart['Período'],
+                    y=df_chart['Receita'],
+                    marker_color='#667eea',
+                    text=[f'R$ {v/1e6:.1f}M' for v in df_chart['Receita']],
+                    textposition='outside'
+                ))
+                
+                fig.add_trace(go.Bar(
+                    name='Custos',
+                    x=df_chart['Período'],
+                    y=df_chart['Custos'],
+                    marker_color='#ef4444',
+                    text=[f'R$ {v/1e6:.1f}M' for v in df_chart['Custos']],
+                    textposition='outside'
+                ))
+                
+                fig.update_layout(
+                    title='Receita vs Custos por Ano',
+                    xaxis_title='Ano',
+                    yaxis_title='Valores (R$)',
+                    barmode='group',
+                    plot_bgcolor='#1e1f3a',
+                    paper_bgcolor='#1e1f3a',
+                    font=dict(color='white'),
+                    xaxis=dict(gridcolor='rgba(255,255,255,0.1)'),
+                    yaxis=dict(gridcolor='rgba(255,255,255,0.1)'),
+                    legend=dict(
+                        orientation="h",
+                        yanchor="bottom",
+                        y=1.02,
+                        xanchor="center",
+                        x=0.5
+                    )
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Margin Evolution
+                fig_margin = go.Figure()
+                
+                fig_margin.add_trace(go.Scatter(
+                    x=df_chart['Período'],
+                    y=df_chart['Margem (%)'],
+                    mode='lines+markers',
+                    name='Margem de Lucro',
+                    line=dict(color='#4ade80', width=3),
+                    marker=dict(size=10),
+                    text=[f'{v:.1f}%' for v in df_chart['Margem (%)']],
+                    textposition='top center'
+                ))
+                
+                # Add average line
+                avg_margin = df_chart['Margem (%)'].mean()
+                fig_margin.add_hline(
+                    y=avg_margin,
+                    line_dash="dash",
+                    line_color="gray",
+                    annotation_text=f"Média: {avg_margin:.1f}%"
+                )
+                
+                fig_margin.update_layout(
+                    title='Evolução da Margem de Lucro',
+                    xaxis_title='Ano',
+                    yaxis_title='Margem (%)',
+                    plot_bgcolor='#1e1f3a',
+                    paper_bgcolor='#1e1f3a',
+                    font=dict(color='white'),
+                    xaxis=dict(gridcolor='rgba(255,255,255,0.1)'),
+                    yaxis=dict(gridcolor='rgba(255,255,255,0.1)')
+                )
+                
+                st.plotly_chart(fig_margin, use_container_width=True)
+                
+            elif view_type == "Mensal":
+                # Monthly chart
+                month_map = {
+                    "Janeiro": "JAN", "Fevereiro": "FEV", "Março": "MAR", "Abril": "ABR",
+                    "Maio": "MAI", "Junho": "JUN", "Julho": "JUL", "Agosto": "AGO",
+                    "Setembro": "SET", "Outubro": "OUT", "Novembro": "NOV", "Dezembro": "DEZ"
+                }
+                
+                # Create chart data
+                chart_data = []
+                for year in selected_years:
+                    if year in filtered_data:
+                        year_data = filtered_data[year]
+                        for month_name in selected_months:
+                            month_key = month_map.get(month_name, month_name)
+                            revenue = year_data.get('revenue', {}).get(month_key, 0)
+                            costs = year_data.get('costs', {}).get(month_key, 0)
+                            
+                            if revenue > 0 or costs > 0:
+                                chart_data.append({
+                                    'Período': f"{month_key}/{year}",
+                                    'Ano': year,
+                                    'Mês': month_key,
+                                    'Receita': revenue,
+                                    'Custos': costs,
+                                    'Lucro': revenue - costs
+                                })
+                
+                if chart_data:
+                    df_chart = pd.DataFrame(chart_data)
+                    
+                    # Monthly revenue chart
+                    fig = px.line(
+                        df_chart,
+                        x='Período',
+                        y='Receita',
+                        title='Evolução Mensal da Receita',
+                        markers=True,
+                        color_discrete_sequence=['#667eea']
+                    )
+                    
+                    fig.update_traces(
+                        text=[f'R$ {v/1e3:.0f}K' for v in df_chart['Receita']],
+                        textposition='top center',
+                        mode='lines+markers+text',
+                        textfont=dict(size=10)
+                    )
+                    
+                    fig.update_layout(
+                        plot_bgcolor='#1e1f3a',
+                        paper_bgcolor='#1e1f3a',
+                        font=dict(color='white'),
+                        xaxis=dict(gridcolor='rgba(255,255,255,0.1)'),
+                        yaxis=dict(gridcolor='rgba(255,255,255,0.1)', title='Receita (R$)')
+                    )
+                    
+                    st.plotly_chart(fig, use_container_width=True)
             
-            fig = go.Figure()
-            fig.add_trace(go.Bar(
-                x=years,
-                y=revenues,
-                marker_color='#667eea',
-                text=[f'R$ {r/1e6:.1f}M' for r in revenues],
-                textposition='outside'
-            ))
-            
-            fig.update_layout(
-                title='Evolução da Receita',
-                xaxis_title='Ano',
-                yaxis_title='Receita (R$)',
-                plot_bgcolor='#1e1f3a',
-                paper_bgcolor='#1e1f3a',
-                font=dict(color='white'),
-                xaxis=dict(gridcolor='rgba(255,255,255,0.1)'),
-                yaxis=dict(gridcolor='rgba(255,255,255,0.1)')
-            )
-            
-            st.plotly_chart(fig, use_container_width=True)
+            # Summary table
+            if st.checkbox("📋 Mostrar Tabela Detalhada", key="show_table"):
+                st.subheader("Dados Detalhados")
+                if 'df_chart' in locals() and not df_chart.empty:
+                    st.dataframe(
+                        df_chart.style.format({
+                            'Receita': 'R$ {:,.0f}',
+                            'Custos': 'R$ {:,.0f}',
+                            'Lucro': 'R$ {:,.0f}',
+                            'Margem (%)': '{:.1f}%'
+                        }),
+                        use_container_width=True
+                    )
     
     # Analysis Tab
     with tab2:
