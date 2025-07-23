@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import os
 from datetime import datetime
 from typing import Dict, List, Tuple
 import warnings
@@ -260,14 +261,24 @@ class FinancialProcessor:
         
         print(f"Processing {len(excel_data)} files for monthly data...")
         
-        # Extract from all loaded files
-        for file in excel_data.keys():
+        # Extract from all loaded files - make sure file paths exist
+        for file_path in excel_data.keys():
             try:
-                file_data = extractor.extract_from_excel(file)
-                if file_data:
-                    all_data.update(file_data)
+                # Check if file exists and extract
+                if os.path.exists(file_path):
+                    print(f"Extracting monthly data from: {file_path}")
+                    file_data = extractor.extract_from_excel(file_path)
+                    if file_data:
+                        all_data.update(file_data)
+                        print(f"✓ Extracted {len(file_data)} years from {file_path}")
+                    else:
+                        print(f"✗ No data extracted from {file_path}")
+                else:
+                    print(f"✗ File not found: {file_path}")
             except Exception as e:
-                print(f"Error extracting from {file}: {e}")
+                print(f"Error extracting from {file_path}: {e}")
+                import traceback
+                print(traceback.format_exc())
         
         # Convert to monthly DataFrame
         monthly_rows = []
@@ -281,25 +292,38 @@ class FinancialProcessor:
             monthly_revenue = year_data.get('revenue', {})
             monthly_costs = year_data.get('costs', {})
             
-            # Extract fixed costs and operational costs (usually annual)
-            fixed_costs_annual = year_data.get('fixed_costs', 0)
-            operational_costs_annual = year_data.get('operational_costs', 0)
+            # Extract monthly fixed costs and operational costs
+            monthly_fixed_costs = year_data.get('fixed_costs', {})
+            monthly_operational_costs = year_data.get('operational_costs', {})
             contribution_margin_annual = year_data.get('contribution_margin', 0)
             
-            # Distribute annual costs across months
-            fixed_costs_monthly = fixed_costs_annual / 12 if fixed_costs_annual else 0
-            operational_costs_monthly = operational_costs_annual / 12 if operational_costs_annual else 0
+            # If we don't have monthly data, fall back to distributing annual costs
+            fixed_costs_annual = monthly_fixed_costs.get('ANNUAL', 0) if isinstance(monthly_fixed_costs, dict) else monthly_fixed_costs
+            operational_costs_annual = monthly_operational_costs.get('ANNUAL', 0) if isinstance(monthly_operational_costs, dict) else monthly_operational_costs
+            
+            # For fallback case only
+            fixed_costs_monthly_fallback = fixed_costs_annual / 12 if fixed_costs_annual else 0
+            operational_costs_monthly_fallback = operational_costs_annual / 12 if operational_costs_annual else 0
             
             for i, month in enumerate(months):
                 if month in monthly_revenue:
                     revenue = monthly_revenue[month]
                     variable_costs = monthly_costs.get(month, 0)
                     
+                    # Get actual monthly fixed costs if available, otherwise use fallback
+                    if isinstance(monthly_fixed_costs, dict) and month in monthly_fixed_costs:
+                        fixed_costs_this_month = monthly_fixed_costs[month]
+                        operational_costs_this_month = monthly_operational_costs.get(month, fixed_costs_this_month)
+                    else:
+                        # Fallback to distributed annual costs
+                        fixed_costs_this_month = fixed_costs_monthly_fallback
+                        operational_costs_this_month = operational_costs_monthly_fallback
+                    
                     # Calculate contribution margin for the month
                     contribution_margin = revenue - variable_costs
                     
                     # Calculate net profit for the month
-                    net_profit = contribution_margin - fixed_costs_monthly - operational_costs_monthly
+                    net_profit = contribution_margin - fixed_costs_this_month - operational_costs_this_month
                     
                     row = {
                         'year': year,
@@ -308,8 +332,8 @@ class FinancialProcessor:
                         'date': pd.Timestamp(year, i + 1, 1),
                         'revenue': revenue,
                         'variable_costs': variable_costs,
-                        'fixed_costs': fixed_costs_monthly,
-                        'operational_costs': operational_costs_monthly,
+                        'fixed_costs': fixed_costs_this_month,
+                        'operational_costs': operational_costs_this_month,
                         'contribution_margin': contribution_margin,
                         'net_profit': net_profit,
                         'profit_margin': (net_profit / revenue * 100) if revenue > 0 else 0

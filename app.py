@@ -14,6 +14,7 @@ from gerenciador_arquivos import GerenciadorArquivos
 from ai_chat_assistant import AIChatAssistant
 from database_manager import DatabaseManager
 from core.direct_extractor import DirectDataExtractor
+from comparative_analyzer import ComparativeAnalyzer
 
 # Load environment variables
 load_dotenv()
@@ -636,15 +637,42 @@ with tab2:
         )
         
         if monthly_data_invalid:
-            if 'raw_data' in data:
-                # Regenerate monthly data from raw data silently
-                try:
-                    processor = FinancialProcessor()
-                    monthly_data = processor.get_monthly_data(data['raw_data'])
+            # Extract monthly data from the known Excel files
+            try:
+                processor = FinancialProcessor()
+                
+                # Use the actual Excel files instead of the broken raw_data paths
+                excel_files = [
+                    "data/arquivos_enviados/Análise de Resultado Financeiro 2018_2023.xlsx",
+                    "data/arquivos_enviados/Resultado Financeiro - 2024.xlsx", 
+                    "data/arquivos_enviados/Resultado Financeiro - 2025.xlsx"
+                ]
+                
+                # Create a properly formatted excel_data dict with existing files
+                excel_data = {}
+                for file_path in excel_files:
+                    if os.path.exists(file_path):
+                        excel_data[file_path] = None  # The processor will handle the file reading
+                
+                if excel_data:
+                    monthly_data = processor.get_monthly_data(excel_data)
+                    
+                    if monthly_data.empty:
+                        st.error("❌ Failed to extract monthly data from Excel files")
+                    else:
+                        st.success(f"✅ Monthly data extracted: {len(monthly_data)} records from {len(excel_data)} files")
+                        st.info(f"Years covered: {sorted(monthly_data['year'].unique()) if 'year' in monthly_data.columns else 'Unknown'}")
+                    
                     st.session_state.monthly_data = monthly_data
-                except Exception as e:
-                    # Silently handle the error - monthly data is optional for yearly view
+                else:
+                    st.error("❌ No Excel files found for monthly data extraction")
                     st.session_state.monthly_data = pd.DataFrame()
+                    
+            except Exception as e:
+                st.error(f"Error extracting monthly data: {str(e)}")
+                import traceback
+                st.code(traceback.format_exc())
+                st.session_state.monthly_data = pd.DataFrame()
         
         
         # Time Period Filters
@@ -1799,6 +1827,10 @@ tab_ai = tab4 if use_flexible_extractor else tab3
 with tab_ai:
     st.header("🤖 Insights com Gemini AI")
     
+    # Load extracted data from database if not in session state
+    if not hasattr(st.session_state, 'extracted_data') or not st.session_state.extracted_data:
+        st.session_state.extracted_data = db.load_all_financial_data()
+    
     if hasattr(st.session_state, 'processed_data') and st.session_state.processed_data is not None and gemini_api_key:
         if st.button("Gerar Insights com IA", type="primary"):
             with st.spinner("Analisando dados com Gemini..."):
@@ -1864,6 +1896,138 @@ with tab_ai:
                 file_name=f"insights_marine_seguros_{datetime.now().strftime('%Y%m%d')}.md",
                 mime="text/markdown"
             )
+        
+        # Separator
+        st.markdown("---")
+        
+        # Comparative Analysis Section
+        st.subheader("🔍 Análise Comparativa")
+        st.markdown("Compare o desempenho entre dois anos específicos:")
+        
+        # Load extracted data for comparison
+        if hasattr(st.session_state, 'extracted_data') and st.session_state.extracted_data:
+            available_years = sorted(st.session_state.extracted_data.keys())
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                year1 = st.selectbox(
+                    "Ano 1 (Base)",
+                    options=available_years,
+                    index=len(available_years)-2 if len(available_years) > 1 else 0,
+                    key="comparison_year1"
+                )
+            
+            with col2:
+                year2 = st.selectbox(
+                    "Ano 2 (Comparação)",
+                    options=available_years,
+                    index=len(available_years)-1,
+                    key="comparison_year2"
+                )
+            
+            if st.button("🔍 Comparar Períodos", type="secondary"):
+                with st.spinner("Executando análise comparativa..."):
+                    try:
+                        # Initialize comparative analyzer
+                        analyzer = ComparativeAnalyzer(gemini_api_key)
+                        
+                        # Get data for both years
+                        period1_data = st.session_state.extracted_data.get(year1, {})
+                        period2_data = st.session_state.extracted_data.get(year2, {})
+                        
+                        if period1_data and period2_data:
+                            # Perform comparison
+                            comparison_result = analyzer.compare_custom_periods(
+                                period1_data, period2_data, str(year1), str(year2)
+                            )
+                            
+                            # Store result in session state
+                            st.session_state.comparison_result = comparison_result
+                            
+                            st.success(f"✅ Comparação entre {year1} e {year2} concluída!")
+                            
+                        else:
+                            st.error(f"❌ Dados não encontrados para um ou ambos os anos ({year1}, {year2})")
+                            
+                    except Exception as e:
+                        st.error(f"Erro na análise comparativa: {str(e)}")
+                        import traceback
+                        st.code(traceback.format_exc())
+            
+            # Display comparison results
+            if hasattr(st.session_state, 'comparison_result') and st.session_state.comparison_result:
+                result = st.session_state.comparison_result
+                
+                st.subheader("📊 Resultados da Comparação")
+                
+                # Metrics comparison
+                metrics = result.get('metrics', {})
+                
+                # Revenue comparison
+                if 'revenue' in metrics:
+                    revenue_metrics = metrics['revenue']
+                    
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        st.metric(
+                            f"Receita {year1}",
+                            f"R$ {revenue_metrics.get('previous', 0):,.2f}"
+                        )
+                    
+                    with col2:
+                        st.metric(
+                            f"Receita {year2}",
+                            f"R$ {revenue_metrics.get('current', 0):,.2f}"
+                        )
+                    
+                    with col3:
+                        change_pct = revenue_metrics.get('percentage_change', 0)
+                        st.metric(
+                            "Variação",
+                            f"{change_pct:+.1f}%",
+                            f"R$ {revenue_metrics.get('absolute_change', 0):+,.2f}"
+                        )
+                
+                # AI Analysis
+                if 'ai_analysis' in result:
+                    st.subheader("🤖 Análise com IA")
+                    st.markdown(result['ai_analysis'])
+                
+                # Monthly detail
+                if 'monthly_detail' in result and result['monthly_detail']:
+                    st.subheader("📅 Detalhamento Mensal")
+                    
+                    # Create monthly comparison chart
+                    monthly_data = []
+                    for month, data in result['monthly_detail'].items():
+                        monthly_data.append({
+                            'Mês': month,
+                            'Variação (%)': data.get('revenue_change_pct', 0),
+                            'Variação (R$)': data.get('revenue_change_abs', 0)
+                        })
+                    
+                    if monthly_data:
+                        monthly_df = pd.DataFrame(monthly_data)
+                        
+                        # Bar chart of monthly changes
+                        fig = px.bar(
+                            monthly_df,
+                            x='Mês',
+                            y='Variação (%)',
+                            title=f'Variação Mensal de Receita: {year1} vs {year2}',
+                            color='Variação (%)',
+                            color_continuous_scale='RdYlGn'
+                        )
+                        fig.update_layout(showlegend=False)
+                        st.plotly_chart(fig, use_container_width=True)
+                        
+                        # Data table
+                        st.dataframe(monthly_df, use_container_width=True)
+        
+        else:
+            st.info("📊 Processe os dados primeiro para habilitar a análise comparativa.")
     else:
         if not gemini_api_key:
             st.warning("⚠️ Por favor, insira sua chave API do Gemini na barra lateral.")

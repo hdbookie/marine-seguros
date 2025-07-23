@@ -296,14 +296,39 @@ class DirectDataExtractor:
                     
                     elif value_str == 'CUSTOS FIXOS' or value_str.startswith('CUSTOS FIXOS'):
                         print(f"Found fixed costs (operational costs) at {idx}: {value_str}")
+                        
+                        # Initialize fixed_costs dict if not exists
+                        if 'fixed_costs' not in data:
+                            data['fixed_costs'] = {}
+                        if 'operational_costs' not in data:
+                            data['operational_costs'] = {}
+                        
+                        # Extract monthly values first
+                        for month, col in month_cols.items():
+                            if col in df.columns:
+                                val = df.iloc[idx][col]
+                                if pd.notna(val):
+                                    # Handle different number formats
+                                    if isinstance(val, (int, float)):
+                                        data['fixed_costs'][month] = float(val)
+                                        data['operational_costs'][month] = float(val)
+                                    elif isinstance(val, str):
+                                        # Try to parse string numbers
+                                        val_clean = val.replace('.', '').replace(',', '.').replace('R$', '').strip()
+                                        try:
+                                            data['fixed_costs'][month] = float(val_clean)
+                                            data['operational_costs'][month] = float(val_clean)
+                                        except:
+                                            print(f"Could not parse fixed cost value: {val}")
+                        
+                        # Extract annual value
                         if annual_col and annual_col in df.columns:
                             val = df.iloc[idx][annual_col]
                             if pd.notna(val) and isinstance(val, (int, float)):
-                                data['fixed_costs'] = float(val)
-                                # Also store as operational_costs since CUSTOS FIXOS is the operational costs in these files
-                                data['operational_costs'] = float(val)
-                                print(f"  Stored fixed costs: {val:,.2f}")
-                                print(f"  Also stored as operational costs: {val:,.2f}")
+                                data['fixed_costs']['ANNUAL'] = float(val)
+                                data['operational_costs']['ANNUAL'] = float(val)
+                                print(f"  Stored annual fixed costs: {val:,.2f}")
+                                print(f"  Stored monthly fixed costs: {len([k for k in data['fixed_costs'].keys() if k != 'ANNUAL'])} months")
         
         # Calculate profits and only calculate margins if not already extracted from Excel
         if data['revenue'] and data['costs']:
