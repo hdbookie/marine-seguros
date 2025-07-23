@@ -300,12 +300,12 @@ class ComparativeAnalyzer:
         }
         
         prompt = f"""
-        Analyze this multi-year financial data for Marine Seguros and provide strategic insights:
+        Analyze this multi-year financial data for Marine Seguros and provide strategic insights IN ENGLISH:
         
         Data Summary:
         {json.dumps(data_summary, indent=2)}
         
-        Please provide:
+        Please provide your analysis in English with:
         1. **Executive Summary**: 2-3 key takeaways
         2. **Growth Analysis**: Is the business healthy? Growing? Declining?
         3. **Seasonal Patterns**: Which months/quarters drive the business?
@@ -315,6 +315,7 @@ class ComparativeAnalyzer:
         
         Focus on actionable insights that would help management make decisions.
         Be specific with numbers and percentages.
+        IMPORTANT: Respond entirely in English, not Portuguese.
         """
         
         try:
@@ -413,20 +414,21 @@ class ComparativeAnalyzer:
         revenue2 = data2.get('revenue', {}).get('ANNUAL', 0)
         
         prompt = f"""
-        Compare these two financial periods and explain the changes:
+        Compare these two financial periods and explain the changes IN ENGLISH:
         
         {name1}: Revenue: R$ {revenue1:,.2f}
         {name2}: Revenue: R$ {revenue2:,.2f}
         
         Monthly changes: {self._monthly_comparison(data1, data2)}
         
-        Provide:
+        Provide your analysis in English with:
         1. What changed and why (be specific)
         2. Which months drove the change
         3. What this means for the business
         4. Recommended actions
         
         Keep it concise and actionable.
+        IMPORTANT: Respond entirely in English, not Portuguese.
         """
         
         try:

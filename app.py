@@ -378,7 +378,7 @@ with st.sidebar:
         "Gemini API Key",
         type="password",
         value=os.getenv("GEMINI_API_KEY", ""),
-        help="Insira sua chave API do Google Gemini"
+        help="Enter your Google Gemini API key"
     )
     
     # Language selection
@@ -797,32 +797,6 @@ with tab2:
                     (monthly_df['month_num'].isin(selected_month_nums))
                 ]
                 
-                # Debug monthly data availability
-                if st.checkbox("Debug dados mensais", key="debug_monthly"):
-                    st.success(f"✅ Dados mensais carregados! Shape: {monthly_df.shape}")
-                    st.info(f"Colunas disponíveis: {monthly_df.columns.tolist()}")
-                    st.info(f"Anos disponíveis: {sorted(monthly_df['year'].unique())}")
-                    st.info(f"Dados filtrados: {len(display_df)} registros")
-                    
-                    # Check if critical columns are missing
-                    required_cols = ['variable_costs', 'fixed_costs', 'net_profit', 'profit_margin']
-                    missing_cols = [col for col in required_cols if col not in monthly_df.columns]
-                    if missing_cols:
-                        st.error(f"❌ Colunas ausentes: {missing_cols}")
-                        st.info("🔄 Clique no botão 'Forçar recarregar dados mensais' acima para corrigir")
-                    else:
-                        st.success("✅ Todas as colunas necessárias estão presentes")
-                    
-                    if display_df.empty:
-                        st.warning("⚠️ Nenhum dado encontrado para os filtros selecionados")
-                        st.info(f"Anos selecionados: {selected_years}")
-                        st.info(f"Meses selecionados: {selected_months}")
-                        st.info(f"Anos únicos nos dados: {sorted(monthly_df['year'].unique())}")
-                        st.info(f"Meses únicos nos dados: {sorted(monthly_df['month_num'].unique()) if 'month_num' in monthly_df.columns else 'month_num não encontrado'}")
-                    
-                    # Show sample data
-                    st.write("**Sample data:**")
-                    st.dataframe(monthly_df.head())
         elif view_type == "Trimestral":
             if not hasattr(st.session_state, 'monthly_data') or st.session_state.monthly_data is None or st.session_state.monthly_data.empty:
                 st.warning("📋 Dados mensais não disponíveis para visualização trimestral. Mostrando visualização anual.")
@@ -1094,12 +1068,6 @@ with tab2:
                     summary['years_range']
                 )
         
-        # Debug display_df
-        if view_type == "Mensal":
-            st.info(f"🔍 Debug display_df: {len(display_df)} registros, empty: {display_df.empty}")
-            if not display_df.empty:
-                st.info(f"Colunas: {display_df.columns.tolist()}")
-                st.info(f"Receita total: {display_df['revenue'].sum() if 'revenue' in display_df.columns else 'Coluna revenue não encontrada'}")
         
         # Revenue Evolution Chart
         st.subheader("📈 Evolução da Receita")
@@ -1409,123 +1377,113 @@ with tab2:
             # Create stacked bar chart with improved styling
             fig_cost_structure = go.Figure()
             
-            # Add costs bars with better colors and formatting
+            # Calculate percentages of revenue for better visualization
+            display_df['var_cost_pct'] = (display_df['variable_costs'] / display_df['revenue'] * 100).fillna(0)
+            display_df['fixed_cost_pct'] = (display_df['fixed_costs'] / display_df['revenue'] * 100).fillna(0)
+            display_df['profit_pct'] = (display_df['profit'] / display_df['revenue'] * 100).fillna(0)
+            
+            # Add variable costs bar (as percentage)
             fig_cost_structure.add_trace(go.Bar(
                 name='Custos Variáveis',
                 x=display_df[x_col],
-                y=display_df['variable_costs'],
-                text=display_df['variable_costs'].apply(lambda x: format_currency(x).replace('R$ ', '')),
+                y=display_df['var_cost_pct'],
+                text=display_df['var_cost_pct'].apply(lambda x: f"{x:.1f}%"),
                 textposition='inside',
-                textfont=dict(color='white', size=11),
+                textfont=dict(color='white', size=11, weight='bold'),
                 marker=dict(
                     color='#6366F1',  # Modern purple/indigo for variable costs
                     line=dict(color='#4F46E5', width=1)
                 ),
                 hovertemplate='<b>Custos Variáveis</b><br>' +
-                             'Valor: R$ %{y:,.0f}<br>' +
-                             '<extra></extra>'
+                             'Percentual: %{y:.1f}%<br>' +
+                             'Valor: R$ %{customdata[0]:,.0f}<br>' +
+                             '<b>Receita Total: R$ %{customdata[1]:,.0f}</b><br>' +
+                             '<extra></extra>',
+                customdata=list(zip(display_df['variable_costs'], display_df['revenue']))
             ))
             
+            # Add fixed costs bar (as percentage)
             fig_cost_structure.add_trace(go.Bar(
                 name='Custos Fixos',
                 x=display_df[x_col],
-                y=display_df['fixed_costs'],
-                text=display_df['fixed_costs'].apply(lambda x: format_currency(x).replace('R$ ', '')),
+                y=display_df['fixed_cost_pct'],
+                text=display_df['fixed_cost_pct'].apply(lambda x: f"{x:.1f}%"),
                 textposition='inside',
-                textfont=dict(color='white', size=11),
+                textfont=dict(color='white', size=11, weight='bold'),
                 marker=dict(
                     color='#F59E0B',  # Professional amber for fixed costs
                     line=dict(color='#D97706', width=1)
                 ),
                 hovertemplate='<b>Custos Fixos</b><br>' +
-                             'Valor: R$ %{y:,.0f}<br>' +
-                             '<extra></extra>'
+                             'Percentual: %{y:.1f}%<br>' +
+                             'Valor: R$ %{customdata[0]:,.0f}<br>' +
+                             '<b>Receita Total: R$ %{customdata[1]:,.0f}</b><br>' +
+                             '<extra></extra>',
+                customdata=list(zip(display_df['fixed_costs'], display_df['revenue']))
             ))
             
-            # Add revenue line with markers
-            fig_cost_structure.add_trace(go.Scatter(
-                name='Receita',
+            # Add profit margin bar
+            fig_cost_structure.add_trace(go.Bar(
+                name='Margem de Lucro',
                 x=display_df[x_col],
-                y=display_df['revenue'],
-                mode='lines+markers+text',
-                text=display_df['revenue'].apply(lambda x: format_currency(x)),
-                textposition='top center',
-                textfont=dict(color='#047857', size=10, weight='bold'),
-                line=dict(color='#10B981', width=4),
-                marker=dict(size=10, color='#10B981', line=dict(color='#047857', width=2)),
-                yaxis='y2',
-                hovertemplate='<b>Receita</b><br>' +
-                             'Valor: R$ %{y:,.0f}<br>' +
-                             '<extra></extra>'
+                y=display_df['profit_pct'],
+                text=display_df['profit_pct'].apply(lambda x: f"{x:.1f}%"),
+                textposition='inside',
+                textfont=dict(color='white', size=11, weight='bold'),
+                marker=dict(
+                    color='#10B981',  # Green for profit
+                    line=dict(color='#047857', width=1)
+                ),
+                hovertemplate='<b>Margem de Lucro</b><br>' +
+                             'Percentual: %{y:.1f}%<br>' +
+                             'Valor: R$ %{customdata[0]:,.0f}<br>' +
+                             '<b>Receita Total: R$ %{customdata[1]:,.0f}</b><br>' +
+                             '<extra></extra>',
+                customdata=list(zip(display_df['profit'], display_df['revenue']))
             ))
             
-            # Add profit margin annotations with improved positioning
-            max_revenue = display_df['revenue'].max()
-            for idx, row in display_df.iterrows():
-                margin = (row['profit'] / row['revenue'] * 100) if row['revenue'] > 0 else 0
-                
-                # Use consistent green color for all positive margins
-                # Position labels well above the revenue line with arrows
-                y_position = row['revenue'] + (max_revenue * 0.15)  # 15% above revenue line
-                
-                fig_cost_structure.add_annotation(
-                    x=row[x_col],
-                    y=y_position,
-                    text=f"<b>{margin:.1f}%</b>",
-                    showarrow=True,
-                    arrowhead=2,
-                    arrowsize=1,
-                    arrowwidth=2,
-                    arrowcolor='#059669',  # Darker green for arrow
-                    ax=0,
-                    ay=-40,  # Longer arrow
-                    font=dict(size=14, color='#059669', weight='bold'),  # Larger, darker green text
-                    bgcolor='#D1FAE5',  # Light green background
-                    bordercolor='#059669',  # Dark green border
-                    borderwidth=2,
-                    borderpad=8,  # More padding
-                    yref='y2'  # Reference the revenue axis
-                )
+            # Add 100% reference line
+            fig_cost_structure.add_hline(
+                y=100, 
+                line_dash="dot", 
+                line_color="#6B7280",
+                annotation_text="100% da Receita",
+                annotation_position="top right",
+                annotation_font=dict(size=12, color="#6B7280")
+            )
+            
+            # Clean x-axis labels with just periods (revenue moved to hover)
             
             
-            # Update layout with improved styling
+            # Update layout with single y-axis for percentages
             fig_cost_structure.update_layout(
                 title={
-                    'text': '💰 Estrutura de Custos vs Receita',
+                    'text': '💰 Estrutura de Custos vs Receita (% da Receita)',
                     'font': {'size': 24, 'color': '#1F2937'}
                 },
                 barmode='stack',
                 yaxis=dict(
                     title=dict(
-                        text="Custos (R$)",
+                        text="Percentual da Receita (%)",
                         font=dict(size=16, color='#1F2937', weight='bold')
                     ),
-                    side='left',
-                    tickformat=',.0f',
+                    tickformat='.1f',
+                    ticksuffix='%',
                     tickfont=dict(size=12, color='#374151'),
                     showgrid=True,
-                    gridcolor='rgba(0,0,0,0.1)'
-                ),
-                yaxis2=dict(
-                    title=dict(
-                        text="Receita (R$)",
-                        font=dict(size=16, color='#047857', weight='bold')
-                    ),
-                    overlaying='y',
-                    side='right',
-                    tickformat=',.0f',
-                    tickfont=dict(size=12, color='#047857'),
-                    showgrid=False
+                    gridcolor='rgba(0,0,0,0.1)',
+                    range=[0, 100]
                 ),
                 xaxis=dict(
                     title=dict(
                         text=x_title,
                         font=dict(size=16, color='#1F2937', weight='bold')
                     ),
-                    tickfont=dict(size=14, color='#374151'),
-                    showgrid=False
+                    tickfont=dict(size=12, color='#374151'),
+                    showgrid=False,
+                    tickangle=-90  # Vertical labels to prevent overlap
                 ),
-                height=600,
+                height=600,  # Standard height for all views
                 hovermode='x unified',
                 plot_bgcolor='rgba(248,249,250,0.8)',
                 paper_bgcolor='white',
@@ -1540,7 +1498,7 @@ with tab2:
                     borderwidth=1,
                     font=dict(size=14, color='#374151', weight='bold')
                 ),
-                margin=dict(t=100, b=50)
+                margin=dict(t=120, b=50)
             )
             
             # Add shapes for visual appeal
@@ -1606,7 +1564,7 @@ with tab2:
             st.dataframe(display_df, use_container_width=True)
     
     else:
-        st.info("👆 Por favor, faça upload dos arquivos na aba 'Upload' primeiro.")
+        st.info("👆 Please upload files in the 'Upload' tab first.")
 
 # Tab 3: Detailed Breakdown (only for flexible mode)
 if use_flexible_extractor:
@@ -1820,7 +1778,7 @@ if use_flexible_extractor:
                     )
             
         else:
-            st.info("👆 Por favor, faça upload dos arquivos na aba 'Upload' primeiro.")
+            st.info("👆 Please upload files in the 'Upload' tab first.")
 
 # Tab 3/4: AI Insights
 tab_ai = tab4 if use_flexible_extractor else tab3
@@ -1832,8 +1790,8 @@ with tab_ai:
         st.session_state.extracted_data = db.load_all_financial_data()
     
     if hasattr(st.session_state, 'processed_data') and st.session_state.processed_data is not None and gemini_api_key:
-        if st.button("Gerar Insights com IA", type="primary"):
-            with st.spinner("Analisando dados com Gemini..."):
+        if st.button("🤖 Generate AI Business Insights", type="primary"):
+            with st.spinner("Analyzing data with AI... Please wait..."):
                 try:
                     # Configure Gemini
                     genai.configure(api_key=gemini_api_key)
@@ -1852,50 +1810,160 @@ with tab_ai:
                             all_categories.update(year_data['categories'].keys())
                             all_items.update(item['label'] for item in year_data['line_items'].values())
                         
-                        flexible_summary = f"\n\nCategorias detectadas: {len(all_categories)}\nTotal de linhas de dados: {len(all_items)}"
+                        flexible_summary = f"\n\nDetected categories: {len(all_categories)}\nTotal data lines: {len(all_items)}"
                     
-                    # Create prompt
+                    # Create prompt with language instruction based on user selection
+                    if language == "Português":
+                        language_instruction = "INSTRUÇÃO CRÍTICA: Você DEVE responder inteiramente em português brasileiro. NÃO use palavras ou frases em inglês."
+                        analysis_request = "Por favor, analise os seguintes dados financeiros da Marine Seguros e forneça insights detalhados de negócios:"
+                    else:
+                        language_instruction = "CRITICAL INSTRUCTION: You MUST respond entirely in English. Do NOT use Portuguese words or phrases."
+                        analysis_request = "Please analyze the following financial data from Marine Seguros and provide detailed business insights:"
+                    
                     prompt = f"""
-                    Analise os seguintes dados financeiros da Marine Seguros e forneça insights detalhados em {language}:
+                    {language_instruction}
                     
-                    Dados Resumidos:
-                    - Período: {summary['years_range']}
-                    - Receita Total: R$ {summary['metrics'].get('revenue', {}).get('total', 0):,.2f}
-                    - CAGR da Receita: {summary['metrics'].get('revenue', {}).get('cagr', 0):.1f}%
-                    - Margem de Lucro Média: {summary['metrics'].get('profit_margin', {}).get('average', 0):.1f}%
+                    {analysis_request}
+                    
+                    Summary Data:
+                    - Period: {summary['years_range']}
+                    - Total Revenue: R$ {summary['metrics'].get('revenue', {}).get('total', 0):,.2f}
+                    - Revenue CAGR: {summary['metrics'].get('revenue', {}).get('cagr', 0):.1f}%
+                    - Average Profit Margin: {summary['metrics'].get('profit_margin', {}).get('average', 0):.1f}%
                     {flexible_summary}
                     
-                    Dados Anuais:
+                    Annual Data:
                     {df.to_string()}
                     
-                    Por favor, forneça:
-                    1. Análise de tendências principais
-                    2. Pontos fortes do desempenho financeiro
-                    3. Áreas de preocupação ou risco
-                    4. Recomendações estratégicas{' para novas categorias de despesas detectadas' if hasattr(st.session_state, 'flexible_data') and st.session_state.flexible_data else ''}
-                    5. Previsões para os próximos anos
+                    {
+                        "Por favor, forneça uma análise abrangente cobrindo:" if language == "Português" else "Please provide a comprehensive analysis covering:"
+                    }
+                    {
+                        '''1. **Análise das Principais Tendências Financeiras**
+                    2. **Pontos Fortes de Performance & Vantagens Competitivas**
+                    3. **Áreas de Risco & Preocupações**
+                    4. **Recomendações Estratégicas**''' + (' para categorias de despesas recém-detectadas' if hasattr(st.session_state, 'flexible_data') and st.session_state.flexible_data else '') + '''
+                    5. **Previsões Futuras & Perspectivas de Mercado**
                     
-                    Formato: Use markdown com títulos claros e bullet points.
+                    Requisitos de Formato:
+                    - Use markdown com títulos claros (##) e subtítulos (###)
+                    - Inclua marcadores para análise detalhada
+                    - Use **negrito** para métricas-chave e pontos importantes
+                    - Assegure linguagem profissional de negócios em português brasileiro apenas''' if language == "Português" else '''1. **Main Financial Trends Analysis**
+                    2. **Performance Strengths & Competitive Advantages**
+                    3. **Risk Areas & Concerns**
+                    4. **Strategic Recommendations**''' + (' for newly detected expense categories' if hasattr(st.session_state, 'flexible_data') and st.session_state.flexible_data else '') + '''
+                    5. **Future Predictions & Market Outlook**
+                    
+                    Format Requirements:
+                    - Use markdown with clear headings (##) and subheadings (###)
+                    - Include bullet points for detailed analysis
+                    - Use **bold** for key metrics and important points
+                    - Ensure professional business language in English only'''
+                    }
                     """
                     
                     # Generate insights
                     response = model.generate_content(prompt)
-                    st.session_state.gemini_insights = response.text
+                    insights_text = response.text
+                    
+                    # Language validation - only check if English is selected
+                    if language == "English" and any(word in insights_text.lower() for word in ['receita', 'lucro', 'despesas', 'vendas', 'análise']):
+                        # If Portuguese words detected when English is selected, add reminder
+                        english_reminder_prompt = f"""
+                        CRITICAL: The following text appears to contain Portuguese words. Please translate this ENTIRE analysis to English and ensure all content is in English only:
+                        
+                        {insights_text}
+                        
+                        Requirements:
+                        - Translate everything to English
+                        - Maintain the same structure and insights
+                        - Use business terminology
+                        - Keep all formatting and markdown
+                        """
+                        response = model.generate_content(english_reminder_prompt)
+                        insights_text = response.text
+                    
+                    st.session_state.gemini_insights = insights_text
                     
                 except Exception as e:
-                    st.error(f"Erro ao gerar insights: {str(e)}")
+                    st.error(f"Error generating AI insights: {str(e)}")
         
-        # Display insights
+        # Display insights with enhanced styling
         if hasattr(st.session_state, 'gemini_insights') and st.session_state.gemini_insights:
-            st.markdown(st.session_state.gemini_insights)
+            # Create a styled container for the insights
+            st.markdown("### 🧠 AI Business Insights")
+            st.markdown("---")
             
-            # Export insights button
-            st.download_button(
-                label="📥 Baixar Insights",
-                data=st.session_state.gemini_insights,
-                file_name=f"insights_marine_seguros_{datetime.now().strftime('%Y%m%d')}.md",
-                mime="text/markdown"
-            )
+            # Apply custom CSS for better formatting
+            st.markdown("""
+            <style>
+            .insights-container {
+                background: #f8f9fa;
+                padding: 20px;
+                border-radius: 10px;
+                border-left: 4px solid #0066cc;
+                margin: 20px 0;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }
+            .insights-content {
+                font-family: 'Segoe UI', Arial, sans-serif;
+                line-height: 1.8;
+                color: #333;
+            }
+            .insights-content h2 {
+                color: #0066cc;
+                margin-top: 25px;
+                margin-bottom: 15px;
+                border-bottom: 2px solid #e9ecef;
+                padding-bottom: 8px;
+            }
+            .insights-content h3 {
+                color: #0d47a1;
+                margin-top: 20px;
+                margin-bottom: 12px;
+            }
+            .insights-content ul, .insights-content ol {
+                margin: 15px 0;
+                padding-left: 25px;
+            }
+            .insights-content li {
+                margin: 8px 0;
+            }
+            .insights-content strong {
+                color: #1565c0;
+                font-weight: 600;
+            }
+            .insights-content p {
+                margin: 12px 0;
+                text-align: justify;
+            }
+            </style>
+            """, unsafe_allow_html=True)
+            
+            # Display insights in styled container
+            with st.container():
+                st.markdown(f"""
+                <div class="insights-container">
+                    <div class="insights-content">
+                        {st.session_state.gemini_insights}
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            # Add spacing
+            st.markdown("<br>", unsafe_allow_html=True)
+            
+            # Export insights button with improved styling
+            col1, col2, col3 = st.columns([1, 2, 1])
+            with col2:
+                st.download_button(
+                    label="📥 Download AI Insights Report",
+                    data=st.session_state.gemini_insights,
+                    file_name=f"ai_insights_marine_seguros_{datetime.now().strftime('%Y%m%d')}.md",
+                    mime="text/markdown",
+                    help="Download the complete AI analysis as a markdown file"
+                )
         
         # Separator
         st.markdown("---")
@@ -2030,9 +2098,9 @@ with tab_ai:
             st.info("📊 Processe os dados primeiro para habilitar a análise comparativa.")
     else:
         if not gemini_api_key:
-            st.warning("⚠️ Por favor, insira sua chave API do Gemini na barra lateral.")
+            st.warning("⚠️ Please enter your Gemini API key in the sidebar.")
         else:
-            st.info("👆 Por favor, faça upload dos arquivos primeiro.")
+            st.info("👆 Please upload files first.")
 
 # Tab 4/5: AI Chat
 tab_chat = tab5 if use_flexible_extractor else tab4
@@ -2109,9 +2177,9 @@ with tab_chat:
         )
     else:
         if not gemini_api_key:
-            st.warning("⚠️ Por favor, insira sua chave API do Gemini na barra lateral.")
+            st.warning("⚠️ Please enter your Gemini API key in the sidebar.")
         else:
-            st.info("👆 Por favor, faça upload dos arquivos primeiro.")
+            st.info("👆 Please upload files first.")
 
 # Tab 5/6: Predictions
 tab_pred = tab6 if use_flexible_extractor else tab5
@@ -2225,7 +2293,7 @@ with tab_pred:
         else:
             st.warning("Dados de receita não encontrados para fazer previsões.")
     else:
-        st.info("👆 Por favor, faça upload dos arquivos primeiro.")
+        st.info("👆 Please upload files first.")
 
 # Tab 6/7: Integration
 tab_int = tab7 if use_flexible_extractor else tab6
