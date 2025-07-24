@@ -14,6 +14,7 @@ from gerenciador_arquivos import GerenciadorArquivos
 from ai_chat_assistant import AIChatAssistant
 from database_manager import DatabaseManager
 from core.direct_extractor import DirectDataExtractor
+from comparative_analyzer import ComparativeAnalyzer
 
 # Load environment variables
 load_dotenv()
@@ -86,14 +87,29 @@ def convert_extracted_to_processed(extracted_data):
             else:
                 margin = 0
             
+            # Extract fixed_costs and operational_costs properly
+            fixed_costs_data = year_data.get('fixed_costs', 0)
+            operational_costs_data = year_data.get('operational_costs', 0)
+            
+            # If it's a dictionary, get the ANNUAL value
+            if isinstance(fixed_costs_data, dict):
+                fixed_costs = fixed_costs_data.get('ANNUAL', 0)
+            else:
+                fixed_costs = fixed_costs_data
+                
+            if isinstance(operational_costs_data, dict):
+                operational_costs = operational_costs_data.get('ANNUAL', 0)
+            else:
+                operational_costs = operational_costs_data
+            
             consolidated_data.append({
                 'year': int(year),
                 'revenue': revenue,
                 'variable_costs': costs,
                 'gross_profit': revenue - costs,
                 'gross_margin': margin,
-                'fixed_costs': year_data.get('fixed_costs', 0),
-                'operational_costs': year_data.get('operational_costs', 0)
+                'fixed_costs': fixed_costs,
+                'operational_costs': operational_costs
             })
         
         if consolidated_data:
@@ -241,7 +257,15 @@ if data_loaded and hasattr(st.session_state, 'extracted_data') and st.session_st
 # Helper functions
 def format_currency(value):
     """Format value as Brazilian currency"""
-    return f"R$ {value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    if abs(value) >= 1_000_000:
+        # For millions, show 1 decimal place and 'M' suffix
+        return f"R$ {value/1_000_000:,.1f}M".replace(",", "X").replace(".", ",").replace("X", ".")
+    elif abs(value) >= 1_000:
+        # For thousands, show as full number with thousands separator
+        return f"R$ {value:,.0f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    else:
+        # For smaller amounts, show 2 decimal places
+        return f"R$ {value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 def calculate_percentage_change(old_value, new_value):
     """Calculate percentage change between two values"""
@@ -369,7 +393,7 @@ with st.sidebar:
         "Gemini API Key",
         type="password",
         value=os.getenv("GEMINI_API_KEY", ""),
-        help="Insira sua chave API do Google Gemini"
+        help="Enter your Google Gemini API key"
     )
     
     # Language selection
@@ -544,8 +568,8 @@ with tab1:
                     consolidated_df, flexible_data = processor.consolidate_all_years_flexible(excel_data)
                     st.session_state.flexible_data = flexible_data
                 else:
-                    # Use standard extractor
-                    consolidated_df = processor.consolidate_all_years(excel_data)
+                    # Use standard extractor - now returns both DataFrame and extracted data
+                    consolidated_df, extracted_financial_data = processor.consolidate_all_years(excel_data)
                     st.session_state.flexible_data = None
                 
                 # Check if data extraction was successful
@@ -565,9 +589,9 @@ with tab1:
                     # Get monthly data
                     monthly_df = processor.get_monthly_data(excel_data)
                     
-                    # Store in session state
+                    # Store in session state with the CORRECT extracted data
                     st.session_state.processed_data = {
-                        'raw_data': excel_data,
+                        'raw_data': extracted_financial_data if not use_flexible_extractor else excel_data,
                         'consolidated': consolidated_df,
                         'summary': processor.get_financial_summary(consolidated_df),
                         'anomalies': processor.detect_anomalies(consolidated_df) if show_anomalies else []
@@ -617,24 +641,6 @@ with tab2:
         df = data.get('consolidated', pd.DataFrame())
         summary = data.get('summary', {})
         
-        # Debug section - always show current status
-        with st.expander("🔍 Status dos Dados", expanded=False):
-            st.write(f"**Dados consolidados:** {len(df)} registros")
-            st.write(f"**Dados mensais disponíveis:** {hasattr(st.session_state, 'monthly_data') and st.session_state.monthly_data is not None and not st.session_state.monthly_data.empty}")
-            if hasattr(st.session_state, 'monthly_data') and st.session_state.monthly_data is not None:
-                st.write(f"**Registros mensais:** {len(st.session_state.monthly_data)}")
-            st.write(f"**Dados brutos disponíveis:** {'raw_data' in data}")
-            
-            if st.button("🔄 Forçar recarregar dados mensais"):
-                if 'raw_data' in data:
-                    with st.spinner("Recarregando dados mensais..."):
-                        processor = FinancialProcessor()
-                        monthly_data = processor.get_monthly_data(data['raw_data'])
-                        st.session_state.monthly_data = monthly_data
-                        st.success(f"✅ Dados mensais recarregados: {len(monthly_data)} registros")
-                        st.rerun()
-                else:
-                    st.error("❌ Dados brutos não disponíveis")
         
         # Ensure monthly data is available and has all required columns
         required_monthly_cols = ['variable_costs', 'fixed_costs', 'net_profit', 'profit_margin']
@@ -646,39 +652,42 @@ with tab2:
         )
         
         if monthly_data_invalid:
-            if 'raw_data' in data:
-                # Regenerate monthly data from raw data
-                with st.spinner("Carregando dados mensais..."):
-                    try:
-                        processor = FinancialProcessor()
-                        st.info(f"🔍 Processando {len(data['raw_data'])} arquivos para dados mensais...")
-                        monthly_data = processor.get_monthly_data(data['raw_data'])
-                        
-                        if monthly_data.empty:
-                            st.error("❌ Não foi possível carregar dados mensais dos arquivos.")
-                            st.warning("Possíveis causas:")
-                            st.write("- Arquivos Excel não contêm dados mensais (colunas JAN, FEV, MAR, etc.)")
-                            st.write("- Formato dos dados não foi reconhecido")
-                            st.write("- Dados mensais não foram extraídos corretamente")
-                            
-                            # Show raw data structure for debugging
-                            if st.checkbox("Mostrar estrutura dos dados brutos"):
-                                st.write("Arquivos disponíveis:")
-                                for filename in data['raw_data'].keys():
-                                    st.write(f"- {filename}")
-                        else:
-                            st.success(f"✅ Dados mensais carregados: {len(monthly_data)} registros")
-                            st.info(f"Colunas geradas: {monthly_data.columns.tolist()}")
-                        
-                        st.session_state.monthly_data = monthly_data
-                        
-                    except Exception as e:
-                        st.error(f"❌ Erro ao processar dados mensais: {str(e)}")
-                        import traceback
-                        if st.checkbox("Mostrar detalhes do erro"):
-                            st.code(traceback.format_exc())
-            else:
-                st.error("❌ Dados brutos não disponíveis para gerar dados mensais.")
+            # Extract monthly data from the known Excel files
+            try:
+                processor = FinancialProcessor()
+                
+                # Use the actual Excel files instead of the broken raw_data paths
+                excel_files = [
+                    "data/arquivos_enviados/Análise de Resultado Financeiro 2018_2023.xlsx",
+                    "data/arquivos_enviados/Resultado Financeiro - 2024.xlsx", 
+                    "data/arquivos_enviados/Resultado Financeiro - 2025.xlsx"
+                ]
+                
+                # Create a properly formatted excel_data dict with existing files
+                excel_data = {}
+                for file_path in excel_files:
+                    if os.path.exists(file_path):
+                        excel_data[file_path] = None  # The processor will handle the file reading
+                
+                if excel_data:
+                    monthly_data = processor.get_monthly_data(excel_data)
+                    
+                    if monthly_data.empty:
+                        st.error("❌ Failed to extract monthly data from Excel files")
+                    else:
+                        st.success(f"✅ Monthly data extracted: {len(monthly_data)} records from {len(excel_data)} files")
+                        st.info(f"Years covered: {sorted(monthly_data['year'].unique()) if 'year' in monthly_data.columns else 'Unknown'}")
+                    
+                    st.session_state.monthly_data = monthly_data
+                else:
+                    st.error("❌ No Excel files found for monthly data extraction")
+                    st.session_state.monthly_data = pd.DataFrame()
+                    
+            except Exception as e:
+                st.error(f"Error extracting monthly data: {str(e)}")
+                import traceback
+                st.code(traceback.format_exc())
+                st.session_state.monthly_data = pd.DataFrame()
         
         
         # Time Period Filters
@@ -803,32 +812,6 @@ with tab2:
                     (monthly_df['month_num'].isin(selected_month_nums))
                 ]
                 
-                # Debug monthly data availability
-                if st.checkbox("Debug dados mensais", key="debug_monthly"):
-                    st.success(f"✅ Dados mensais carregados! Shape: {monthly_df.shape}")
-                    st.info(f"Colunas disponíveis: {monthly_df.columns.tolist()}")
-                    st.info(f"Anos disponíveis: {sorted(monthly_df['year'].unique())}")
-                    st.info(f"Dados filtrados: {len(display_df)} registros")
-                    
-                    # Check if critical columns are missing
-                    required_cols = ['variable_costs', 'fixed_costs', 'net_profit', 'profit_margin']
-                    missing_cols = [col for col in required_cols if col not in monthly_df.columns]
-                    if missing_cols:
-                        st.error(f"❌ Colunas ausentes: {missing_cols}")
-                        st.info("🔄 Clique no botão 'Forçar recarregar dados mensais' acima para corrigir")
-                    else:
-                        st.success("✅ Todas as colunas necessárias estão presentes")
-                    
-                    if display_df.empty:
-                        st.warning("⚠️ Nenhum dado encontrado para os filtros selecionados")
-                        st.info(f"Anos selecionados: {selected_years}")
-                        st.info(f"Meses selecionados: {selected_months}")
-                        st.info(f"Anos únicos nos dados: {sorted(monthly_df['year'].unique())}")
-                        st.info(f"Meses únicos nos dados: {sorted(monthly_df['month_num'].unique()) if 'month_num' in monthly_df.columns else 'month_num não encontrado'}")
-                    
-                    # Show sample data
-                    st.write("**Sample data:**")
-                    st.dataframe(monthly_df.head())
         elif view_type == "Trimestral":
             if not hasattr(st.session_state, 'monthly_data') or st.session_state.monthly_data is None or st.session_state.monthly_data.empty:
                 st.warning("📋 Dados mensais não disponíveis para visualização trimestral. Mostrando visualização anual.")
@@ -978,7 +961,17 @@ with tab2:
                 display_df['period'] = display_df.apply(lambda x: f"{int(x['year'])}-S{int(x['semester'])}", axis=1)
         else:
             # Default to annual view if monthly data not available
-            display_df = df[df['year'].isin(selected_years)]
+            display_df = df[df['year'].isin(selected_years)].copy()
+            
+            # Ensure all numeric columns contain only numeric values (not dicts)
+            numeric_cols = ['revenue', 'variable_costs', 'fixed_costs', 'operational_costs', 
+                          'gross_profit', 'net_profit', 'contribution_margin']
+            for col in numeric_cols:
+                if col in display_df.columns:
+                    # Convert any dict values to numbers
+                    display_df[col] = display_df[col].apply(
+                        lambda x: x.get('ANNUAL', 0) if isinstance(x, dict) else x
+                    )
         
         # Debug: Show what data is being displayed
         if not display_df.empty:
@@ -996,22 +989,17 @@ with tab2:
         # Key metrics - Calculate based on filtered data
         col1, col2, col3, col4 = st.columns(4)
         
-        # Debug info for profit calculation
-        if st.checkbox("🔍 Debug cálculo de lucro", key="debug_profit_calc"):
-            st.write("### Colunas disponíveis em display_df:")
-            st.write(display_df.columns.tolist())
-            if not display_df.empty:
-                st.write("### Amostra dos dados (primeiro ano):")
-                first_row = display_df.iloc[0]
-                for col in ['revenue', 'variable_costs', 'gross_profit', 'fixed_costs', 'operational_costs', 'net_profit', 'profit_margin']:
-                    if col in display_df.columns:
-                        st.write(f"- {col}: {first_row[col]:,.2f}")
-                    else:
-                        st.write(f"- {col}: NÃO ENCONTRADO")
         
         # Calculate net_profit if missing
         if 'net_profit' not in display_df.columns and not display_df.empty:
             display_df = display_df.copy()
+            
+            # Ensure all numeric columns are actually numeric (not dicts)
+            for col in ['revenue', 'variable_costs', 'fixed_costs', 'operational_costs']:
+                if col in display_df.columns:
+                    display_df[col] = display_df[col].apply(
+                        lambda x: x.get('ANNUAL', 0) if isinstance(x, dict) else x
+                    )
             
             # Check if operational_costs exists and has values
             if 'operational_costs' in display_df.columns:
@@ -1034,9 +1022,31 @@ with tab2:
         
         # Calculate metrics from filtered display_df
         total_revenue = display_df['revenue'].sum() if 'revenue' in display_df.columns and not display_df.empty else 0
-        total_profit = display_df['net_profit'].sum() if 'net_profit' in display_df.columns and not display_df.empty else 0
-        avg_profit = display_df['net_profit'].mean() if 'net_profit' in display_df.columns and not display_df.empty else 0
-        avg_margin = display_df['profit_margin'].mean() if 'profit_margin' in display_df.columns and not display_df.empty else 0
+        
+        # Use existing profit data from the DataFrame
+        if not display_df.empty:
+            # Debug: Check data types and convert dicts to numbers
+            numeric_cols = ['revenue', 'variable_costs', 'fixed_costs', 'net_profit', 'profit_margin']
+            for col in numeric_cols:
+                if col in display_df.columns:
+                    # Check if any values are dicts
+                    has_dicts = display_df[col].apply(lambda x: isinstance(x, dict)).any()
+                    if has_dicts:
+                        # Convert dict values to numbers (using ANNUAL key if available)
+                        display_df[col] = display_df[col].apply(
+                            lambda x: x.get('ANNUAL', 0) if isinstance(x, dict) else x
+                        )
+            
+            # Use the existing net_profit and profit_margin from the data
+            total_profit = display_df['net_profit'].sum() if 'net_profit' in display_df.columns else 0
+            avg_profit = display_df['net_profit'].mean() if 'net_profit' in display_df.columns else 0
+            avg_margin = display_df['profit_margin'].mean() if 'profit_margin' in display_df.columns else 0
+            
+        else:
+            # Fallback to DataFrame values if we can't calculate
+            total_profit = display_df['net_profit'].sum() if 'net_profit' in display_df.columns and not display_df.empty else 0
+            avg_profit = display_df['net_profit'].mean() if 'net_profit' in display_df.columns and not display_df.empty else 0
+            avg_margin = display_df['profit_margin'].mean() if 'profit_margin' in display_df.columns and not display_df.empty else 0
         
         # For period views, show period count
         period_label = f"{len(display_df)} {'meses' if view_type == 'Mensal' else 'períodos'}" if view_type != 'Anual' else f"{summary['metrics'].get('revenue', {}).get('cagr', 0):.1f}% CAGR"
@@ -1049,18 +1059,28 @@ with tab2:
             )
         
         with col2:
+            # For yearly view, show total profit and clarify it's total across all years
+            if view_type == "Anual":
+                profit_label = "Lucro Total (Todos os Anos)"
+                profit_value = total_profit
+                profit_delta = f"Média anual: {format_currency(avg_profit)}"
+            else:
+                profit_label = "Lucro Total"
+                profit_value = total_profit
+                profit_delta = f"{(total_profit / total_revenue * 100) if total_revenue > 0 else 0:.1f}% da receita"
+            
             st.metric(
-                "Lucro Total" if view_type != "Anual" else "Lucro Médio",
-                format_currency(total_profit if view_type != "Anual" else avg_profit),
-                f"{(total_profit / total_revenue * 100) if total_revenue > 0 else 0:.1f}% da receita"
+                profit_label,
+                format_currency(profit_value),
+                profit_delta
             )
         
         with col3:
             margin_range = display_df['profit_margin'].max() - display_df['profit_margin'].min() if 'profit_margin' in display_df.columns and not display_df.empty else 0
             st.metric(
                 "Margem de Lucro Média",
-                f"{avg_margin:.1f}%",
-                f"{margin_range:.1f}pp variação"
+                f"{avg_margin:.2f}%",
+                f"{margin_range:.2f}pp variação"
             )
         
         with col4:
@@ -1081,12 +1101,6 @@ with tab2:
                     summary['years_range']
                 )
         
-        # Debug display_df
-        if view_type == "Mensal":
-            st.info(f"🔍 Debug display_df: {len(display_df)} registros, empty: {display_df.empty}")
-            if not display_df.empty:
-                st.info(f"Colunas: {display_df.columns.tolist()}")
-                st.info(f"Receita total: {display_df['revenue'].sum() if 'revenue' in display_df.columns else 'Coluna revenue não encontrada'}")
         
         # Revenue Evolution Chart
         st.subheader("📈 Evolução da Receita")
@@ -1160,11 +1174,11 @@ with tab2:
             if view_type == "Mensal" and len(display_df) > 20:
                 fig_margin.update_traces(
                     texttemplate='',
-                    hovertemplate='<b>%{x}</b><br>Margem de Lucro: %{y:.1f}%<extra></extra>'
+                    hovertemplate='<b>%{x}</b><br>Margem de Lucro: %{y:.2f}%<extra></extra>'
                 )
             else:
                 fig_margin.update_traces(
-                    text=display_df['profit_margin'].apply(lambda x: f'{x:.1f}%'),
+                    text=display_df['profit_margin'].apply(lambda x: f'{x:.2f}%'),
                     textposition='outside'
                 )
             
@@ -1396,123 +1410,113 @@ with tab2:
             # Create stacked bar chart with improved styling
             fig_cost_structure = go.Figure()
             
-            # Add costs bars with better colors and formatting
+            # Calculate percentages of revenue for better visualization
+            display_df['var_cost_pct'] = (display_df['variable_costs'] / display_df['revenue'] * 100).fillna(0)
+            display_df['fixed_cost_pct'] = (display_df['fixed_costs'] / display_df['revenue'] * 100).fillna(0)
+            display_df['profit_pct'] = (display_df['profit'] / display_df['revenue'] * 100).fillna(0)
+            
+            # Add variable costs bar (as percentage)
             fig_cost_structure.add_trace(go.Bar(
                 name='Custos Variáveis',
                 x=display_df[x_col],
-                y=display_df['variable_costs'],
-                text=display_df['variable_costs'].apply(lambda x: format_currency(x).replace('R$ ', '')),
+                y=display_df['var_cost_pct'],
+                text=display_df['var_cost_pct'].apply(lambda x: f"{x:.2f}%"),
                 textposition='inside',
-                textfont=dict(color='white', size=11),
+                textfont=dict(color='white', size=11, weight='bold'),
                 marker=dict(
                     color='#6366F1',  # Modern purple/indigo for variable costs
                     line=dict(color='#4F46E5', width=1)
                 ),
                 hovertemplate='<b>Custos Variáveis</b><br>' +
-                             'Valor: R$ %{y:,.0f}<br>' +
-                             '<extra></extra>'
+                             'Percentual: %{y:.1f}%<br>' +
+                             'Valor: R$ %{customdata[0]:,.0f}<br>' +
+                             '<b>Receita Total: R$ %{customdata[1]:,.0f}</b><br>' +
+                             '<extra></extra>',
+                customdata=list(zip(display_df['variable_costs'], display_df['revenue']))
             ))
             
+            # Add fixed costs bar (as percentage)
             fig_cost_structure.add_trace(go.Bar(
                 name='Custos Fixos',
                 x=display_df[x_col],
-                y=display_df['fixed_costs'],
-                text=display_df['fixed_costs'].apply(lambda x: format_currency(x).replace('R$ ', '')),
+                y=display_df['fixed_cost_pct'],
+                text=display_df['fixed_cost_pct'].apply(lambda x: f"{x:.2f}%"),
                 textposition='inside',
-                textfont=dict(color='white', size=11),
+                textfont=dict(color='white', size=11, weight='bold'),
                 marker=dict(
                     color='#F59E0B',  # Professional amber for fixed costs
                     line=dict(color='#D97706', width=1)
                 ),
                 hovertemplate='<b>Custos Fixos</b><br>' +
-                             'Valor: R$ %{y:,.0f}<br>' +
-                             '<extra></extra>'
+                             'Percentual: %{y:.1f}%<br>' +
+                             'Valor: R$ %{customdata[0]:,.0f}<br>' +
+                             '<b>Receita Total: R$ %{customdata[1]:,.0f}</b><br>' +
+                             '<extra></extra>',
+                customdata=list(zip(display_df['fixed_costs'], display_df['revenue']))
             ))
             
-            # Add revenue line with markers
-            fig_cost_structure.add_trace(go.Scatter(
-                name='Receita',
+            # Add profit margin bar
+            fig_cost_structure.add_trace(go.Bar(
+                name='Margem de Lucro',
                 x=display_df[x_col],
-                y=display_df['revenue'],
-                mode='lines+markers+text',
-                text=display_df['revenue'].apply(lambda x: format_currency(x)),
-                textposition='top center',
-                textfont=dict(color='#047857', size=10, weight='bold'),
-                line=dict(color='#10B981', width=4),
-                marker=dict(size=10, color='#10B981', line=dict(color='#047857', width=2)),
-                yaxis='y2',
-                hovertemplate='<b>Receita</b><br>' +
-                             'Valor: R$ %{y:,.0f}<br>' +
-                             '<extra></extra>'
+                y=display_df['profit_pct'],
+                text=display_df['profit_pct'].apply(lambda x: f"{x:.2f}%"),
+                textposition='inside',
+                textfont=dict(color='white', size=11, weight='bold'),
+                marker=dict(
+                    color='#10B981',  # Green for profit
+                    line=dict(color='#047857', width=1)
+                ),
+                hovertemplate='<b>Margem de Lucro</b><br>' +
+                             'Percentual: %{y:.1f}%<br>' +
+                             'Valor: R$ %{customdata[0]:,.0f}<br>' +
+                             '<b>Receita Total: R$ %{customdata[1]:,.0f}</b><br>' +
+                             '<extra></extra>',
+                customdata=list(zip(display_df['profit'], display_df['revenue']))
             ))
             
-            # Add profit margin annotations with improved positioning
-            max_revenue = display_df['revenue'].max()
-            for idx, row in display_df.iterrows():
-                margin = (row['profit'] / row['revenue'] * 100) if row['revenue'] > 0 else 0
-                
-                # Use consistent green color for all positive margins
-                # Position labels well above the revenue line with arrows
-                y_position = row['revenue'] + (max_revenue * 0.15)  # 15% above revenue line
-                
-                fig_cost_structure.add_annotation(
-                    x=row[x_col],
-                    y=y_position,
-                    text=f"<b>{margin:.1f}%</b>",
-                    showarrow=True,
-                    arrowhead=2,
-                    arrowsize=1,
-                    arrowwidth=2,
-                    arrowcolor='#059669',  # Darker green for arrow
-                    ax=0,
-                    ay=-40,  # Longer arrow
-                    font=dict(size=14, color='#059669', weight='bold'),  # Larger, darker green text
-                    bgcolor='#D1FAE5',  # Light green background
-                    bordercolor='#059669',  # Dark green border
-                    borderwidth=2,
-                    borderpad=8,  # More padding
-                    yref='y2'  # Reference the revenue axis
-                )
+            # Add 100% reference line
+            fig_cost_structure.add_hline(
+                y=100, 
+                line_dash="dot", 
+                line_color="#6B7280",
+                annotation_text="100% da Receita",
+                annotation_position="top right",
+                annotation_font=dict(size=12, color="#6B7280")
+            )
+            
+            # Clean x-axis labels with just periods (revenue moved to hover)
             
             
-            # Update layout with improved styling
+            # Update layout with single y-axis for percentages
             fig_cost_structure.update_layout(
                 title={
-                    'text': '💰 Estrutura de Custos vs Receita',
+                    'text': '💰 Estrutura de Custos vs Receita (% da Receita)',
                     'font': {'size': 24, 'color': '#1F2937'}
                 },
                 barmode='stack',
                 yaxis=dict(
                     title=dict(
-                        text="Custos (R$)",
+                        text="Percentual da Receita (%)",
                         font=dict(size=16, color='#1F2937', weight='bold')
                     ),
-                    side='left',
-                    tickformat=',.0f',
+                    tickformat='.1f',
+                    ticksuffix='%',
                     tickfont=dict(size=12, color='#374151'),
                     showgrid=True,
-                    gridcolor='rgba(0,0,0,0.1)'
-                ),
-                yaxis2=dict(
-                    title=dict(
-                        text="Receita (R$)",
-                        font=dict(size=16, color='#047857', weight='bold')
-                    ),
-                    overlaying='y',
-                    side='right',
-                    tickformat=',.0f',
-                    tickfont=dict(size=12, color='#047857'),
-                    showgrid=False
+                    gridcolor='rgba(0,0,0,0.1)',
+                    range=[0, 100]
                 ),
                 xaxis=dict(
                     title=dict(
                         text=x_title,
                         font=dict(size=16, color='#1F2937', weight='bold')
                     ),
-                    tickfont=dict(size=14, color='#374151'),
-                    showgrid=False
+                    tickfont=dict(size=12, color='#374151'),
+                    showgrid=False,
+                    tickangle=-90  # Vertical labels to prevent overlap
                 ),
-                height=600,
+                height=600,  # Standard height for all views
                 hovermode='x unified',
                 plot_bgcolor='rgba(248,249,250,0.8)',
                 paper_bgcolor='white',
@@ -1527,7 +1531,7 @@ with tab2:
                     borderwidth=1,
                     font=dict(size=14, color='#374151', weight='bold')
                 ),
-                margin=dict(t=100, b=50)
+                margin=dict(t=120, b=50)
             )
             
             # Add shapes for visual appeal
@@ -1574,7 +1578,7 @@ with tab2:
                 avg_margin = display_df['profit_margin'].mean() if 'profit_margin' in display_df.columns else 0
                 st.metric(
                     "📈 Margem de Lucro Média",
-                    f"{avg_margin:.1f}%",
+                    f"{avg_margin:.2f}%",
                     "↑ período selecionado",
                     help=f"Margem de lucro média considerando todo o período analisado"
                 )
@@ -1593,7 +1597,7 @@ with tab2:
             st.dataframe(display_df, use_container_width=True)
     
     else:
-        st.info("👆 Por favor, faça upload dos arquivos na aba 'Upload' primeiro.")
+        st.info("👆 Please upload files in the 'Upload' tab first.")
 
 # Tab 3: Detailed Breakdown (only for flexible mode)
 if use_flexible_extractor:
@@ -1807,16 +1811,20 @@ if use_flexible_extractor:
                     )
             
         else:
-            st.info("👆 Por favor, faça upload dos arquivos na aba 'Upload' primeiro.")
+            st.info("👆 Please upload files in the 'Upload' tab first.")
 
 # Tab 3/4: AI Insights
 tab_ai = tab4 if use_flexible_extractor else tab3
 with tab_ai:
     st.header("🤖 Insights com Gemini AI")
     
+    # Load extracted data from database if not in session state
+    if not hasattr(st.session_state, 'extracted_data') or not st.session_state.extracted_data:
+        st.session_state.extracted_data = db.load_all_financial_data()
+    
     if hasattr(st.session_state, 'processed_data') and st.session_state.processed_data is not None and gemini_api_key:
-        if st.button("Gerar Insights com IA", type="primary"):
-            with st.spinner("Analisando dados com Gemini..."):
+        if st.button("🤖 Generate AI Business Insights", type="primary"):
+            with st.spinner("Analyzing data with AI... Please wait..."):
                 try:
                     # Configure Gemini
                     genai.configure(api_key=gemini_api_key)
@@ -1835,55 +1843,297 @@ with tab_ai:
                             all_categories.update(year_data['categories'].keys())
                             all_items.update(item['label'] for item in year_data['line_items'].values())
                         
-                        flexible_summary = f"\n\nCategorias detectadas: {len(all_categories)}\nTotal de linhas de dados: {len(all_items)}"
+                        flexible_summary = f"\n\nDetected categories: {len(all_categories)}\nTotal data lines: {len(all_items)}"
                     
-                    # Create prompt
+                    # Create prompt with language instruction based on user selection
+                    if language == "Português":
+                        language_instruction = "INSTRUÇÃO CRÍTICA: Você DEVE responder inteiramente em português brasileiro. NÃO use palavras ou frases em inglês."
+                        analysis_request = "Por favor, analise os seguintes dados financeiros da Marine Seguros e forneça insights detalhados de negócios:"
+                    else:
+                        language_instruction = "CRITICAL INSTRUCTION: You MUST respond entirely in English. Do NOT use Portuguese words or phrases."
+                        analysis_request = "Please analyze the following financial data from Marine Seguros and provide detailed business insights:"
+                    
                     prompt = f"""
-                    Analise os seguintes dados financeiros da Marine Seguros e forneça insights detalhados em {language}:
+                    {language_instruction}
                     
-                    Dados Resumidos:
-                    - Período: {summary['years_range']}
-                    - Receita Total: R$ {summary['metrics'].get('revenue', {}).get('total', 0):,.2f}
-                    - CAGR da Receita: {summary['metrics'].get('revenue', {}).get('cagr', 0):.1f}%
-                    - Margem de Lucro Média: {summary['metrics'].get('profit_margin', {}).get('average', 0):.1f}%
+                    {analysis_request}
+                    
+                    Summary Data:
+                    - Period: {summary['years_range']}
+                    - Total Revenue: R$ {summary['metrics'].get('revenue', {}).get('total', 0):,.2f}
+                    - Revenue CAGR: {summary['metrics'].get('revenue', {}).get('cagr', 0):.1f}%
+                    - Average Profit Margin: {summary['metrics'].get('profit_margin', {}).get('average', 0):.1f}%
                     {flexible_summary}
                     
-                    Dados Anuais:
+                    Annual Data:
                     {df.to_string()}
                     
-                    Por favor, forneça:
-                    1. Análise de tendências principais
-                    2. Pontos fortes do desempenho financeiro
-                    3. Áreas de preocupação ou risco
-                    4. Recomendações estratégicas{' para novas categorias de despesas detectadas' if hasattr(st.session_state, 'flexible_data') and st.session_state.flexible_data else ''}
-                    5. Previsões para os próximos anos
+                    {
+                        "Por favor, forneça uma análise abrangente cobrindo:" if language == "Português" else "Please provide a comprehensive analysis covering:"
+                    }
+                    {
+                        '''1. **Análise das Principais Tendências Financeiras**
+                    2. **Pontos Fortes de Performance & Vantagens Competitivas**
+                    3. **Áreas de Risco & Preocupações**
+                    4. **Recomendações Estratégicas**''' + (' para categorias de despesas recém-detectadas' if hasattr(st.session_state, 'flexible_data') and st.session_state.flexible_data else '') + '''
+                    5. **Previsões Futuras & Perspectivas de Mercado**
                     
-                    Formato: Use markdown com títulos claros e bullet points.
+                    Requisitos de Formato:
+                    - Use markdown com títulos claros (##) e subtítulos (###)
+                    - Inclua marcadores para análise detalhada
+                    - Use **negrito** para métricas-chave e pontos importantes
+                    - Assegure linguagem profissional de negócios em português brasileiro apenas''' if language == "Português" else '''1. **Main Financial Trends Analysis**
+                    2. **Performance Strengths & Competitive Advantages**
+                    3. **Risk Areas & Concerns**
+                    4. **Strategic Recommendations**''' + (' for newly detected expense categories' if hasattr(st.session_state, 'flexible_data') and st.session_state.flexible_data else '') + '''
+                    5. **Future Predictions & Market Outlook**
+                    
+                    Format Requirements:
+                    - Use markdown with clear headings (##) and subheadings (###)
+                    - Include bullet points for detailed analysis
+                    - Use **bold** for key metrics and important points
+                    - Ensure professional business language in English only'''
+                    }
                     """
                     
                     # Generate insights
                     response = model.generate_content(prompt)
-                    st.session_state.gemini_insights = response.text
+                    insights_text = response.text
+                    
+                    # Language validation - only check if English is selected
+                    if language == "English" and any(word in insights_text.lower() for word in ['receita', 'lucro', 'despesas', 'vendas', 'análise']):
+                        # If Portuguese words detected when English is selected, add reminder
+                        english_reminder_prompt = f"""
+                        CRITICAL: The following text appears to contain Portuguese words. Please translate this ENTIRE analysis to English and ensure all content is in English only:
+                        
+                        {insights_text}
+                        
+                        Requirements:
+                        - Translate everything to English
+                        - Maintain the same structure and insights
+                        - Use business terminology
+                        - Keep all formatting and markdown
+                        """
+                        response = model.generate_content(english_reminder_prompt)
+                        insights_text = response.text
+                    
+                    st.session_state.gemini_insights = insights_text
                     
                 except Exception as e:
-                    st.error(f"Erro ao gerar insights: {str(e)}")
+                    st.error(f"Error generating AI insights: {str(e)}")
         
-        # Display insights
+        # Display insights with enhanced styling
         if hasattr(st.session_state, 'gemini_insights') and st.session_state.gemini_insights:
-            st.markdown(st.session_state.gemini_insights)
+            # Create a styled container for the insights
+            st.markdown("### 🧠 AI Business Insights")
+            st.markdown("---")
             
-            # Export insights button
-            st.download_button(
-                label="📥 Baixar Insights",
-                data=st.session_state.gemini_insights,
-                file_name=f"insights_marine_seguros_{datetime.now().strftime('%Y%m%d')}.md",
-                mime="text/markdown"
-            )
+            # Apply custom CSS for better formatting
+            st.markdown("""
+            <style>
+            .insights-container {
+                background: #f8f9fa;
+                padding: 20px;
+                border-radius: 10px;
+                border-left: 4px solid #0066cc;
+                margin: 20px 0;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }
+            .insights-content {
+                font-family: 'Segoe UI', Arial, sans-serif;
+                line-height: 1.8;
+                color: #333;
+            }
+            .insights-content h2 {
+                color: #0066cc;
+                margin-top: 25px;
+                margin-bottom: 15px;
+                border-bottom: 2px solid #e9ecef;
+                padding-bottom: 8px;
+            }
+            .insights-content h3 {
+                color: #0d47a1;
+                margin-top: 20px;
+                margin-bottom: 12px;
+            }
+            .insights-content ul, .insights-content ol {
+                margin: 15px 0;
+                padding-left: 25px;
+            }
+            .insights-content li {
+                margin: 8px 0;
+            }
+            .insights-content strong {
+                color: #1565c0;
+                font-weight: 600;
+            }
+            .insights-content p {
+                margin: 12px 0;
+                text-align: justify;
+            }
+            </style>
+            """, unsafe_allow_html=True)
+            
+            # Display insights in styled container
+            with st.container():
+                st.markdown(f"""
+                <div class="insights-container">
+                    <div class="insights-content">
+                        {st.session_state.gemini_insights}
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            # Add spacing
+            st.markdown("<br>", unsafe_allow_html=True)
+            
+            # Export insights button with improved styling
+            col1, col2, col3 = st.columns([1, 2, 1])
+            with col2:
+                st.download_button(
+                    label="📥 Download AI Insights Report",
+                    data=st.session_state.gemini_insights,
+                    file_name=f"ai_insights_marine_seguros_{datetime.now().strftime('%Y%m%d')}.md",
+                    mime="text/markdown",
+                    help="Download the complete AI analysis as a markdown file"
+                )
+        
+        # Separator
+        st.markdown("---")
+        
+        # Comparative Analysis Section
+        st.subheader("🔍 Análise Comparativa")
+        st.markdown("Compare o desempenho entre dois anos específicos:")
+        
+        # Load extracted data for comparison
+        if hasattr(st.session_state, 'extracted_data') and st.session_state.extracted_data:
+            available_years = sorted(st.session_state.extracted_data.keys())
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                year1 = st.selectbox(
+                    "Ano 1 (Base)",
+                    options=available_years,
+                    index=len(available_years)-2 if len(available_years) > 1 else 0,
+                    key="comparison_year1"
+                )
+            
+            with col2:
+                year2 = st.selectbox(
+                    "Ano 2 (Comparação)",
+                    options=available_years,
+                    index=len(available_years)-1,
+                    key="comparison_year2"
+                )
+            
+            if st.button("🔍 Comparar Períodos", type="secondary"):
+                with st.spinner("Executando análise comparativa..."):
+                    try:
+                        # Initialize comparative analyzer
+                        analyzer = ComparativeAnalyzer(gemini_api_key)
+                        
+                        # Get data for both years
+                        period1_data = st.session_state.extracted_data.get(year1, {})
+                        period2_data = st.session_state.extracted_data.get(year2, {})
+                        
+                        if period1_data and period2_data:
+                            # Perform comparison
+                            comparison_result = analyzer.compare_custom_periods(
+                                period1_data, period2_data, str(year1), str(year2)
+                            )
+                            
+                            # Store result in session state
+                            st.session_state.comparison_result = comparison_result
+                            
+                            st.success(f"✅ Comparação entre {year1} e {year2} concluída!")
+                            
+                        else:
+                            st.error(f"❌ Dados não encontrados para um ou ambos os anos ({year1}, {year2})")
+                            
+                    except Exception as e:
+                        st.error(f"Erro na análise comparativa: {str(e)}")
+                        import traceback
+                        st.code(traceback.format_exc())
+            
+            # Display comparison results
+            if hasattr(st.session_state, 'comparison_result') and st.session_state.comparison_result:
+                result = st.session_state.comparison_result
+                
+                st.subheader("📊 Resultados da Comparação")
+                
+                # Metrics comparison
+                metrics = result.get('metrics', {})
+                
+                # Revenue comparison
+                if 'revenue' in metrics:
+                    revenue_metrics = metrics['revenue']
+                    
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        st.metric(
+                            f"Receita {year1}",
+                            f"R$ {revenue_metrics.get('previous', 0):,.2f}"
+                        )
+                    
+                    with col2:
+                        st.metric(
+                            f"Receita {year2}",
+                            f"R$ {revenue_metrics.get('current', 0):,.2f}"
+                        )
+                    
+                    with col3:
+                        change_pct = revenue_metrics.get('percentage_change', 0)
+                        st.metric(
+                            "Variação",
+                            f"{change_pct:+.1f}%",
+                            f"R$ {revenue_metrics.get('absolute_change', 0):+,.2f}"
+                        )
+                
+                # AI Analysis
+                if 'ai_analysis' in result:
+                    st.subheader("🤖 Análise com IA")
+                    st.markdown(result['ai_analysis'])
+                
+                # Monthly detail
+                if 'monthly_detail' in result and result['monthly_detail']:
+                    st.subheader("📅 Detalhamento Mensal")
+                    
+                    # Create monthly comparison chart
+                    monthly_data = []
+                    for month, data in result['monthly_detail'].items():
+                        monthly_data.append({
+                            'Mês': month,
+                            'Variação (%)': data.get('revenue_change_pct', 0),
+                            'Variação (R$)': data.get('revenue_change_abs', 0)
+                        })
+                    
+                    if monthly_data:
+                        monthly_df = pd.DataFrame(monthly_data)
+                        
+                        # Bar chart of monthly changes
+                        fig = px.bar(
+                            monthly_df,
+                            x='Mês',
+                            y='Variação (%)',
+                            title=f'Variação Mensal de Receita: {year1} vs {year2}',
+                            color='Variação (%)',
+                            color_continuous_scale='RdYlGn'
+                        )
+                        fig.update_layout(showlegend=False)
+                        st.plotly_chart(fig, use_container_width=True)
+                        
+                        # Data table
+                        st.dataframe(monthly_df, use_container_width=True)
+        
+        else:
+            st.info("📊 Processe os dados primeiro para habilitar a análise comparativa.")
     else:
         if not gemini_api_key:
-            st.warning("⚠️ Por favor, insira sua chave API do Gemini na barra lateral.")
+            st.warning("⚠️ Please enter your Gemini API key in the sidebar.")
         else:
-            st.info("👆 Por favor, faça upload dos arquivos primeiro.")
+            st.info("👆 Please upload files first.")
 
 # Tab 4/5: AI Chat
 tab_chat = tab5 if use_flexible_extractor else tab4
@@ -1960,9 +2210,9 @@ with tab_chat:
         )
     else:
         if not gemini_api_key:
-            st.warning("⚠️ Por favor, insira sua chave API do Gemini na barra lateral.")
+            st.warning("⚠️ Please enter your Gemini API key in the sidebar.")
         else:
-            st.info("👆 Por favor, faça upload dos arquivos primeiro.")
+            st.info("👆 Please upload files first.")
 
 # Tab 5/6: Predictions
 tab_pred = tab6 if use_flexible_extractor else tab5
@@ -2076,7 +2326,7 @@ with tab_pred:
         else:
             st.warning("Dados de receita não encontrados para fazer previsões.")
     else:
-        st.info("👆 Por favor, faça upload dos arquivos primeiro.")
+        st.info("👆 Please upload files first.")
 
 # Tab 6/7: Integration
 tab_int = tab7 if use_flexible_extractor else tab6

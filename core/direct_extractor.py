@@ -183,6 +183,45 @@ class DirectDataExtractor:
                                     except:
                                         print(f"Could not parse annual value: {val}")
                     
+                    # Extract profit margin (Margem de lucro) - BEFORE profit check
+                    # Prioritize operational margin over net margin
+                    elif 'MARGEM DE LUCRO' in value_str.upper():
+                        # Skip the net margin version if we already have operational margin
+                        if 'LÍQUIDO' in value_str.upper() or 'LIQUIDO' in value_str.upper():
+                            if 'ANNUAL' in data.get('margins', {}):
+                                print(f"Skipping net margin at {idx} (already have operational): {value_str}")
+                                continue
+                        
+                        print(f"Found profit margin at {idx}: {value_str}")
+                        
+                        # Extract monthly values first
+                        for month, col in month_cols.items():
+                            if col in df.columns:
+                                val = df.iloc[idx][col]
+                                if pd.notna(val):
+                                    if isinstance(val, (int, float)):
+                                        # Convert decimal to percentage
+                                        margin_pct = val * 100 if val < 1 else val
+                                        data['margins'][month] = margin_pct
+                        
+                        # Extract annual value
+                        if annual_col and annual_col in df.columns:
+                            val = df.iloc[idx][annual_col]
+                            if pd.notna(val):
+                                # Extract percentage value
+                                if isinstance(val, str):
+                                    val_clean = val.replace('%', '').replace(',', '.').strip()
+                                    try:
+                                        data['margins']['ANNUAL'] = float(val_clean)
+                                        print(f"  Stored profit margin: {val_clean}%")
+                                    except:
+                                        pass
+                                elif isinstance(val, (int, float)):
+                                    # Convert decimal to percentage
+                                    margin_pct = val * 100 if val < 1 else val
+                                    data['margins']['ANNUAL'] = margin_pct
+                                    print(f"  Stored profit margin: {margin_pct:.2f}%")
+                    
                     # Profit/Result rows - look for specific profit indicators
                     elif any(profit_term in value_str for profit_term in ['RESULTADO', 'LUCRO']):
                         # Skip rows that are calculations or have additional qualifiers
@@ -254,40 +293,44 @@ class DirectDataExtractor:
                                     data['gross_margin'] = float(val)
                                     print(f"  Stored gross margin: {val}%")
                     
-                    # Extract profit margin (Margem de lucro)
-                    elif 'MARGEM DE LUCRO' in value_str.upper():
-                        print(f"Found profit margin at {idx}: {value_str}")
-                        if annual_col and annual_col in df.columns:
-                            val = df.iloc[idx][annual_col]
-                            if pd.notna(val):
-                                # Extract percentage value
-                                if isinstance(val, str):
-                                    val_clean = val.replace('%', '').replace(',', '.').strip()
-                                    try:
-                                        data['margins']['ANNUAL'] = float(val_clean)
-                                        print(f"  Stored profit margin: {val_clean}%")
-                                    except:
-                                        pass
-                                elif isinstance(val, (int, float)):
-                                    # If it's already a number, check if it needs to be a percentage
-                                    if val < 1:  # Likely a decimal (0.15 = 15%)
-                                        data['margins']['ANNUAL'] = val * 100
-                                    else:
-                                        data['margins']['ANNUAL'] = float(val)
-                                    print(f"  Stored profit margin: {data['margins']['ANNUAL']}%")
                     
                     elif value_str == 'CUSTOS FIXOS' or value_str.startswith('CUSTOS FIXOS'):
                         print(f"Found fixed costs (operational costs) at {idx}: {value_str}")
+                        
+                        # Initialize fixed_costs dict if not exists
+                        if 'fixed_costs' not in data:
+                            data['fixed_costs'] = {}
+                        if 'operational_costs' not in data:
+                            data['operational_costs'] = {}
+                        
+                        # Extract monthly values first
+                        for month, col in month_cols.items():
+                            if col in df.columns:
+                                val = df.iloc[idx][col]
+                                if pd.notna(val):
+                                    # Handle different number formats
+                                    if isinstance(val, (int, float)):
+                                        data['fixed_costs'][month] = float(val)
+                                        data['operational_costs'][month] = float(val)
+                                    elif isinstance(val, str):
+                                        # Try to parse string numbers
+                                        val_clean = val.replace('.', '').replace(',', '.').replace('R$', '').strip()
+                                        try:
+                                            data['fixed_costs'][month] = float(val_clean)
+                                            data['operational_costs'][month] = float(val_clean)
+                                        except:
+                                            print(f"Could not parse fixed cost value: {val}")
+                        
+                        # Extract annual value
                         if annual_col and annual_col in df.columns:
                             val = df.iloc[idx][annual_col]
                             if pd.notna(val) and isinstance(val, (int, float)):
-                                data['fixed_costs'] = float(val)
-                                # Also store as operational_costs since CUSTOS FIXOS is the operational costs in these files
-                                data['operational_costs'] = float(val)
-                                print(f"  Stored fixed costs: {val:,.2f}")
-                                print(f"  Also stored as operational costs: {val:,.2f}")
+                                data['fixed_costs']['ANNUAL'] = float(val)
+                                data['operational_costs']['ANNUAL'] = float(val)
+                                print(f"  Stored annual fixed costs: {val:,.2f}")
+                                print(f"  Stored monthly fixed costs: {len([k for k in data['fixed_costs'].keys() if k != 'ANNUAL'])} months")
         
-        # Calculate margins if we have both revenue and costs
+        # Calculate profits and only calculate margins if not already extracted from Excel
         if data['revenue'] and data['costs']:
             for month in data['revenue']:
                 if month in data['costs']:
@@ -295,7 +338,9 @@ class DirectDataExtractor:
                     cost = data['costs'][month]
                     if revenue > 0:
                         data['profits'][month] = revenue - cost
-                        data['margins'][month] = ((revenue - cost) / revenue) * 100
+                        # Only calculate margin if we don't have it from Excel already
+                        if month not in data['margins']:
+                            data['margins'][month] = ((revenue - cost) / revenue) * 100
         
         return data
 
