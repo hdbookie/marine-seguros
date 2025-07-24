@@ -87,14 +87,29 @@ def convert_extracted_to_processed(extracted_data):
             else:
                 margin = 0
             
+            # Extract fixed_costs and operational_costs properly
+            fixed_costs_data = year_data.get('fixed_costs', 0)
+            operational_costs_data = year_data.get('operational_costs', 0)
+            
+            # If it's a dictionary, get the ANNUAL value
+            if isinstance(fixed_costs_data, dict):
+                fixed_costs = fixed_costs_data.get('ANNUAL', 0)
+            else:
+                fixed_costs = fixed_costs_data
+                
+            if isinstance(operational_costs_data, dict):
+                operational_costs = operational_costs_data.get('ANNUAL', 0)
+            else:
+                operational_costs = operational_costs_data
+            
             consolidated_data.append({
                 'year': int(year),
                 'revenue': revenue,
                 'variable_costs': costs,
                 'gross_profit': revenue - costs,
                 'gross_margin': margin,
-                'fixed_costs': year_data.get('fixed_costs', 0),
-                'operational_costs': year_data.get('operational_costs', 0)
+                'fixed_costs': fixed_costs,
+                'operational_costs': operational_costs
             })
         
         if consolidated_data:
@@ -553,8 +568,8 @@ with tab1:
                     consolidated_df, flexible_data = processor.consolidate_all_years_flexible(excel_data)
                     st.session_state.flexible_data = flexible_data
                 else:
-                    # Use standard extractor
-                    consolidated_df = processor.consolidate_all_years(excel_data)
+                    # Use standard extractor - now returns both DataFrame and extracted data
+                    consolidated_df, extracted_financial_data = processor.consolidate_all_years(excel_data)
                     st.session_state.flexible_data = None
                 
                 # Check if data extraction was successful
@@ -574,9 +589,9 @@ with tab1:
                     # Get monthly data
                     monthly_df = processor.get_monthly_data(excel_data)
                     
-                    # Store in session state
+                    # Store in session state with the CORRECT extracted data
                     st.session_state.processed_data = {
-                        'raw_data': excel_data,
+                        'raw_data': extracted_financial_data if not use_flexible_extractor else excel_data,
                         'consolidated': consolidated_df,
                         'summary': processor.get_financial_summary(consolidated_df),
                         'anomalies': processor.detect_anomalies(consolidated_df) if show_anomalies else []
@@ -946,7 +961,17 @@ with tab2:
                 display_df['period'] = display_df.apply(lambda x: f"{int(x['year'])}-S{int(x['semester'])}", axis=1)
         else:
             # Default to annual view if monthly data not available
-            display_df = df[df['year'].isin(selected_years)]
+            display_df = df[df['year'].isin(selected_years)].copy()
+            
+            # Ensure all numeric columns contain only numeric values (not dicts)
+            numeric_cols = ['revenue', 'variable_costs', 'fixed_costs', 'operational_costs', 
+                          'gross_profit', 'net_profit', 'contribution_margin']
+            for col in numeric_cols:
+                if col in display_df.columns:
+                    # Convert any dict values to numbers
+                    display_df[col] = display_df[col].apply(
+                        lambda x: x.get('ANNUAL', 0) if isinstance(x, dict) else x
+                    )
         
         # Debug: Show what data is being displayed
         if not display_df.empty:
@@ -968,6 +993,13 @@ with tab2:
         # Calculate net_profit if missing
         if 'net_profit' not in display_df.columns and not display_df.empty:
             display_df = display_df.copy()
+            
+            # Ensure all numeric columns are actually numeric (not dicts)
+            for col in ['revenue', 'variable_costs', 'fixed_costs', 'operational_costs']:
+                if col in display_df.columns:
+                    display_df[col] = display_df[col].apply(
+                        lambda x: x.get('ANNUAL', 0) if isinstance(x, dict) else x
+                    )
             
             # Check if operational_costs exists and has values
             if 'operational_costs' in display_df.columns:
@@ -991,23 +1023,24 @@ with tab2:
         # Calculate metrics from filtered display_df
         total_revenue = display_df['revenue'].sum() if 'revenue' in display_df.columns and not display_df.empty else 0
         
-        # Calculate profit properly - use our calculation instead of potentially wrong DataFrame values
-        if not display_df.empty and all(col in display_df.columns for col in ['revenue', 'variable_costs', 'fixed_costs']):
-            # Calculate profit correctly: Revenue - Variable Costs - Fixed Costs
-            calculated_profits = display_df['revenue'] - display_df['variable_costs'] - display_df['fixed_costs']
-            total_profit = calculated_profits.sum()
-            avg_profit = calculated_profits.mean()
+        # Use existing profit data from the DataFrame
+        if not display_df.empty:
+            # Debug: Check data types and convert dicts to numbers
+            numeric_cols = ['revenue', 'variable_costs', 'fixed_costs', 'net_profit', 'profit_margin']
+            for col in numeric_cols:
+                if col in display_df.columns:
+                    # Check if any values are dicts
+                    has_dicts = display_df[col].apply(lambda x: isinstance(x, dict)).any()
+                    if has_dicts:
+                        # Convert dict values to numbers (using ANNUAL key if available)
+                        display_df[col] = display_df[col].apply(
+                            lambda x: x.get('ANNUAL', 0) if isinstance(x, dict) else x
+                        )
             
-            # Recalculate profit margin based on corrected profits
-            if 'revenue' in display_df.columns:
-                avg_margin = (calculated_profits / display_df['revenue'] * 100).mean()
-            else:
-                avg_margin = 0
-                
-            # Also update the DataFrame with correct net_profit for consistency
-            display_df = display_df.copy()
-            display_df['net_profit'] = calculated_profits
-            display_df['profit_margin'] = (calculated_profits / display_df['revenue'] * 100).fillna(0)
+            # Use the existing net_profit and profit_margin from the data
+            total_profit = display_df['net_profit'].sum() if 'net_profit' in display_df.columns else 0
+            avg_profit = display_df['net_profit'].mean() if 'net_profit' in display_df.columns else 0
+            avg_margin = display_df['profit_margin'].mean() if 'profit_margin' in display_df.columns else 0
             
         else:
             # Fallback to DataFrame values if we can't calculate
@@ -1046,8 +1079,8 @@ with tab2:
             margin_range = display_df['profit_margin'].max() - display_df['profit_margin'].min() if 'profit_margin' in display_df.columns and not display_df.empty else 0
             st.metric(
                 "Margem de Lucro Média",
-                f"{avg_margin:.1f}%",
-                f"{margin_range:.1f}pp variação"
+                f"{avg_margin:.2f}%",
+                f"{margin_range:.2f}pp variação"
             )
         
         with col4:
@@ -1141,11 +1174,11 @@ with tab2:
             if view_type == "Mensal" and len(display_df) > 20:
                 fig_margin.update_traces(
                     texttemplate='',
-                    hovertemplate='<b>%{x}</b><br>Margem de Lucro: %{y:.1f}%<extra></extra>'
+                    hovertemplate='<b>%{x}</b><br>Margem de Lucro: %{y:.2f}%<extra></extra>'
                 )
             else:
                 fig_margin.update_traces(
-                    text=display_df['profit_margin'].apply(lambda x: f'{x:.1f}%'),
+                    text=display_df['profit_margin'].apply(lambda x: f'{x:.2f}%'),
                     textposition='outside'
                 )
             
@@ -1387,7 +1420,7 @@ with tab2:
                 name='Custos Variáveis',
                 x=display_df[x_col],
                 y=display_df['var_cost_pct'],
-                text=display_df['var_cost_pct'].apply(lambda x: f"{x:.1f}%"),
+                text=display_df['var_cost_pct'].apply(lambda x: f"{x:.2f}%"),
                 textposition='inside',
                 textfont=dict(color='white', size=11, weight='bold'),
                 marker=dict(
@@ -1407,7 +1440,7 @@ with tab2:
                 name='Custos Fixos',
                 x=display_df[x_col],
                 y=display_df['fixed_cost_pct'],
-                text=display_df['fixed_cost_pct'].apply(lambda x: f"{x:.1f}%"),
+                text=display_df['fixed_cost_pct'].apply(lambda x: f"{x:.2f}%"),
                 textposition='inside',
                 textfont=dict(color='white', size=11, weight='bold'),
                 marker=dict(
@@ -1427,7 +1460,7 @@ with tab2:
                 name='Margem de Lucro',
                 x=display_df[x_col],
                 y=display_df['profit_pct'],
-                text=display_df['profit_pct'].apply(lambda x: f"{x:.1f}%"),
+                text=display_df['profit_pct'].apply(lambda x: f"{x:.2f}%"),
                 textposition='inside',
                 textfont=dict(color='white', size=11, weight='bold'),
                 marker=dict(
@@ -1545,7 +1578,7 @@ with tab2:
                 avg_margin = display_df['profit_margin'].mean() if 'profit_margin' in display_df.columns else 0
                 st.metric(
                     "📈 Margem de Lucro Média",
-                    f"{avg_margin:.1f}%",
+                    f"{avg_margin:.2f}%",
                     "↑ período selecionado",
                     help=f"Margem de lucro média considerando todo o período analisado"
                 )

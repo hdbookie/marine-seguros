@@ -180,8 +180,12 @@ class FinancialProcessor:
         
         return df
     
-    def consolidate_all_years(self, excel_data: Dict, include_monthly: bool = False) -> pd.DataFrame:
-        """Consolidate financial data from all years into a single DataFrame"""
+    def consolidate_all_years(self, excel_data: Dict, include_monthly: bool = False) -> Tuple[pd.DataFrame, Dict]:
+        """Consolidate financial data from all years into a single DataFrame
+        
+        Returns:
+            Tuple[pd.DataFrame, Dict]: (consolidated_df, extracted_data)
+        """
         # Use direct extractor for reliable data extraction
         extractor = DirectDataExtractor()
         all_data = {}
@@ -217,12 +221,27 @@ class FinancialProcessor:
                          profits.get('NET_ADJUSTED') or
                          profits.get('GROSS') or 0)
             
+            # Extract fixed_costs and operational_costs properly
+            fixed_costs_data = year_data.get('fixed_costs', 0)
+            operational_costs_data = year_data.get('operational_costs', 0)
+            
+            # If it's a dictionary, get the ANNUAL value
+            if isinstance(fixed_costs_data, dict):
+                fixed_costs = fixed_costs_data.get('ANNUAL', 0)
+            else:
+                fixed_costs = fixed_costs_data
+                
+            if isinstance(operational_costs_data, dict):
+                operational_costs = operational_costs_data.get('ANNUAL', 0)
+            else:
+                operational_costs = operational_costs_data
+            
             row = {
                 'year': year,
                 'revenue': year_data.get('revenue', {}).get('ANNUAL', 0),
                 'variable_costs': year_data.get('costs', {}).get('ANNUAL', 0),
-                'fixed_costs': year_data.get('fixed_costs', 0),
-                'operational_costs': year_data.get('operational_costs', 0),
+                'fixed_costs': fixed_costs,
+                'operational_costs': operational_costs,
                 'contribution_margin': year_data.get('contribution_margin', 0),
                 'net_profit': net_profit,
                 'gross_profit': year_data.get('gross_profit', profits.get('GROSS', 0)),
@@ -245,13 +264,14 @@ class FinancialProcessor:
         # Check if we have any data
         if not consolidated_data:
             print("Warning: No data was consolidated. Returning empty DataFrame with expected columns.")
-            # Return empty DataFrame with expected columns
-            return pd.DataFrame(columns=['year', 'revenue', 'variable_costs', 'net_profit', 'profit_margin'])
+            # Return empty DataFrame with expected columns and empty dict
+            return pd.DataFrame(columns=['year', 'revenue', 'variable_costs', 'net_profit', 'profit_margin']), {}
         
         df = pd.DataFrame(consolidated_data)
         print(f"Consolidated data shape: {df.shape}")
         print(f"Columns: {df.columns.tolist()}")
-        return df
+        # Return both the consolidated DataFrame and the extracted data
+        return df, all_data
     
     def get_monthly_data(self, excel_data: Dict) -> pd.DataFrame:
         """Get monthly financial data from all years"""
