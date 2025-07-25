@@ -73,7 +73,10 @@ class DatabaseManager:
             
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                json_data = json.dumps(data, ensure_ascii=False)
+                
+                # Serialize the data with proper handling
+                serialized_data = self._serialize_for_json(data)
+                json_data = json.dumps(serialized_data, ensure_ascii=False)
                 
                 cursor.execute("""
                     INSERT OR REPLACE INTO financial_data (year, data, updated_at)
@@ -87,12 +90,96 @@ class DatabaseManager:
             st.error(f"Error saving financial data for {year}: {str(e)}")
             return False
     
+    def _serialize_for_json(self, obj):
+        """Recursively serialize an object for JSON storage"""
+        import datetime
+        import pandas as pd
+        import numpy as np
+        
+        try:
+            # Handle None first
+            if obj is None:
+                return None
+            
+            # Check for pandas NA values
+            if pd.isna(obj):
+                return None
+            
+            # Handle DataFrame
+            if hasattr(obj, 'to_dict'):  # DataFrame
+                # Convert DataFrame to a serializable format
+                df_dict = obj.to_dict('records')
+                serialized_records = [self._serialize_for_json(record) for record in df_dict]
+                return {
+                    '__dataframe__': True,
+                    'data': serialized_records,
+                    'columns': list(obj.columns),
+                    'dtypes': {col: str(dtype) for col, dtype in obj.dtypes.items()}
+                }
+            
+            # Handle datetime objects (including Timestamp)
+            elif isinstance(obj, (datetime.datetime, datetime.date, pd.Timestamp)):
+                return obj.isoformat()
+            elif hasattr(obj, 'isoformat'):
+                return obj.isoformat()
+            
+            # Handle numpy types
+            elif isinstance(obj, (np.integer, np.int64, np.int32)):
+                return int(obj)
+            elif isinstance(obj, (np.floating, np.float64, np.float32)):
+                return float(obj)
+            elif isinstance(obj, np.ndarray):
+                return obj.tolist()
+            
+            # Handle collections
+            elif isinstance(obj, dict):
+                result = {}
+                for k, v in obj.items():
+                    # Ensure keys are strings
+                    key_str = str(k) if not isinstance(k, str) else k
+                    result[key_str] = self._serialize_for_json(v)
+                return result
+            elif isinstance(obj, list):
+                return [self._serialize_for_json(item) for item in obj]
+            elif isinstance(obj, tuple):
+                return [self._serialize_for_json(item) for item in obj]
+            elif isinstance(obj, (set, frozenset)):
+                return [self._serialize_for_json(item) for item in obj]
+            
+            # Handle basic types
+            elif isinstance(obj, (str, int, float, bool)):
+                return obj
+            
+            # Fallback - convert to string
+            else:
+                return str(obj)
+                
+        except Exception as e:
+            print(f"Serialization error for object {type(obj)}: {str(e)}")
+            return str(obj)
+    
     def _validate_financial_data(self, data: Dict[str, Any]) -> bool:
         """Validate financial data structure and content"""
         if not isinstance(data, dict):
+            print(f"Validation failed: data is not a dict, it's {type(data)}")
             return False
         
-        # Check for required fields
+        print(f"Validation check - data keys: {list(data.keys())}")
+        
+        # Check if it's flexible extractor data (has line_items)
+        if 'line_items' in data:
+            print(f"Detected flexible extractor data format")
+            # Validate flexible extractor format
+            if not isinstance(data['line_items'], dict):
+                print(f"Flexible data: line_items is not a dict, it's {type(data['line_items'])}")
+                return False
+            if len(data['line_items']) == 0:
+                print(f"Flexible data: line_items is empty")
+                return False
+            print(f"Flexible data validation passed: {len(data['line_items'])} line items found")
+            return True
+        
+        # Check for standard extractor required fields
         required_fields = ['revenue', 'costs']
         for field in required_fields:
             if field not in data:
@@ -203,48 +290,38 @@ class DatabaseManager:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 
-                # Convert DataFrames to JSON-serializable format
-                def serialize_value(value):
-                    import datetime
-                    import pandas as pd
+                # Use the same serialization method as save_financial_data
+                try:
+                    serialized_data = self._serialize_for_json(analysis_data)
+                    json_data = json.dumps(serialized_data, ensure_ascii=False)
+                except Exception as serialize_error:
+                    print(f"Serialization error details: {str(serialize_error)}")
+                    print(f"Data structure causing error: {type(analysis_data)}")
+                    if hasattr(analysis_data, 'keys'):
+                        print(f"Data keys: {list(analysis_data.keys())}")
                     
-                    if hasattr(value, 'to_dict'):  # Check if it's a DataFrame
-                        # Convert DataFrame, handling datetime columns
-                        df_dict = value.to_dict('records')
-                        # Recursively serialize the data to handle any datetime objects
-                        serialized_data = [serialize_value(record) for record in df_dict]
-                        return {
-                            '__dataframe__': True,
-                            'data': serialized_data,
-                            'columns': list(value.columns),
-                            'dtypes': {col: str(dtype) for col, dtype in value.dtypes.items()}
-                        }
-                    elif isinstance(value, (datetime.datetime, datetime.date, pd.Timestamp)):
-                        # Convert datetime objects to ISO format string
-                        return value.isoformat()
-                    elif hasattr(value, 'isoformat'):  # Other datetime-like objects
-                        return value.isoformat()
-                    elif isinstance(value, np.integer):
-                        # Convert numpy integers to Python int
-                        return int(value)
-                    elif isinstance(value, np.floating):
-                        # Convert numpy floats to Python float
-                        return float(value)
-                    elif isinstance(value, np.ndarray):
-                        # Convert numpy arrays to lists
-                        return value.tolist()
-                    elif isinstance(value, dict):
-                        # Recursively handle nested dictionaries
-                        return {k: serialize_value(v) for k, v in value.items()}
-                    elif isinstance(value, list):
-                        # Handle lists
-                        return [serialize_value(item) for item in value]
-                    else:
-                        return value
-                
-                serializable_data = serialize_value(analysis_data)
-                
-                json_data = json.dumps(serializable_data, ensure_ascii=False, default=str)
+                    # Try a more aggressive approach
+                    def force_serialize(obj):
+                        import datetime
+                        import pandas as pd
+                        import numpy as np
+                        
+                        if isinstance(obj, (datetime.datetime, datetime.date, pd.Timestamp)):
+                            return obj.isoformat()
+                        elif hasattr(obj, 'isoformat'):
+                            return obj.isoformat()
+                        elif isinstance(obj, (np.integer, np.int64)):
+                            return int(obj)
+                        elif isinstance(obj, (np.floating, np.float64)):
+                            return float(obj)
+                        elif pd.isna(obj):
+                            return None
+                        elif isinstance(obj, (set, frozenset)):
+                            return list(obj)
+                        else:
+                            return str(obj)
+                    
+                    json_data = json.dumps(analysis_data, ensure_ascii=False, default=force_serialize)
                 
                 cursor.execute("""
                     INSERT OR REPLACE INTO analysis_cache 
@@ -255,8 +332,11 @@ class DatabaseManager:
                 conn.commit()
                 return True
         except Exception as e:
-            st.error(f"Error saving analysis cache: {str(e)}")
+            print(f"Error saving analysis cache: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return False
+    
     
     def load_analysis_cache(self) -> Optional[Any]:
         """Load cached analysis results"""
@@ -506,4 +586,26 @@ class DatabaseManager:
             print(f"Auto-load error: {str(e)}")
             import traceback
             traceback.print_exc()
+            return False
+    
+    def clear_session_data(self):
+        """Clear all cached data from the database"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # Clear analysis cache
+                cursor.execute("DELETE FROM analysis_cache")
+                
+                # Clear filter state
+                cursor.execute("DELETE FROM filter_state")
+                
+                # Optionally clear financial data (uncomment if needed)
+                # cursor.execute("DELETE FROM financial_data")
+                
+                conn.commit()
+                print("Session data cleared from database")
+                return True
+        except Exception as e:
+            print(f"Error clearing session data: {str(e)}")
             return False

@@ -41,14 +41,20 @@ class FlexibleFinancialExtractor:
                 print(f"{'='*50}")
                 
                 df = pd.read_excel(file_path, sheet_name=sheet_name)
+                print(f"Sheet shape: {df.shape}")
                 financial_data = self._extract_all_financial_data(df, year)
                 
                 if financial_data['line_items']:
                     extracted_data[year] = financial_data
                     print(f"✓ Extracted {len(financial_data['line_items'])} line items for {year}")
+                else:
+                    print(f"✗ No line items found in sheet {sheet_name} for year {year}")
+                    print(f"  Categories found: {list(financial_data['categories'].keys())}")
                 
         except Exception as e:
             print(f"Error processing {file_path}: {e}")
+            import traceback
+            traceback.print_exc()
             
         return extracted_data
     
@@ -63,7 +69,13 @@ class FlexibleFinancialExtractor:
         if year_match:
             return int(year_match.group())
             
-        # Check for year in file path
+        # For multi-year files, the sheet should have the year
+        # Don't try to extract year from file path for multi-year files
+        if '_' in file_path and re.search(r'20\d{2}_20\d{2}', file_path):
+            print(f"Multi-year file detected. Sheet '{sheet_name}' must contain year.")
+            return None
+            
+        # Check for year in file path (for single year files)
         year_match = re.search(r'20\d{2}', file_path)
         if year_match:
             return int(year_match.group())
@@ -87,15 +99,22 @@ class FlexibleFinancialExtractor:
         print(f"Found {len(month_cols)} month columns and annual column: {annual_col is not None}")
         
         # Process each row
+        rows_checked = 0
+        rows_with_labels = 0
+        rows_with_data = 0
+        
         for idx in range(len(df)):
+            rows_checked += 1
             row_label = self._get_row_label(df, idx)
             if not row_label:
                 continue
+            rows_with_labels += 1
                 
             # Check if this row has numerical data
             row_data = self._extract_row_data(df, idx, month_cols, annual_col)
             if not row_data['has_data']:
                 continue
+            rows_with_data += 1
                 
             # Classify the line item
             category = self._classify_line_item(row_label)
@@ -118,8 +137,18 @@ class FlexibleFinancialExtractor:
             
             print(f"  [{category}] {row_label}: R$ {row_data['annual']:,.2f}")
             
+        # Debug: Print category summary
+        print(f"\nCategory summary for year {year}:")
+        for cat, items in data['categories'].items():
+            total = sum(data['line_items'][item]['annual'] for item in items)
+            print(f"  {cat}: {len(items)} items, R$ {total:,.2f}")
+            if cat in ['other_expenses', 'other_costs', 'other']:
+                print(f"    Items: {[data['line_items'][item]['label'] for item in items[:3]]}...")  # Show first 3
+            
         # Build hierarchy (preserves indentation/structure)
         data['hierarchy'] = self._build_hierarchy(df, data['line_items'])
+        
+        print(f"Row processing stats: {rows_checked} checked, {rows_with_labels} with labels, {rows_with_data} with data")
         
         return data
     
@@ -129,11 +158,15 @@ class FlexibleFinancialExtractor:
                   'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ']
         month_cols = {}
         
+        print(f"Looking for month columns in {len(df.columns)} columns")
+        print(f"First 10 columns: {list(df.columns[:10])}")
+        
         for col_idx, col in enumerate(df.columns):
             col_str = str(col).upper().strip()
             for month in months:
                 if month in col_str:
                     month_cols[month] = col
+                    print(f"  Found {month} in column '{col}'")
                     break
                     
         return month_cols

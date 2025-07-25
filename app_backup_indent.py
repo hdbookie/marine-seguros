@@ -2926,13 +2926,6 @@ else:
                         
                         if selected_year and selected_year in flexible_data:
                             year_data = flexible_data[selected_year]
-                        else:
-                            if selected_year:
-                                st.warning(f"Ano {selected_year} não encontrado nos dados. Anos disponíveis: {sorted(list(flexible_data.keys()))}")
-                            year_data = None
-                        
-                        # Only proceed if we have valid year_data
-                        if year_data and isinstance(year_data, dict) and 'line_items' in year_data:
             
                             # Summary metrics for the year
                             col1, col2, col3 = st.columns(3)
@@ -3107,15 +3100,12 @@ else:
                     st.plotly_chart(fig_waterfall, use_container_width=True)
             
                     # Year-over-year comparison
-                    if len(years) > 1 and 'selected_year' in locals() and selected_year:
+                    if len(years) > 1:
                         st.subheader("📊 Comparação com Ano Anterior")
                 
-                        try:
-                            year_index = years.index(selected_year)
-                            if year_index > 0:
-                                prev_year = years[year_index - 1]
-                                if prev_year in flexible_data:
-                                    prev_data = flexible_data[prev_year]
+                        if years.index(selected_year) > 0:
+                            prev_year = years[years.index(selected_year) - 1]
+                            prev_data = flexible_data[prev_year]
                     
                             # Compare categories
                             comparison_data = []
@@ -3173,8 +3163,6 @@ else:
                                 use_container_width=True,
                                 hide_index=True
                             )
-                        except (KeyError, ValueError, IndexError) as e:
-                            st.error(f"Erro ao processar comparação anual: {str(e)}")
             
                 else:
                     st.info("👆 Please upload files in the 'Upload' tab first.")

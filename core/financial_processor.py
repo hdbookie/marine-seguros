@@ -139,44 +139,89 @@ class FinancialProcessor:
             year_data = all_data[year]
             row = {'year': year}
             
-            # Extract key metrics
+            # Initialize standard financial categories
+            standard_categories = {
+                'revenue': 0,
+                'variable_costs': 0,
+                'fixed_costs': 0,
+                'admin_expenses': 0,
+                'operational_expenses': 0,
+                'marketing_expenses': 0,
+                'financial_expenses': 0,
+                'tax_expenses': 0,
+                'other_expenses': 0,
+                'other_costs': 0
+            }
+            
+            # Extract and aggregate metrics by category
+            excluded_count = 0
             for item_key, item_data in year_data['line_items'].items():
                 category = item_data['category']
+                annual_value = item_data.get('annual', 0)
+                is_subtotal = item_data.get('is_subtotal', False)
                 
-                # Map to standard names for backward compatibility
-                if category == 'revenue':
-                    row['revenue'] = item_data['annual']
-                elif category == 'variable_costs' and 'variable_costs' not in row:
-                    row['variable_costs'] = item_data['annual']
+                # Skip subtotals and calculated results to avoid double counting
+                if is_subtotal or category in ['calculated_results', 'margins', 'results']:
+                    excluded_count += 1
+                    print(f"  EXCLUDED [{category}] {item_data['label']}: R$ {annual_value:,.2f} (subtotal: {is_subtotal})")
+                    continue
+                
+                # Aggregate into standard categories
+                if category in standard_categories:
+                    standard_categories[category] += annual_value
                     
-                # Store all items with their original keys
-                row[item_key] = item_data['annual']
+                # Store all items with their original keys for detailed analysis
+                row[item_key] = annual_value
+                
+            print(f"Excluded {excluded_count} items from aggregation for year {year}")
+            
+            # Add aggregated values to row
+            row.update(standard_categories)
             
             # Calculate derived metrics
-            if 'revenue' in row:
-                # Net profit (if not already in data)
-                if 'net_profit' not in row:
-                    total_costs = sum(
-                        item_data['annual'] 
-                        for item_data in year_data['line_items'].values()
-                        if item_data['category'] in ['variable_costs', 'fixed_costs', 
-                                                     'admin_expenses', 'operational_expenses',
-                                                     'marketing_expenses', 'financial_expenses',
-                                                     'tax_expenses', 'other_expenses', 'other_costs']
-                    )
-                    row['net_profit'] = row['revenue'] - total_costs
+            if row['revenue'] > 0:
+                # Calculate total costs from aggregated categories
+                total_costs = (
+                    row['variable_costs'] + row['fixed_costs'] + 
+                    row['admin_expenses'] + row['operational_expenses'] +
+                    row['marketing_expenses'] + row['financial_expenses'] +
+                    row['tax_expenses'] + row['other_expenses'] + row['other_costs']
+                )
+                
+                # Net profit
+                row['net_profit'] = row['revenue'] - total_costs
                 
                 # Profit margin
-                if row['revenue'] > 0:
-                    row['profit_margin'] = (row.get('net_profit', 0) / row['revenue']) * 100
-                else:
-                    row['profit_margin'] = 0
+                row['profit_margin'] = (row['net_profit'] / row['revenue']) * 100
+                
+                # Additional standard metrics for compatibility
+                row['total_costs'] = total_costs
+                row['contribution_margin'] = row['revenue'] - row['variable_costs']
+                row['operational_costs'] = row['admin_expenses'] + row['operational_expenses']
+            else:
+                row['net_profit'] = 0
+                row['profit_margin'] = 0
+                row['total_costs'] = 0
+                row['contribution_margin'] = 0
+                row['operational_costs'] = 0
                     
             summary_rows.append(row)
         
         df = pd.DataFrame(summary_rows)
         print(f"Summary data shape: {df.shape}")
         print(f"Columns found: {df.columns.tolist()}")
+        
+        # Debug: Show aggregated values for first year
+        if not df.empty:
+            first_row = df.iloc[0]
+            print(f"\nDEBUG - First year ({first_row['year']}) aggregated values:")
+            for category in ['revenue', 'variable_costs', 'fixed_costs', 'admin_expenses', 
+                           'operational_expenses', 'marketing_expenses', 'financial_expenses',
+                           'tax_expenses', 'other_expenses', 'other_costs']:
+                value = first_row.get(category, 0)
+                print(f"  {category}: R$ {value:,.2f}")
+            print(f"  net_profit: R$ {first_row.get('net_profit', 0):,.2f}")
+            print(f"  profit_margin: {first_row.get('profit_margin', 0):.2f}%")
         
         return df
     
