@@ -356,6 +356,132 @@ def format_currency(value):
         # For smaller amounts, show 2 decimal places
         return f"R$ {value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
+def get_expense_subcategories():
+    """Define detailed expense subcategories for better organization"""
+    return {
+        'pessoal': {
+            'name': '👥 Pessoal',
+            'subcategories': {
+                'salarios': {
+                    'name': 'Salários e Ordenados',
+                    'patterns': ['salario', 'salário', 'ordenado', 'remuneracao', 'remuneração', 'folha de pagamento', 'holerite']
+                },
+                'beneficios': {
+                    'name': 'Benefícios',
+                    'patterns': ['vale transporte', 'vale-transporte', 'vt', 'vale refeicao', 'vale refeição', 'vale alimentacao', 'vale alimentação', 'va', 'vr']
+                },
+                'encargos': {
+                    'name': 'Encargos Sociais',
+                    'patterns': ['inss', 'fgts', 'encargo', 'previdencia', 'previdência', 'contribuicao social', 'contribuição social']
+                },
+                'provisoes': {
+                    'name': 'Provisões',
+                    'patterns': ['ferias', 'férias', '13o', '13º', 'decimo terceiro', 'décimo terceiro', 'provisao', 'provisão']
+                }
+            }
+        },
+        'ocupacao': {
+            'name': '🏢 Ocupação e Utilidades',
+            'subcategories': {
+                'aluguel': {
+                    'name': 'Aluguel e Condomínio',
+                    'patterns': ['aluguel', 'locacao', 'locação', 'condominio', 'condomínio', 'iptu', 'taxa condominial']
+                },
+                'energia': {
+                    'name': 'Energia Elétrica',
+                    'patterns': ['energia', 'eletrica', 'elétrica', 'luz', 'cemig', 'light', 'cpfl', 'coelba', 'celesc']
+                },
+                'agua': {
+                    'name': 'Água e Esgoto',
+                    'patterns': ['agua', 'água', 'esgoto', 'saneamento', 'sabesp', 'copasa', 'cedae', 'cagece']
+                },
+                'telecom': {
+                    'name': 'Telecomunicações',
+                    'patterns': ['telefone', 'internet', 'telefonia', 'celular', 'vivo', 'claro', 'tim', 'oi', 'net']
+                }
+            }
+        },
+        'servicos': {
+            'name': '💼 Serviços Profissionais',
+            'subcategories': {
+                'contabilidade': {
+                    'name': 'Contabilidade',
+                    'patterns': ['contabilidade', 'contador', 'contabil', 'contábil', 'escritorio contabil', 'escritório contábil']
+                },
+                'juridico': {
+                    'name': 'Jurídico',
+                    'patterns': ['advocacia', 'advogado', 'juridico', 'jurídico', 'honorario', 'honorário', 'judicial']
+                },
+                'consultoria': {
+                    'name': 'Consultoria',
+                    'patterns': ['consultoria', 'consultor', 'assessoria', 'treinamento', 'capacitacao', 'capacitação']
+                },
+                'ti': {
+                    'name': 'TI e Software',
+                    'patterns': ['software', 'sistema', 'ti', 'informatica', 'informática', 'licenca', 'licença', 'assinatura', 'cloud', 'nuvem']
+                }
+            }
+        },
+        'manutencao': {
+            'name': '🔧 Manutenção e Conservação',
+            'subcategories': {
+                'limpeza': {
+                    'name': 'Limpeza',
+                    'patterns': ['limpeza', 'higienizacao', 'higienização', 'faxina', 'jardinagem', 'conservacao', 'conservação']
+                },
+                'predial': {
+                    'name': 'Manutenção Predial',
+                    'patterns': ['manutencao predial', 'manutenção predial', 'reforma', 'pintura', 'obra', 'reparo', 'conserto']
+                },
+                'equipamentos': {
+                    'name': 'Manutenção de Equipamentos',
+                    'patterns': ['manutencao equipamento', 'manutenção equipamento', 'assistencia tecnica', 'assistência técnica', 'reparo equipamento']
+                }
+            }
+        },
+        'material': {
+            'name': '📦 Material de Consumo',
+            'subcategories': {
+                'escritorio': {
+                    'name': 'Material de Escritório',
+                    'patterns': ['material escritorio', 'material escritório', 'papelaria', 'papel', 'caneta', 'toner', 'cartucho']
+                },
+                'limpeza_material': {
+                    'name': 'Material de Limpeza',
+                    'patterns': ['material limpeza', 'produto limpeza', 'detergente', 'desinfetante', 'papel higienico', 'papel higiênico']
+                },
+                'combustivel': {
+                    'name': 'Combustíveis',
+                    'patterns': ['combustivel', 'combustível', 'gasolina', 'alcool', 'álcool', 'diesel', 'posto', 'abastecimento']
+                }
+            }
+        }
+    }
+
+def classify_expense_subcategory(description):
+    """Classify an expense into a subcategory based on its description"""
+    description_lower = description.lower()
+    subcategories = get_expense_subcategories()
+    
+    for main_cat, main_data in subcategories.items():
+        for sub_cat, sub_data in main_data['subcategories'].items():
+            for pattern in sub_data['patterns']:
+                if pattern in description_lower:
+                    return {
+                        'main_category': main_cat,
+                        'main_category_name': main_data['name'],
+                        'subcategory': sub_cat,
+                        'subcategory_name': sub_data['name']
+                    }
+    
+    # Default to uncategorized
+    return {
+        'main_category': 'outros',
+        'main_category_name': '📌 Outros',
+        'subcategory': 'nao_categorizado',
+        'subcategory_name': 'Não Categorizado'
+    }
+
 def calculate_percentage_change(old_value, new_value):
     """Calculate percentage change between two values"""
     if old_value == 0:
@@ -455,10 +581,12 @@ def process_detailed_monthly_data(flexible_data):
         'line_items': [],
         'por_mes': {},
         'por_categoria': {},
+        'por_subcategoria': {},
         'por_ano': {},
         'summary': {
             'total_items': 0,
             'total_categories': set(),
+            'total_subcategories': set(),
             'years': set()
         }
     }
@@ -485,10 +613,17 @@ def process_detailed_monthly_data(flexible_data):
             detailed_data['summary']['total_categories'].add(category)
             detailed_data['summary']['total_items'] += 1
             
+            # Classify into subcategory
+            subcategory_info = classify_expense_subcategory(label)
+            
             # Create detailed record
             record = {
                 'ano': year,
                 'categoria': category,
+                'subcategoria_principal': subcategory_info['main_category'],
+                'subcategoria_principal_nome': subcategory_info['main_category_name'],
+                'subcategoria': subcategory_info['subcategory'],
+                'subcategoria_nome': subcategory_info['subcategory_name'],
                 'descricao': label,
                 'valor_anual': annual_value,
                 'valores_mensais': monthly_values,
@@ -502,6 +637,16 @@ def process_detailed_monthly_data(flexible_data):
             if category not in detailed_data['por_categoria']:
                 detailed_data['por_categoria'][category] = []
             detailed_data['por_categoria'][category].append(record)
+            
+            # Group by subcategory
+            subcat_key = f"{subcategory_info['main_category']}_{subcategory_info['subcategory']}"
+            if subcat_key not in detailed_data['por_subcategoria']:
+                detailed_data['por_subcategoria'][subcat_key] = {
+                    'nome': f"{subcategory_info['main_category_name']} - {subcategory_info['subcategory_name']}",
+                    'items': []
+                }
+            detailed_data['por_subcategoria'][subcat_key]['items'].append(record)
+            detailed_data['summary']['total_subcategories'].add(subcat_key)
             
             # Group by month
             for month, value in monthly_values.items():
@@ -2508,6 +2653,43 @@ else:
                     
                     # Filter Section
                     st.markdown("### 🎯 Filtros")
+                    
+                    # Add subcategory filter as a prominent feature
+                    st.markdown("#### 📊 Filtro por Subcategoria")
+                    subcategory_col1, subcategory_col2 = st.columns(2)
+                    
+                    with subcategory_col1:
+                        # Get all main categories from subcategories
+                        subcategories_data = get_expense_subcategories()
+                        main_categories = list(subcategories_data.keys()) + ['outros']
+                        selected_main_categories = st.multiselect(
+                            "Categorias Principais",
+                            options=main_categories,
+                            format_func=lambda x: subcategories_data.get(x, {}).get('name', '📌 Outros') if x != 'outros' else '📌 Outros',
+                            default=main_categories
+                        )
+                    
+                    with subcategory_col2:
+                        # Dynamic subcategory filter based on selected main categories
+                        available_subcategories = {}
+                        for main_cat in selected_main_categories:
+                            if main_cat in subcategories_data:
+                                for sub_cat, sub_data in subcategories_data[main_cat]['subcategories'].items():
+                                    key = f"{main_cat}_{sub_cat}"
+                                    available_subcategories[key] = f"{subcategories_data[main_cat]['name']} - {sub_data['name']}"
+                            elif main_cat == 'outros':
+                                available_subcategories['outros_nao_categorizado'] = '📌 Outros - Não Categorizado'
+                        
+                        selected_subcategories = st.multiselect(
+                            "Subcategorias",
+                            options=list(available_subcategories.keys()),
+                            format_func=lambda x: available_subcategories[x],
+                            default=list(available_subcategories.keys())
+                        )
+                    
+                    st.markdown("---")
+                    
+                    # Original filters
                     filter_col1, filter_col2, filter_col3, filter_col4 = st.columns(4)
                     
                     with filter_col1:
@@ -2605,6 +2787,11 @@ else:
                         if item['categoria'] not in selected_categories:
                             continue
                         
+                        # Subcategory filter
+                        item_subcat_key = f"{item['subcategoria_principal']}_{item['subcategoria']}"
+                        if item_subcat_key not in selected_subcategories:
+                            continue
+                        
                         # Value filter
                         if not (min_value <= item['valor_anual'] <= max_value):
                             continue
@@ -2623,7 +2810,7 @@ else:
                     col1, col2, col3, col4 = st.columns(4)
                     
                     total_filtered = sum(item['valor_anual'] for item in filtered_items)
-                    unique_categories = len(set(item['categoria'] for item in filtered_items))
+                    unique_subcategories = len(set(f"{item['subcategoria_principal']}_{item['subcategoria']}" for item in filtered_items))
                     unique_descriptions = len(set(item['descricao'] for item in filtered_items))
                     
                     with col1:
@@ -2631,7 +2818,7 @@ else:
                     with col2:
                         st.metric("Itens", f"{len(filtered_items):,}")
                     with col3:
-                        st.metric("Categorias", unique_categories)
+                        st.metric("Subcategorias", unique_subcategories)
                     with col4:
                         avg_value = total_filtered / len(filtered_items) if filtered_items else 0
                         st.metric("Valor Médio", format_currency(avg_value))
@@ -2666,11 +2853,13 @@ else:
                     st.markdown("### 📊 Visualizações")
                     
                     # Create tabs for different visualizations
-                    viz_tab1, viz_tab2, viz_tab3, viz_tab4 = st.tabs([
+                    viz_tab1, viz_tab2, viz_tab3, viz_tab4, viz_tab5, viz_tab6 = st.tabs([
                         "🗂️ Tabela Detalhada",
-                        "🌡️ Mapa de Calor",
+                        "🌲 Treemap",
                         "📊 Top Despesas",
-                        "📈 Análise Temporal"
+                        "🌡️ Mapa de Calor",
+                        "📈 Análise Temporal",
+                        "📊 Análise Pareto"
                     ])
                     
                     # Tab 1: Detailed Table
@@ -2729,34 +2918,83 @@ else:
                                     st.info(f"Mostrando os top 50 itens de {len(sorted_items)} total")
                             
                             else:
-                                # Standard table view
-                                display_data = []
+                                # Enhanced grouped table view by subcategory
+                                st.markdown("##### 📂 Visualização Agrupada por Subcategoria")
+                                
+                                # Group items by subcategory
+                                grouped_data = {}
                                 for item in filtered_items:
-                                    display_data.append({
+                                    subcat_key = f"{item['subcategoria_principal']}_{item['subcategoria']}"
+                                    subcat_name = f"{item['subcategoria_principal_nome']} - {item['subcategoria_nome']}"
+                                    
+                                    if subcat_key not in grouped_data:
+                                        grouped_data[subcat_key] = {
+                                            'name': subcat_name,
+                                            'items': [],
+                                            'total': 0
+                                        }
+                                    
+                                    grouped_data[subcat_key]['items'].append(item)
+                                    grouped_data[subcat_key]['total'] += item['valor_anual']
+                                
+                                # Sort groups by total value
+                                sorted_groups = sorted(grouped_data.items(), key=lambda x: x[1]['total'], reverse=True)
+                                
+                                # Display each group
+                                for group_key, group_data in sorted_groups:
+                                    with st.expander(
+                                        f"{group_data['name']} - {format_currency(group_data['total'])} ({len(group_data['items'])} itens)",
+                                        expanded=False
+                                    ):
+                                        # Create DataFrame for this group
+                                        group_items = []
+                                        for item in sorted(group_data['items'], key=lambda x: x['valor_anual'], reverse=True):
+                                            group_items.append({
+                                                'Ano': item['ano'],
+                                                'Descrição': item['descricao'],
+                                                'Valor Anual': item['valor_anual'],
+                                                '% do Grupo': (item['valor_anual'] / group_data['total'] * 100),
+                                                '% do Total': (item['valor_anual'] / total_filtered * 100) if total_filtered > 0 else 0
+                                            })
+                                        
+                                        group_df = pd.DataFrame(group_items)
+                                        
+                                        # Display group metrics
+                                        col1, col2, col3 = st.columns(3)
+                                        with col1:
+                                            st.metric("Total da Subcategoria", format_currency(group_data['total']))
+                                        with col2:
+                                            st.metric("Número de Itens", len(group_data['items']))
+                                        with col3:
+                                            st.metric("% do Total Geral", f"{(group_data['total'] / total_filtered * 100):.1f}%")
+                                        
+                                        # Display table
+                                        st.dataframe(
+                                            group_df.style.format({
+                                                'Valor Anual': lambda x: format_currency(x),
+                                                '% do Grupo': '{:.1f}%',
+                                                '% do Total': '{:.1f}%'
+                                            }),
+                                            use_container_width=True
+                                        )
+                                
+                                # Export button with all filtered data
+                                export_data = []
+                                for item in filtered_items:
+                                    export_data.append({
                                         'Ano': item['ano'],
                                         'Categoria': get_category_name(item['categoria']),
+                                        'Subcategoria Principal': item['subcategoria_principal_nome'],
+                                        'Subcategoria': item['subcategoria_nome'],
                                         'Descrição': item['descricao'],
                                         'Valor Anual': item['valor_anual'],
                                         '% do Total': (item['valor_anual'] / total_filtered * 100) if total_filtered > 0 else 0
                                     })
                                 
-                                display_df = pd.DataFrame(display_data)
-                                display_df = display_df.sort_values('Valor Anual', ascending=False)
-                                
-                                # Display with formatting
-                                st.dataframe(
-                                    display_df.style.format({
-                                        'Valor Anual': lambda x: format_currency(x),
-                                        '% do Total': '{:.1f}%'
-                                    }),
-                                    use_container_width=True,
-                                    height=600
-                                )
-                                
-                                # Export button
-                                csv = display_df.to_csv(index=False)
+                                export_df = pd.DataFrame(export_data)
+                                csv = export_df.to_csv(index=False)
                                 st.download_button(
-                                    label="📥 Baixar como CSV",
+                                    label="📥 Baixar Dados Completos como CSV",
                                     data=csv,
                                     file_name=f"despesas_detalhadas_{datetime.now().strftime('%Y%m%d')}.csv",
                                     mime="text/csv"
@@ -2764,62 +3002,90 @@ else:
                         else:
                             st.info("Nenhum item encontrado com os filtros selecionados.")
                     
-                    # Tab 2: Heatmap
+                    # Tab 2: Treemap
                     with viz_tab2:
-                        st.subheader("Mapa de Calor - Despesas por Mês e Categoria")
+                        st.subheader("🌲 Treemap Hierárquico de Despesas")
                         
-                        if filtered_items and selected_years:
-                            # Prepare data for heatmap
-                            heatmap_data = {}
-                            months = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 
-                                     'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ']
+                        if filtered_items:
+                            # Prepare hierarchical data for treemap
+                            treemap_data = []
                             
-                            for month in months:
-                                heatmap_data[month] = {}
-                                for cat in selected_categories:
-                                    heatmap_data[month][cat] = 0
-                            
-                            # Aggregate values
+                            # Build hierarchy: Category -> Subcategory -> Item
                             for item in filtered_items:
-                                if item['ano'] in selected_years:
-                                    for month, value in item['valores_mensais'].items():
-                                        if month in selected_months:
-                                            heatmap_data[month][item['categoria']] += value
+                                treemap_data.append({
+                                    'labels': item['descricao'],
+                                    'parents': f"{item['subcategoria_principal_nome']} - {item['subcategoria_nome']}",
+                                    'values': item['valor_anual'],
+                                    'text': format_currency(item['valor_anual'])
+                                })
                             
-                            # Create DataFrame for heatmap
-                            heatmap_df = pd.DataFrame(heatmap_data).T
-                            heatmap_df.columns = [get_category_name(cat) for cat in heatmap_df.columns]
+                            # Add subcategory level
+                            subcategory_totals = {}
+                            for item in filtered_items:
+                                subcat_label = f"{item['subcategoria_principal_nome']} - {item['subcategoria_nome']}"
+                                parent_label = item['subcategoria_principal_nome']
+                                
+                                if subcat_label not in subcategory_totals:
+                                    subcategory_totals[subcat_label] = {
+                                        'parent': parent_label,
+                                        'total': 0
+                                    }
+                                subcategory_totals[subcat_label]['total'] += item['valor_anual']
                             
-                            # Create heatmap
-                            fig_heatmap = px.imshow(
-                                heatmap_df.T,
-                                labels=dict(x="Mês", y="Categoria", color="Valor (R$)"),
-                                x=heatmap_df.index,
-                                y=heatmap_df.columns,
-                                color_continuous_scale="RdYlBu_r",
-                                aspect="auto"
+                            for subcat, data in subcategory_totals.items():
+                                treemap_data.append({
+                                    'labels': subcat,
+                                    'parents': data['parent'],
+                                    'values': data['total'],
+                                    'text': format_currency(data['total'])
+                                })
+                            
+                            # Add main category level
+                            main_category_totals = {}
+                            for subcat, data in subcategory_totals.items():
+                                parent = data['parent']
+                                if parent not in main_category_totals:
+                                    main_category_totals[parent] = 0
+                                main_category_totals[parent] += data['total']
+                            
+                            for cat, total in main_category_totals.items():
+                                treemap_data.append({
+                                    'labels': cat,
+                                    'parents': '',
+                                    'values': total,
+                                    'text': format_currency(total)
+                                })
+                            
+                            # Create treemap
+                            treemap_df = pd.DataFrame(treemap_data)
+                            
+                            fig_treemap = px.treemap(
+                                treemap_df,
+                                names='labels',
+                                parents='parents',
+                                values='values',
+                                title=f"Treemap de Despesas - {', '.join(map(str, selected_years))}",
+                                color='values',
+                                color_continuous_scale='RdYlBu_r'
                             )
                             
-                            fig_heatmap.update_layout(
-                                title=f"Mapa de Calor de Despesas - {', '.join(map(str, selected_years))}",
-                                height=600
+                            fig_treemap.update_traces(
+                                textposition="middle center",
+                                textfont_size=10,
+                                hovertemplate='<b>%{label}</b><br>Valor: R$ %{value:,.2f}<br>%{percentParent} do pai<br>%{percentRoot} do total<extra></extra>'
                             )
                             
-                            # Add text annotations
-                            for i, month in enumerate(heatmap_df.index):
-                                for j, cat in enumerate(heatmap_df.columns):
-                                    value = heatmap_df.loc[month, cat]
-                                    if value > 0:
-                                        fig_heatmap.add_annotation(
-                                            x=i, y=j,
-                                            text=format_currency(value),
-                                            showarrow=False,
-                                            font=dict(size=10)
-                                        )
+                            fig_treemap.update_layout(
+                                height=700,
+                                margin=dict(t=50, l=25, r=25, b=25)
+                            )
                             
-                            st.plotly_chart(fig_heatmap, use_container_width=True)
+                            st.plotly_chart(fig_treemap, use_container_width=True)
+                            
+                            # Summary info
+                            st.info(f"💡 Visualizando {len(filtered_items)} itens em {len(main_category_totals)} categorias principais e {len(subcategory_totals)} subcategorias")
                         else:
-                            st.info("Selecione pelo menos um ano para visualizar o mapa de calor.")
+                            st.info("Nenhum item encontrado com os filtros selecionados.")
                     
                     # Tab 3: Top Expenses
                     with viz_tab3:
@@ -2863,9 +3129,84 @@ else:
                         else:
                             st.info("Nenhum item encontrado com os filtros selecionados.")
                     
-                    # Tab 4: Temporal Analysis
+                    # Tab 4: Heatmap
                     with viz_tab4:
-                        st.subheader("Análise Temporal de Despesas")
+                        st.subheader("🌡️ Mapa de Calor - Despesas por Mês e Subcategoria")
+                        
+                        if filtered_items and selected_years:
+                            # Option to show by subcategory instead of main category
+                            show_subcategories = st.checkbox("Mostrar por subcategoria", value=True)
+                            
+                            # Prepare data for heatmap
+                            heatmap_data = {}
+                            months = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 
+                                     'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ']
+                            
+                            if show_subcategories:
+                                # Get unique subcategories
+                                unique_subcats = {}
+                                for item in filtered_items:
+                                    subcat_key = f"{item['subcategoria_principal']}_{item['subcategoria']}"
+                                    subcat_name = f"{item['subcategoria_nome']}"
+                                    unique_subcats[subcat_key] = subcat_name
+                                
+                                # Initialize heatmap data
+                                for month in months:
+                                    heatmap_data[month] = {}
+                                    for subcat in unique_subcats.keys():
+                                        heatmap_data[month][subcat] = 0
+                                
+                                # Aggregate values by subcategory
+                                for item in filtered_items:
+                                    if item['ano'] in selected_years:
+                                        subcat_key = f"{item['subcategoria_principal']}_{item['subcategoria']}"
+                                        for month, value in item['valores_mensais'].items():
+                                            if month in selected_months:
+                                                heatmap_data[month][subcat_key] += value
+                                
+                                # Create DataFrame
+                                heatmap_df = pd.DataFrame(heatmap_data).T
+                                heatmap_df.columns = [unique_subcats[col] for col in heatmap_df.columns]
+                            else:
+                                # Original category-based heatmap
+                                for month in months:
+                                    heatmap_data[month] = {}
+                                    for cat in selected_categories:
+                                        heatmap_data[month][cat] = 0
+                                
+                                # Aggregate values
+                                for item in filtered_items:
+                                    if item['ano'] in selected_years:
+                                        for month, value in item['valores_mensais'].items():
+                                            if month in selected_months:
+                                                heatmap_data[month][item['categoria']] += value
+                                
+                                # Create DataFrame
+                                heatmap_df = pd.DataFrame(heatmap_data).T
+                                heatmap_df.columns = [get_category_name(cat) for cat in heatmap_df.columns]
+                            
+                            # Create heatmap
+                            fig_heatmap = px.imshow(
+                                heatmap_df.T,
+                                labels=dict(x="Mês", y="Subcategoria" if show_subcategories else "Categoria", color="Valor (R$)"),
+                                x=heatmap_df.index,
+                                y=heatmap_df.columns,
+                                color_continuous_scale="RdYlBu_r",
+                                aspect="auto"
+                            )
+                            
+                            fig_heatmap.update_layout(
+                                title=f"Mapa de Calor de Despesas - {', '.join(map(str, selected_years))}",
+                                height=max(400, len(heatmap_df.columns) * 30)  # Dynamic height based on categories
+                            )
+                            
+                            st.plotly_chart(fig_heatmap, use_container_width=True)
+                        else:
+                            st.info("Selecione pelo menos um ano para visualizar o mapa de calor.")
+                    
+                    # Tab 5: Temporal Analysis
+                    with viz_tab5:
+                        st.subheader("📈 Análise Temporal de Despesas")
                         
                         if filtered_items and selected_categories:
                             # Allow selection of specific items for trend analysis
@@ -2909,6 +3250,118 @@ else:
                                 st.plotly_chart(fig_trend, use_container_width=True)
                             else:
                                 st.info("Selecione itens específicos para ver sua tendência mensal.")
+                        else:
+                            st.info("Nenhum item encontrado com os filtros selecionados.")
+                    
+                    # Tab 6: Pareto Analysis
+                    with viz_tab6:
+                        st.subheader("📊 Análise de Pareto - 80/20")
+                        
+                        if filtered_items:
+                            # Sort items by value
+                            sorted_items = sorted(filtered_items, key=lambda x: x['valor_anual'], reverse=True)
+                            
+                            # Calculate cumulative percentages
+                            total_value = sum(item['valor_anual'] for item in sorted_items)
+                            cumulative_values = []
+                            cumulative_percent = []
+                            running_total = 0
+                            
+                            for item in sorted_items:
+                                running_total += item['valor_anual']
+                                cumulative_values.append(running_total)
+                                cumulative_percent.append((running_total / total_value) * 100)
+                            
+                            # Find 80% threshold
+                            items_for_80_percent = 0
+                            for i, percent in enumerate(cumulative_percent):
+                                if percent >= 80:
+                                    items_for_80_percent = i + 1
+                                    break
+                            
+                            # Create Pareto chart (limited to top 30 items for readability)
+                            display_items = sorted_items[:30]
+                            
+                            fig_pareto = go.Figure()
+                            
+                            # Bar chart for individual values
+                            fig_pareto.add_trace(go.Bar(
+                                x=[f"{item['descricao'][:20]}..." if len(item['descricao']) > 20 else item['descricao'] 
+                                   for item in display_items],
+                                y=[item['valor_anual'] for item in display_items],
+                                name='Valor Individual',
+                                yaxis='y',
+                                marker_color='lightblue'
+                            ))
+                            
+                            # Line chart for cumulative percentage
+                            fig_pareto.add_trace(go.Scatter(
+                                x=[f"{item['descricao'][:20]}..." if len(item['descricao']) > 20 else item['descricao'] 
+                                   for item in display_items],
+                                y=cumulative_percent[:30],
+                                name='% Acumulado',
+                                yaxis='y2',
+                                mode='lines+markers',
+                                marker_color='red',
+                                line=dict(width=3)
+                            ))
+                            
+                            # Add 80% reference line
+                            fig_pareto.add_hline(
+                                y=80,
+                                line_dash="dash",
+                                line_color="green",
+                                annotation_text="80%",
+                                yref='y2'
+                            )
+                            
+                            fig_pareto.update_layout(
+                                title=f"Análise de Pareto - Top 30 Despesas",
+                                xaxis_title="Despesas",
+                                yaxis=dict(
+                                    title="Valor (R$)",
+                                    side='left'
+                                ),
+                                yaxis2=dict(
+                                    title="% Acumulado",
+                                    overlaying='y',
+                                    side='right',
+                                    range=[0, 100]
+                                ),
+                                height=600,
+                                xaxis_tickangle=-45,
+                                hovermode='x unified'
+                            )
+                            
+                            st.plotly_chart(fig_pareto, use_container_width=True)
+                            
+                            # Summary metrics
+                            col1, col2, col3 = st.columns(3)
+                            
+                            with col1:
+                                st.metric(
+                                    "Princípio 80/20",
+                                    f"{items_for_80_percent} itens",
+                                    f"de {len(sorted_items)} total"
+                                )
+                            
+                            with col2:
+                                percent_of_items = (items_for_80_percent / len(sorted_items)) * 100
+                                st.metric(
+                                    "% de Itens para 80%",
+                                    f"{percent_of_items:.1f}%",
+                                    f"{items_for_80_percent} itens"
+                                )
+                            
+                            with col3:
+                                value_of_top_20 = sum(item['valor_anual'] for item in sorted_items[:items_for_80_percent])
+                                st.metric(
+                                    "Valor dos Top Items",
+                                    format_currency(value_of_top_20),
+                                    f"{(value_of_top_20/total_value*100):.1f}% do total"
+                                )
+                            
+                            st.info(f"💡 {items_for_80_percent} despesas ({percent_of_items:.1f}% do total) representam 80% do valor total. Focar nesses itens pode trazer maior impacto na redução de custos.")
                         else:
                             st.info("Nenhum item encontrado com os filtros selecionados.")
                     
