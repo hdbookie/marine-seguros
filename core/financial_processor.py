@@ -209,29 +209,36 @@ class FinancialProcessor:
         consolidated_data = []
         for year in sorted(all_data.keys()):
             year_data = all_data[year]
-            # Use the most appropriate profit value
-            # Priority: OPERATIONAL > WITH_NON_OP > WITHOUT_NON_OP > OTHER > NET_FINAL > NET_ADJUSTED > GROSS
-            # We prioritize OPERATIONAL because it's the main business result
-            # NET_FINAL is deprioritized because it includes investment deductions
-            profits = year_data.get('profits', {})
-            net_profit = (profits.get('OPERATIONAL') or 
-                         profits.get('WITH_NON_OP') or
-                         profits.get('WITHOUT_NON_OP') or
-                         profits.get('OTHER') or
-                         profits.get('NET_FINAL') or 
-                         profits.get('NET_ADJUSTED') or
-                         profits.get('GROSS') or 0)
+            # Get revenue and costs first
+            revenue = year_data.get('revenue', {}).get('ANNUAL', 0)
+            variable_costs = year_data.get('costs', {}).get('ANNUAL', 0)
             
-            # Extract fixed_costs and operational_costs properly
+            # Extract fixed_costs first (moved up)
             fixed_costs_data = year_data.get('fixed_costs', 0)
-            operational_costs_data = year_data.get('operational_costs', 0)
-            
-            # If it's a dictionary, get the ANNUAL value
             if isinstance(fixed_costs_data, dict):
                 fixed_costs = fixed_costs_data.get('ANNUAL', 0)
             else:
                 fixed_costs = fixed_costs_data
-                
+            
+            # Get profits data (needed for gross_profit later)
+            profits = year_data.get('profits', {})
+            
+            # For years before 2020, calculate net profit directly
+            if year < 2020:
+                net_profit = revenue - variable_costs - fixed_costs
+            else:
+                # Use the most appropriate profit value from Excel
+                # Priority: OPERATIONAL > WITH_NON_OP > WITHOUT_NON_OP > OTHER > NET_FINAL > NET_ADJUSTED > GROSS
+                net_profit = (profits.get('OPERATIONAL') or 
+                             profits.get('WITH_NON_OP') or
+                             profits.get('WITHOUT_NON_OP') or
+                             profits.get('OTHER') or
+                             profits.get('NET_FINAL') or 
+                             profits.get('NET_ADJUSTED') or
+                             profits.get('GROSS') or 0)
+            
+            # Extract operational_costs (fixed_costs already extracted above)
+            operational_costs_data = year_data.get('operational_costs', 0)
             if isinstance(operational_costs_data, dict):
                 operational_costs = operational_costs_data.get('ANNUAL', 0)
             else:
@@ -239,8 +246,8 @@ class FinancialProcessor:
             
             row = {
                 'year': year,
-                'revenue': year_data.get('revenue', {}).get('ANNUAL', 0),
-                'variable_costs': year_data.get('costs', {}).get('ANNUAL', 0),
+                'revenue': revenue,
+                'variable_costs': variable_costs,
                 'fixed_costs': fixed_costs,
                 'operational_costs': operational_costs,
                 'contribution_margin': year_data.get('contribution_margin', 0),
@@ -252,8 +259,9 @@ class FinancialProcessor:
             
             # Use extracted profit margin if available, otherwise calculate
             if row['revenue'] > 0:
-                # Only recalculate if we don't have an extracted margin
-                if row['profit_margin'] == 0:
+                # For years before 2020, always recalculate margin
+                # For 2020+, only recalculate if we don't have an extracted margin
+                if year < 2020 or row['profit_margin'] == 0:
                     row['profit_margin'] = (row['net_profit'] / row['revenue']) * 100
                 
                 # Calculate contribution margin if not provided
@@ -346,17 +354,16 @@ class FinancialProcessor:
                         fixed_costs_this_month = fixed_costs_monthly_fallback
                         operational_costs_this_month = operational_costs_monthly_fallback
                     
-                    # Calculate contribution margin for the month
+                    # Always calculate contribution margin from revenue - variable costs
+                    # Don't use the MARGEM DE CONTRIBUIÇÃO row values as they might be wrong
                     contribution_margin = revenue - variable_costs
                     
                     # Use net profit from Excel if available (RESULTADO), otherwise calculate
-                    if month in monthly_profits:
+                    if month in monthly_profits and year >= 2020:  # Only trust RESULTADO from 2020 onwards
                         net_profit = monthly_profits[month]
                     else:
-                        # Calculate net profit for the month
-                        # Note: fixed_costs and operational_costs are the same in the Excel data
-                        # so we only subtract once to avoid double-counting
-                        net_profit = contribution_margin - fixed_costs_this_month
+                        # Calculate net profit: Revenue - Variable Costs - Fixed Costs
+                        net_profit = revenue - variable_costs - fixed_costs_this_month
                     
                     # Use profit margin from Excel if available, otherwise calculate
                     if month in monthly_margins:

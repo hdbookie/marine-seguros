@@ -443,6 +443,77 @@ def get_monthly_layout_config():
         range=None  # Will be set dynamically in each graph
     )
 
+def process_detailed_monthly_data(flexible_data):
+    """Process flexible data to extract detailed monthly line items for analysis"""
+    if not flexible_data:
+        return None
+    
+    detailed_data = {
+        'line_items': [],
+        'por_mes': {},
+        'por_categoria': {},
+        'por_ano': {},
+        'summary': {
+            'total_items': 0,
+            'total_categories': set(),
+            'years': set()
+        }
+    }
+    
+    months = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 
+              'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ']
+    
+    # Process each year
+    for year, year_data in flexible_data.items():
+        detailed_data['por_ano'][year] = []
+        detailed_data['summary']['years'].add(year)
+        
+        # Process each line item
+        for item_key, item_data in year_data['line_items'].items():
+            label = item_data['label']
+            category = item_data['category']
+            annual_value = item_data['annual']
+            monthly_values = item_data.get('monthly', {})
+            
+            # Skip calculated items and margins
+            if category in ['calculated_results', 'margins'] or item_data.get('is_subtotal', False):
+                continue
+            
+            detailed_data['summary']['total_categories'].add(category)
+            detailed_data['summary']['total_items'] += 1
+            
+            # Create detailed record
+            record = {
+                'ano': year,
+                'categoria': category,
+                'descricao': label,
+                'valor_anual': annual_value,
+                'valores_mensais': monthly_values,
+                'key': item_key
+            }
+            
+            detailed_data['line_items'].append(record)
+            detailed_data['por_ano'][year].append(record)
+            
+            # Group by category
+            if category not in detailed_data['por_categoria']:
+                detailed_data['por_categoria'][category] = []
+            detailed_data['por_categoria'][category].append(record)
+            
+            # Group by month
+            for month, value in monthly_values.items():
+                if month not in detailed_data['por_mes']:
+                    detailed_data['por_mes'][month] = []
+                
+                detailed_data['por_mes'][month].append({
+                    'ano': year,
+                    'categoria': category,
+                    'descricao': label,
+                    'valor': value
+                })
+    
+    return detailed_data
+
 def get_plotly_config():
     """Get Plotly configuration for interactive graphs"""
     return {
@@ -1035,7 +1106,8 @@ else:
                             'fixed_costs': 'sum',
                             'operational_costs': 'sum',
                             'contribution_margin': 'sum',
-                            'net_profit': 'sum'
+                            'net_profit': 'sum',
+                            'profit_margin': 'mean'  # Average the profit margins
                         }).reset_index()
                         display_df['period'] = display_df.apply(lambda x: f"{int(x['year'])}-Q{int(x['quarter'])}", axis=1)
                 elif view_type == "Trimestre Personalizado":
@@ -1098,7 +1170,8 @@ else:
                             'fixed_costs': 'sum',
                             'operational_costs': 'sum',
                             'contribution_margin': 'sum',
-                            'net_profit': 'sum'
+                            'net_profit': 'sum',
+                            'profit_margin': 'mean'  # Average the profit margins
                         }).reset_index()
                 
                         # Add period label
@@ -1146,7 +1219,8 @@ else:
                             'fixed_costs': 'sum',
                             'operational_costs': 'sum',
                             'contribution_margin': 'sum',
-                            'net_profit': 'sum'
+                            'net_profit': 'sum',
+                            'profit_margin': 'mean'  # Average the profit margins
                         }).reset_index()
                         display_df['period'] = display_df.apply(lambda x: f"{int(x['year'])}-S{int(x['semester'])}", axis=1)
                 else:
@@ -1381,9 +1455,12 @@ else:
                     st.subheader("📊 Margem de Lucro")
                     x_col, x_title = prepare_x_axis(display_df, view_type)
             
-                    # Don't recalculate profit margin for monthly view - use extracted values
-                    # Only calculate for aggregated views (Trimestral, etc.)
-                    if view_type not in ["Anual", "Mensal"]:
+                    # Don't recalculate profit margin - we already have it from aggregation or extraction
+                    # The profit margin is either:
+                    # - Extracted from Excel for Anual/Mensal views
+                    # - Averaged during aggregation for Trimestral/Semestral views
+                    # Only calculate if the column is completely missing
+                    if 'profit_margin' not in display_df.columns:
                         display_df['profit_margin'] = (display_df['net_profit'] / display_df['revenue'] * 100).fillna(0)
             
                     fig_margin = px.bar(
@@ -2293,16 +2370,328 @@ else:
         # Tab 3: Detailed Breakdown (only for flexible mode)
         if use_flexible_extractor:
             with tab3:
-                st.header("🔍 Detalhamento por Categoria")
+                st.header("🔍 Análise Detalhada de Despesas")
         
                 if hasattr(st.session_state, 'flexible_data') and st.session_state.flexible_data is not None:
                     flexible_data = st.session_state.flexible_data
-            
-                    # Year selector
-                    years = sorted(flexible_data.keys())
-                    selected_year = st.selectbox("Selecione o Ano", years, index=len(years)-1)
-            
-                    year_data = flexible_data[selected_year]
+                    
+                    # Process detailed monthly data
+                    if 'detailed_monthly_data' not in st.session_state:
+                        st.session_state.detailed_monthly_data = process_detailed_monthly_data(flexible_data)
+                    
+                    detailed_data = st.session_state.detailed_monthly_data
+                    
+                    # Filter Section
+                    st.markdown("### 🎯 Filtros")
+                    filter_col1, filter_col2, filter_col3, filter_col4 = st.columns(4)
+                    
+                    with filter_col1:
+                        # Multi-year selector
+                        years = sorted(flexible_data.keys())
+                        selected_years = st.multiselect(
+                            "Anos",
+                            options=years,
+                            default=[years[-1]] if years else []
+                        )
+                    
+                    with filter_col2:
+                        # Multi-month selector
+                        months = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 
+                                 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ']
+                        selected_months = st.multiselect(
+                            "Meses",
+                            options=months,
+                            default=months
+                        )
+                    
+                    with filter_col3:
+                        # Category filter
+                        all_categories = list(detailed_data['summary']['total_categories'])
+                        category_names = {cat: get_category_name(cat) for cat in all_categories}
+                        selected_categories = st.multiselect(
+                            "Categorias",
+                            options=all_categories,
+                            format_func=lambda x: f"{get_category_icon(x)} {category_names[x]}",
+                            default=all_categories
+                        )
+                    
+                    with filter_col4:
+                        # Search box
+                        search_term = st.text_input(
+                            "🔍 Buscar despesa",
+                            placeholder="Digite para buscar..."
+                        )
+                    
+                    # Value range filter
+                    st.markdown("---")
+                    value_col1, value_col2 = st.columns(2)
+                    
+                    # Get min and max values from data
+                    all_values = [item['valor_anual'] for item in detailed_data['line_items']]
+                    min_val = min(all_values) if all_values else 0
+                    max_val = max(all_values) if all_values else 1000000
+                    
+                    with value_col1:
+                        min_value = st.number_input(
+                            "Valor Mínimo (R$)",
+                            min_value=min_val,
+                            max_value=max_val,
+                            value=min_val,
+                            step=1000.0
+                        )
+                    
+                    with value_col2:
+                        max_value = st.number_input(
+                            "Valor Máximo (R$)",
+                            min_value=min_val,
+                            max_value=max_val,
+                            value=max_val,
+                            step=1000.0
+                        )
+                    
+                    st.markdown("---")
+                    
+                    # Apply filters
+                    filtered_items = []
+                    for item in detailed_data['line_items']:
+                        # Year filter
+                        if item['ano'] not in selected_years:
+                            continue
+                        
+                        # Category filter
+                        if item['categoria'] not in selected_categories:
+                            continue
+                        
+                        # Value filter
+                        if not (min_value <= item['valor_anual'] <= max_value):
+                            continue
+                        
+                        # Search filter
+                        if search_term and search_term.lower() not in item['descricao'].lower():
+                            continue
+                        
+                        filtered_items.append(item)
+                    
+                    # Summary metrics after filtering
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    total_filtered = sum(item['valor_anual'] for item in filtered_items)
+                    unique_categories = len(set(item['categoria'] for item in filtered_items))
+                    
+                    with col1:
+                        st.metric("Total Filtrado", format_currency(total_filtered))
+                    with col2:
+                        st.metric("Itens", f"{len(filtered_items):,}")
+                    with col3:
+                        st.metric("Categorias", unique_categories)
+                    with col4:
+                        avg_value = total_filtered / len(filtered_items) if filtered_items else 0
+                        st.metric("Valor Médio", format_currency(avg_value))
+                    
+                    # Visualizations Section
+                    st.markdown("---")
+                    st.markdown("### 📊 Visualizações")
+                    
+                    # Create tabs for different visualizations
+                    viz_tab1, viz_tab2, viz_tab3, viz_tab4 = st.tabs([
+                        "🗂️ Tabela Detalhada",
+                        "🌡️ Mapa de Calor",
+                        "📊 Top Despesas",
+                        "📈 Análise Temporal"
+                    ])
+                    
+                    # Tab 1: Detailed Table
+                    with viz_tab1:
+                        st.subheader("Tabela de Despesas Detalhada")
+                        
+                        if filtered_items:
+                            # Create DataFrame for display
+                            display_data = []
+                            for item in filtered_items:
+                                display_data.append({
+                                    'Ano': item['ano'],
+                                    'Categoria': get_category_name(item['categoria']),
+                                    'Descrição': item['descricao'],
+                                    'Valor Anual': item['valor_anual'],
+                                    '% do Total': (item['valor_anual'] / total_filtered * 100) if total_filtered > 0 else 0
+                                })
+                            
+                            display_df = pd.DataFrame(display_data)
+                            display_df = display_df.sort_values('Valor Anual', ascending=False)
+                            
+                            # Display with formatting
+                            st.dataframe(
+                                display_df.style.format({
+                                    'Valor Anual': lambda x: format_currency(x),
+                                    '% do Total': '{:.1f}%'
+                                }),
+                                use_container_width=True,
+                                height=600
+                            )
+                            
+                            # Export button
+                            csv = display_df.to_csv(index=False)
+                            st.download_button(
+                                label="📥 Baixar como CSV",
+                                data=csv,
+                                file_name=f"despesas_detalhadas_{datetime.now().strftime('%Y%m%d')}.csv",
+                                mime="text/csv"
+                            )
+                        else:
+                            st.info("Nenhum item encontrado com os filtros selecionados.")
+                    
+                    # Tab 2: Heatmap
+                    with viz_tab2:
+                        st.subheader("Mapa de Calor - Despesas por Mês e Categoria")
+                        
+                        if filtered_items and selected_years:
+                            # Prepare data for heatmap
+                            heatmap_data = {}
+                            months = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 
+                                     'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ']
+                            
+                            for month in months:
+                                heatmap_data[month] = {}
+                                for cat in selected_categories:
+                                    heatmap_data[month][cat] = 0
+                            
+                            # Aggregate values
+                            for item in filtered_items:
+                                if item['ano'] in selected_years:
+                                    for month, value in item['valores_mensais'].items():
+                                        if month in selected_months:
+                                            heatmap_data[month][item['categoria']] += value
+                            
+                            # Create DataFrame for heatmap
+                            heatmap_df = pd.DataFrame(heatmap_data).T
+                            heatmap_df.columns = [get_category_name(cat) for cat in heatmap_df.columns]
+                            
+                            # Create heatmap
+                            fig_heatmap = px.imshow(
+                                heatmap_df.T,
+                                labels=dict(x="Mês", y="Categoria", color="Valor (R$)"),
+                                x=heatmap_df.index,
+                                y=heatmap_df.columns,
+                                color_continuous_scale="RdYlBu_r",
+                                aspect="auto"
+                            )
+                            
+                            fig_heatmap.update_layout(
+                                title=f"Mapa de Calor de Despesas - {', '.join(map(str, selected_years))}",
+                                height=600
+                            )
+                            
+                            # Add text annotations
+                            for i, month in enumerate(heatmap_df.index):
+                                for j, cat in enumerate(heatmap_df.columns):
+                                    value = heatmap_df.loc[month, cat]
+                                    if value > 0:
+                                        fig_heatmap.add_annotation(
+                                            x=i, y=j,
+                                            text=format_currency(value),
+                                            showarrow=False,
+                                            font=dict(size=10)
+                                        )
+                            
+                            st.plotly_chart(fig_heatmap, use_container_width=True)
+                        else:
+                            st.info("Selecione pelo menos um ano para visualizar o mapa de calor.")
+                    
+                    # Tab 3: Top Expenses
+                    with viz_tab3:
+                        st.subheader("Top 10 Maiores Despesas")
+                        
+                        if filtered_items:
+                            # Get top 10 expenses
+                            top_items = sorted(filtered_items, key=lambda x: x['valor_anual'], reverse=True)[:10]
+                            
+                            # Create bar chart
+                            fig_top = go.Figure()
+                            
+                            labels = [f"{item['descricao'][:30]}..." if len(item['descricao']) > 30 else item['descricao'] 
+                                     for item in top_items]
+                            values = [item['valor_anual'] for item in top_items]
+                            categories = [get_category_name(item['categoria']) for item in top_items]
+                            
+                            fig_top.add_trace(go.Bar(
+                                x=values,
+                                y=labels,
+                                orientation='h',
+                                text=[format_currency(v) for v in values],
+                                textposition='auto',
+                                hovertemplate='<b>%{y}</b><br>Categoria: %{customdata}<br>Valor: R$ %{x:,.2f}<extra></extra>',
+                                customdata=categories,
+                                marker_color='#3498db'
+                            ))
+                            
+                            fig_top.update_layout(
+                                title="Top 10 Despesas por Valor",
+                                xaxis_title="Valor (R$)",
+                                height=600,
+                                margin=dict(l=200)
+                            )
+                            
+                            st.plotly_chart(fig_top, use_container_width=True)
+                            
+                            # Additional metrics
+                            top_total = sum(values)
+                            st.info(f"💡 As top 10 despesas representam {(top_total/total_filtered*100):.1f}% do total filtrado")
+                        else:
+                            st.info("Nenhum item encontrado com os filtros selecionados.")
+                    
+                    # Tab 4: Temporal Analysis
+                    with viz_tab4:
+                        st.subheader("Análise Temporal de Despesas")
+                        
+                        if filtered_items and selected_categories:
+                            # Allow selection of specific items for trend analysis
+                            item_options = {f"{item['descricao']} ({item['ano']})": item 
+                                          for item in filtered_items}
+                            
+                            selected_items_for_trend = st.multiselect(
+                                "Selecione itens para análise de tendência",
+                                options=list(item_options.keys()),
+                                max_selections=5
+                            )
+                            
+                            if selected_items_for_trend:
+                                # Create line chart for selected items
+                                fig_trend = go.Figure()
+                                
+                                months = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 
+                                         'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ']
+                                
+                                for item_key in selected_items_for_trend:
+                                    item = item_options[item_key]
+                                    monthly_values = [item['valores_mensais'].get(month, 0) for month in months]
+                                    
+                                    fig_trend.add_trace(go.Scatter(
+                                        x=months,
+                                        y=monthly_values,
+                                        mode='lines+markers',
+                                        name=item_key,
+                                        line=dict(width=3),
+                                        marker=dict(size=8)
+                                    ))
+                                
+                                fig_trend.update_layout(
+                                    title="Tendência Mensal de Despesas Selecionadas",
+                                    xaxis_title="Mês",
+                                    yaxis_title="Valor (R$)",
+                                    height=500,
+                                    hovermode='x unified'
+                                )
+                                
+                                st.plotly_chart(fig_trend, use_container_width=True)
+                            else:
+                                st.info("Selecione itens específicos para ver sua tendência mensal.")
+                        else:
+                            st.info("Nenhum item encontrado com os filtros selecionados.")
+                    
+                    # Keep backward compatibility - show original category breakdown
+                    if selected_years:
+                        selected_year = selected_years[0]
+                        year_data = flexible_data[selected_year]
             
                     # Summary metrics for the year
                     col1, col2, col3 = st.columns(3)
@@ -2496,7 +2885,7 @@ else:
                                     f'{selected_year}': lambda x: format_currency(x),
                                     'Variação R$': lambda x: format_currency(x),
                                     'Variação %': '{:.1f}%'
-                                }).background_gradient(subset=['Variação %'], cmap='RdYlGn', vmin=-50, vmax=50),
+                                }),
                                 use_container_width=True,
                                 hide_index=True
                             )
@@ -2529,6 +2918,8 @@ else:
                     
                             # Include flexible data insights
                             flexible_summary = ""
+                            detailed_expense_data = ""
+                            
                             if hasattr(st.session_state, 'flexible_data') and st.session_state.flexible_data:
                                 all_categories = set()
                                 all_items = set()
@@ -2537,6 +2928,36 @@ else:
                                     all_items.update(item['label'] for item in year_data['line_items'].values())
                         
                                 flexible_summary = f"\n\nDetected categories: {len(all_categories)}\nTotal data lines: {len(all_items)}"
+                                
+                                # Process detailed monthly data for AI context
+                                if 'detailed_monthly_data' not in st.session_state:
+                                    st.session_state.detailed_monthly_data = process_detailed_monthly_data(st.session_state.flexible_data)
+                                
+                                if st.session_state.detailed_monthly_data:
+                                    # Get top expenses by category for AI context
+                                    detailed_data = st.session_state.detailed_monthly_data
+                                    expense_summary = []
+                                    
+                                    for category, items in detailed_data['por_categoria'].items():
+                                        if category not in ['revenue', 'calculated_results', 'margins']:
+                                            cat_total = sum(item['valor_anual'] for item in items)
+                                            top_items = sorted(items, key=lambda x: x['valor_anual'], reverse=True)[:3]
+                                            
+                                            expense_summary.append(f"\n{get_category_name(category)} (Total: R$ {cat_total:,.2f}):")
+                                            for item in top_items:
+                                                expense_summary.append(f"  - {item['descricao']}: R$ {item['valor_anual']:,.2f}")
+                                    
+                                    detailed_expense_data = "\n\nDetailed Expense Breakdown:" + "".join(expense_summary)
+                                    
+                                    # Add monthly trends for key expenses
+                                    monthly_trends = "\n\nMonthly Expense Patterns:"
+                                    months_with_data = sorted(detailed_data['por_mes'].keys())
+                                    if months_with_data:
+                                        for month in months_with_data[-3:]:  # Last 3 months with data
+                                            month_total = sum(item['valor'] for item in detailed_data['por_mes'][month])
+                                            monthly_trends += f"\n{month}: R$ {month_total:,.2f}"
+                                    
+                                    detailed_expense_data += monthly_trends
                     
                             # Create prompt with language instruction based on user selection
                             if language == "Português":
@@ -2557,37 +2978,56 @@ else:
                             - Revenue CAGR: {summary['metrics'].get('revenue', {}).get('cagr', 0):.1f}%
                             - Average Profit Margin: {summary['metrics'].get('profit_margin', {}).get('average', 0):.1f}%
                             {flexible_summary}
+                            {detailed_expense_data}
                     
                             Annual Data:
                             {df.to_string()}
                     
-                            {
-                                "Por favor, forneça uma análise abrangente cobrindo:" if language == "Português" else "Please provide a comprehensive analysis covering:"
-                            }
-                            {
-                                '''1. **Análise das Principais Tendências Financeiras**
+                            {"Por favor, forneça uma análise abrangente cobrindo:" if language == "Português" else "Please provide a comprehensive analysis covering:"}
+                            
+                            """
+                            
+                            # Build analysis requirements
+                            if language == "Português":
+                                analysis_items = '''1. **Análise das Principais Tendências Financeiras**
                             2. **Pontos Fortes de Performance & Vantagens Competitivas**
                             3. **Áreas de Risco & Preocupações**
-                            4. **Recomendações Estratégicas**''' + (' para categorias de despesas recém-detectadas' if hasattr(st.session_state, 'flexible_data') and st.session_state.flexible_data else '') + '''
-                            5. **Previsões Futuras & Perspectivas de Mercado**
-                    
+                            4. **Recomendações Estratégicas**'''
+                                if hasattr(st.session_state, 'flexible_data') and st.session_state.flexible_data:
+                                    analysis_items += ' para categorias de despesas recém-detectadas'
+                                analysis_items += '''
+                            5. **Previsões Futuras & Perspectivas de Mercado**'''
+                                if detailed_expense_data:
+                                    analysis_items += '''
+                            6. **Análise Detalhada de Despesas** - Identifique quais despesas específicas tiveram maior impacto e por quê'''
+                                
+                                format_requirements = '''
                             Requisitos de Formato:
                             - Use markdown com títulos claros (##) e subtítulos (###)
                             - Inclua marcadores para análise detalhada
                             - Use **negrito** para métricas-chave e pontos importantes
-                            - Assegure linguagem profissional de negócios em português brasileiro apenas''' if language == "Português" else '''1. **Main Financial Trends Analysis**
+                            - Assegure linguagem profissional de negócios em português brasileiro apenas'''
+                            else:
+                                analysis_items = '''1. **Main Financial Trends Analysis**
                             2. **Performance Strengths & Competitive Advantages**
                             3. **Risk Areas & Concerns**
-                            4. **Strategic Recommendations**''' + (' for newly detected expense categories' if hasattr(st.session_state, 'flexible_data') and st.session_state.flexible_data else '') + '''
-                            5. **Future Predictions & Market Outlook**
-                    
+                            4. **Strategic Recommendations**'''
+                                if hasattr(st.session_state, 'flexible_data') and st.session_state.flexible_data:
+                                    analysis_items += ' for newly detected expense categories'
+                                analysis_items += '''
+                            5. **Future Predictions & Market Outlook**'''
+                                if detailed_expense_data:
+                                    analysis_items += '''
+                            6. **Detailed Expense Analysis** - Identify which specific expenses had the most impact and why'''
+                                
+                                format_requirements = '''
                             Format Requirements:
                             - Use markdown with clear headings (##) and subheadings (###)
                             - Include bullet points for detailed analysis
                             - Use **bold** for key metrics and important points
                             - Ensure professional business language in English only'''
-                            }
-                            """
+                            
+                            prompt += analysis_items + format_requirements
                     
                             # Generate insights
                             response = model.generate_content(prompt)
@@ -2597,15 +3037,15 @@ else:
                             if language == "English" and any(word in insights_text.lower() for word in ['receita', 'lucro', 'despesas', 'vendas', 'análise']):
                                 # If Portuguese words detected when English is selected, add reminder
                                 english_reminder_prompt = f"""
-                                CRITICAL: The following text appears to contain Portuguese words. Please translate this ENTIRE analysis to English and ensure all content is in English only:
-                        
-                                {insights_text}
-                        
-                                Requirements:
-                                - Translate everything to English
-                                - Maintain the same structure and insights
-                                - Use business terminology
-                                - Keep all formatting and markdown
+CRITICAL: The following text appears to contain Portuguese words. Please translate this ENTIRE analysis to English and ensure all content is in English only:
+
+{insights_text}
+
+Requirements:
+- Translate everything to English
+- Maintain the same structure and insights
+- Use business terminology
+- Keep all formatting and markdown
                                 """
                                 response = model.generate_content(english_reminder_prompt)
                                 insights_text = response.text

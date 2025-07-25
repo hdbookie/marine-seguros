@@ -205,13 +205,34 @@ class DatabaseManager:
                 
                 # Convert DataFrames to JSON-serializable format
                 def serialize_value(value):
+                    import datetime
+                    import pandas as pd
+                    
                     if hasattr(value, 'to_dict'):  # Check if it's a DataFrame
+                        # Convert DataFrame, handling datetime columns
+                        df_dict = value.to_dict('records')
+                        # Recursively serialize the data to handle any datetime objects
+                        serialized_data = [serialize_value(record) for record in df_dict]
                         return {
                             '__dataframe__': True,
-                            'data': value.to_dict('records'),
+                            'data': serialized_data,
                             'columns': list(value.columns),
                             'dtypes': {col: str(dtype) for col, dtype in value.dtypes.items()}
                         }
+                    elif isinstance(value, (datetime.datetime, datetime.date, pd.Timestamp)):
+                        # Convert datetime objects to ISO format string
+                        return value.isoformat()
+                    elif hasattr(value, 'isoformat'):  # Other datetime-like objects
+                        return value.isoformat()
+                    elif isinstance(value, np.integer):
+                        # Convert numpy integers to Python int
+                        return int(value)
+                    elif isinstance(value, np.floating):
+                        # Convert numpy floats to Python float
+                        return float(value)
+                    elif isinstance(value, np.ndarray):
+                        # Convert numpy arrays to lists
+                        return value.tolist()
                     elif isinstance(value, dict):
                         # Recursively handle nested dictionaries
                         return {k: serialize_value(v) for k, v in value.items()}
