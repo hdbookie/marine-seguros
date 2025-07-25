@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Dict, Any, Optional, List
 import streamlit as st
 from pathlib import Path
+import pandas as pd
 
 class DatabaseManager:
     """SQLite-based persistence for dashboard data"""
@@ -201,7 +202,28 @@ class DatabaseManager:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                json_data = json.dumps(analysis_data, ensure_ascii=False)
+                
+                # Convert DataFrames to JSON-serializable format
+                def serialize_value(value):
+                    if hasattr(value, 'to_dict'):  # Check if it's a DataFrame
+                        return {
+                            '__dataframe__': True,
+                            'data': value.to_dict('records'),
+                            'columns': list(value.columns),
+                            'dtypes': {col: str(dtype) for col, dtype in value.dtypes.items()}
+                        }
+                    elif isinstance(value, dict):
+                        # Recursively handle nested dictionaries
+                        return {k: serialize_value(v) for k, v in value.items()}
+                    elif isinstance(value, list):
+                        # Handle lists
+                        return [serialize_value(item) for item in value]
+                    else:
+                        return value
+                
+                serializable_data = serialize_value(analysis_data)
+                
+                json_data = json.dumps(serializable_data, ensure_ascii=False, default=str)
                 
                 cursor.execute("""
                     INSERT OR REPLACE INTO analysis_cache 
@@ -227,7 +249,26 @@ class DatabaseManager:
                 
                 row = cursor.fetchone()
                 if row:
-                    return json.loads(row[0])
+                    data = json.loads(row[0])
+                    
+                    # Reconstruct DataFrames from JSON data
+                    def deserialize_value(value):
+                        if isinstance(value, dict):
+                            if value.get('__dataframe__') == True:
+                                # This was a DataFrame, reconstruct it
+                                df = pd.DataFrame(value['data'], columns=value['columns'])
+                                return df
+                            else:
+                                # Recursively handle nested dictionaries
+                                return {k: deserialize_value(v) for k, v in value.items()}
+                        elif isinstance(value, list):
+                            # Handle lists
+                            return [deserialize_value(item) for item in value]
+                        else:
+                            return value
+                    
+                    reconstructed_data = deserialize_value(data)
+                    return reconstructed_data
                 return None
         except Exception as e:
             st.error(f"Error loading analysis cache: {str(e)}")
@@ -351,10 +392,32 @@ class DatabaseManager:
                 ):
                     print(f"✅ Saved filter state: {len(session_state.selected_years)} years, {len(session_state.selected_months)} months")
             
-            # Save analysis cache if available
+            # Save complete analyzed data cache
+            cache_data = {}
+            
+            # Save processed_data if available
+            if hasattr(session_state, 'processed_data') and session_state.processed_data:
+                cache_data['processed_data'] = session_state.processed_data
+                
+            # Save monthly_data if available
+            if hasattr(session_state, 'monthly_data') and session_state.monthly_data is not None:
+                cache_data['monthly_data'] = session_state.monthly_data
+                
+            # Save flexible_data if available
+            if hasattr(session_state, 'flexible_data') and session_state.flexible_data:
+                cache_data['flexible_data'] = session_state.flexible_data
+                
+            # Save comparative analysis if available
             if hasattr(session_state, 'comparative_analysis') and session_state.comparative_analysis:
-                if self.save_analysis_cache(session_state.comparative_analysis):
-                    print("✅ Saved analysis cache")
+                cache_data['comparative_analysis'] = session_state.comparative_analysis
+                
+            # Save gemini insights if available
+            if hasattr(session_state, 'gemini_insights') and session_state.gemini_insights:
+                cache_data['gemini_insights'] = session_state.gemini_insights
+            
+            if cache_data:
+                if self.save_analysis_cache(cache_data):
+                    print(f"✅ Saved complete analysis cache with {len(cache_data)} data types")
                     
         except Exception as e:
             # Don't show error to user for auto-save failures
@@ -384,13 +447,32 @@ class DatabaseManager:
                 data_loaded = True
                 print(f"Loaded filter state: {len(session_state.selected_years)} years, {len(session_state.selected_months)} months")
             
-            # Load analysis cache
+            # Load complete analysis cache
             analysis_cache = self.load_analysis_cache()
             if analysis_cache:
-                # Force overwrite
-                session_state.comparative_analysis = analysis_cache
+                # Load all cached data types
+                if 'processed_data' in analysis_cache:
+                    session_state.processed_data = analysis_cache['processed_data']
+                    print("Loaded processed_data from cache")
+                    
+                if 'monthly_data' in analysis_cache:
+                    session_state.monthly_data = analysis_cache['monthly_data']
+                    print("Loaded monthly_data from cache")
+                    
+                if 'flexible_data' in analysis_cache:
+                    session_state.flexible_data = analysis_cache['flexible_data']
+                    print("Loaded flexible_data from cache")
+                    
+                if 'comparative_analysis' in analysis_cache:
+                    session_state.comparative_analysis = analysis_cache['comparative_analysis']
+                    print("Loaded comparative_analysis from cache")
+                    
+                if 'gemini_insights' in analysis_cache:
+                    session_state.gemini_insights = analysis_cache['gemini_insights']
+                    print("Loaded gemini_insights from cache")
+                    
                 data_loaded = True
-                print("Loaded analysis cache from database")
+                print(f"Loaded complete analysis cache with {len(analysis_cache)} data types")
             
             # If we have financial data but no filters selected, select all by default
             if financial_data and not session_state.selected_years:

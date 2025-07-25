@@ -85,35 +85,58 @@ def convert_extracted_to_processed(extracted_data):
             revenue = year_data.get('revenue', {}).get('ANNUAL', 0)
             costs = year_data.get('costs', {}).get('ANNUAL', 0)
             
-            # Calculate other metrics
-            if revenue > 0:
-                margin = ((revenue - costs) / revenue) * 100
-            else:
-                margin = 0
+            # Get expenses
+            admin_expenses = year_data.get('admin_expenses', {}).get('ANNUAL', 0)
+            operational_expenses = year_data.get('operational_expenses', {}).get('ANNUAL', 0)
+            marketing_expenses = year_data.get('marketing_expenses', {}).get('ANNUAL', 0)
+            financial_expenses = year_data.get('financial_expenses', {}).get('ANNUAL', 0)
             
-            # Extract fixed_costs and operational_costs properly
-            fixed_costs_data = year_data.get('fixed_costs', 0)
-            operational_costs_data = year_data.get('operational_costs', 0)
-            
-            # If it's a dictionary, get the ANNUAL value
+            # Get fixed costs directly from Excel (CUSTOS FIXOS line)
+            fixed_costs_data = year_data.get('fixed_costs', {})
             if isinstance(fixed_costs_data, dict):
                 fixed_costs = fixed_costs_data.get('ANNUAL', 0)
             else:
-                fixed_costs = fixed_costs_data
-                
+                fixed_costs = fixed_costs_data if fixed_costs_data else 0
+            
+            # If no direct fixed costs data, calculate as sum of expenses (fallback)
+            if fixed_costs == 0:
+                fixed_costs = admin_expenses + operational_expenses + marketing_expenses + financial_expenses
+            
+            # Calculate operational costs
+            operational_costs_data = year_data.get('operational_costs', {})
             if isinstance(operational_costs_data, dict):
                 operational_costs = operational_costs_data.get('ANNUAL', 0)
             else:
                 operational_costs = operational_costs_data
+                
+            if operational_costs == 0:
+                operational_costs = admin_expenses + operational_expenses
+            
+            # Calculate all required fields
+            total_costs = costs + fixed_costs
+            net_profit = revenue - total_costs
+            profit_margin = (net_profit / revenue * 100) if revenue > 0 else 0
+            gross_profit = revenue - costs
+            gross_margin = (gross_profit / revenue * 100) if revenue > 0 else 0
+            contribution_margin = revenue - costs
             
             consolidated_data.append({
                 'year': int(year),
                 'revenue': revenue,
                 'variable_costs': costs,
-                'gross_profit': revenue - costs,
-                'gross_margin': margin,
                 'fixed_costs': fixed_costs,
-                'operational_costs': operational_costs
+                'admin_expenses': admin_expenses,
+                'operational_expenses': operational_expenses,
+                'marketing_expenses': marketing_expenses,
+                'financial_expenses': financial_expenses,
+                'operational_costs': operational_costs,
+                'total_costs': total_costs,
+                'net_profit': net_profit,
+                'profit': net_profit,
+                'profit_margin': profit_margin,
+                'gross_profit': gross_profit,
+                'gross_margin': gross_margin,
+                'contribution_margin': contribution_margin
             })
         
         if consolidated_data:
@@ -179,24 +202,37 @@ def sync_processed_to_extracted():
             extracted = {}
             df = st.session_state.processed_data.get('consolidated', pd.DataFrame())
             
-            for _, row in df.iterrows():
-                year = str(int(row['year']))
-                extracted[year] = {
-                    'revenue': {'ANNUAL': row.get('revenue', 0)},
-                    'costs': {'ANNUAL': row.get('variable_costs', 0)},
-                    'fixed_costs': row.get('fixed_costs', 0),
-                    'operational_costs': row.get('operational_costs', 0),
-                    'year': int(year)
-                }
+            # Ensure df is a DataFrame before iterating
+            if isinstance(df, pd.DataFrame) and not df.empty:
+                for _, row in df.iterrows():
+                    year = str(int(row['year']))
+                    extracted[year] = {
+                        'revenue': {'ANNUAL': row.get('revenue', 0)},
+                        'costs': {'ANNUAL': row.get('variable_costs', 0)},
+                        'fixed_costs': row.get('fixed_costs', 0),
+                        'operational_costs': row.get('operational_costs', 0),
+                        'year': int(year)
+                    }
             
             st.session_state.extracted_data = extracted
 
 # Try to load data from database FIRST
 data_loaded = db.auto_load_state(st.session_state)
 
-# If data was loaded from database, convert it to processed format
-if data_loaded and hasattr(st.session_state, 'extracted_data') and st.session_state.extracted_data:
-    print(f"DEBUG: About to convert {len(st.session_state.extracted_data)} years to processed format")
+# Check if we have cached analyzed data
+print(f"DEBUG: data_loaded = {data_loaded}")
+print(f"DEBUG: has processed_data = {hasattr(st.session_state, 'processed_data')}")
+if hasattr(st.session_state, 'processed_data'):
+    print(f"DEBUG: processed_data is None = {st.session_state.processed_data is None}")
+    if st.session_state.processed_data:
+        print(f"DEBUG: processed_data type = {type(st.session_state.processed_data)}")
+
+if data_loaded and hasattr(st.session_state, 'processed_data') and st.session_state.processed_data:
+    print("DEBUG: Using cached analyzed data - no reconstruction needed")
+    # Everything is already loaded from cache by auto_load_state
+elif data_loaded and hasattr(st.session_state, 'extracted_data') and st.session_state.extracted_data:
+    # Only reconstruct if we don't have cached processed_data but have raw extracted_data
+    print(f"DEBUG: No cached analysis found, converting {len(st.session_state.extracted_data)} years from raw data")
     processed = convert_extracted_to_processed(st.session_state.extracted_data)
     if processed:
         st.session_state.processed_data = processed
@@ -204,25 +240,67 @@ if data_loaded and hasattr(st.session_state, 'extracted_data') and st.session_st
     
     # Also need to generate monthly data from extracted data
     try:
-        # Create monthly DataFrame from extracted data
+        # Create monthly DataFrame from extracted data with ALL required fields
         monthly_data = []
         for year, year_data in st.session_state.extracted_data.items():
             revenue_data = year_data.get('revenue', {})
             costs_data = year_data.get('costs', {})
+            admin_data = year_data.get('admin_expenses', {})
+            operational_data = year_data.get('operational_expenses', {})
+            marketing_data = year_data.get('marketing_expenses', {})
+            financial_data = year_data.get('financial_expenses', {})
+            fixed_costs_data = year_data.get('fixed_costs', {})
             
             for month in ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ']:
                 if month in revenue_data:
+                    revenue = revenue_data.get(month, 0)
+                    variable_costs = costs_data.get(month, 0)
+                    
+                    # Get fixed costs directly from Excel data
+                    fixed_costs = fixed_costs_data.get(month, 0)
+                    
+                    # If no direct fixed costs data, calculate as sum of expenses (fallback)
+                    if fixed_costs == 0:
+                        fixed_costs = (
+                            admin_data.get(month, 0) + 
+                            operational_data.get(month, 0) + 
+                            marketing_data.get(month, 0) + 
+                            financial_data.get(month, 0)
+                        )
+                    
+                    # Calculate operational costs (admin + operational)
+                    operational_costs = admin_data.get(month, 0) + operational_data.get(month, 0)
+                    
+                    # Calculate profit and margins
+                    total_costs = variable_costs + fixed_costs
+                    net_profit = revenue - total_costs
+                    profit_margin = (net_profit / revenue * 100) if revenue > 0 else 0
+                    contribution_margin = revenue - variable_costs
+                    
                     monthly_data.append({
                         'year': int(year),
                         'month': month,
-                        'revenue': revenue_data.get(month, 0),
-                        'costs': costs_data.get(month, 0)
+                        'revenue': revenue,
+                        'variable_costs': variable_costs,
+                        'fixed_costs': fixed_costs,
+                        'admin_expenses': admin_data.get(month, 0),
+                        'operational_expenses': operational_data.get(month, 0),
+                        'marketing_expenses': marketing_data.get(month, 0),
+                        'financial_expenses': financial_data.get(month, 0),
+                        'total_costs': total_costs,
+                        'operational_costs': operational_costs,
+                        'net_profit': net_profit,
+                        'profit_margin': profit_margin,
+                        'contribution_margin': contribution_margin
                     })
         
         if monthly_data:
             st.session_state.monthly_data = pd.DataFrame(monthly_data)
+            print(f"DEBUG: Generated monthly data with {len(monthly_data)} records and columns: {list(st.session_state.monthly_data.columns)}")
     except Exception as e:
         print(f"Error generating monthly data: {e}")
+        import traceback
+        traceback.print_exc()
 
 # Initialize session state
 if 'file_manager' not in st.session_state:
@@ -250,11 +328,15 @@ if not data_loaded:
         st.session_state.selected_months = []
 
 # Debug: Show loaded data status
-if data_loaded and hasattr(st.session_state, 'extracted_data') and st.session_state.extracted_data:
-    print(f"DEBUG: Successfully loaded {len(st.session_state.extracted_data)} years from database")
+if data_loaded:
+    if hasattr(st.session_state, 'extracted_data') and st.session_state.extracted_data:
+        print(f"DEBUG: Successfully loaded {len(st.session_state.extracted_data)} years from database")
     if hasattr(st.session_state, 'processed_data') and st.session_state.processed_data and 'consolidated' in st.session_state.processed_data:
-        df = st.session_state.processed_data.get('consolidated', pd.DataFrame())
-        print(f"DEBUG: Processed data contains {len(df)} years: {sorted(df['year'].tolist())}")
+        df = st.session_state.processed_data.get('consolidated')
+        if isinstance(df, pd.DataFrame):
+            print(f"DEBUG: Processed data contains {len(df)} years: {sorted(df['year'].tolist())}")
+        else:
+            print(f"DEBUG: Processed data 'consolidated' is not a DataFrame, it's a {type(df)}")
     else:
         print("DEBUG: WARNING - No processed_data despite successful database load")
 
@@ -395,12 +477,8 @@ else:
                 # Add reload button
                 if st.button("🔄 Recarregar Dados Salvos", use_container_width=True):
                     if db.auto_load_state(st.session_state):
-                        # Convert loaded data
-                        if hasattr(st.session_state, 'extracted_data') and st.session_state.extracted_data:
-                            processed = convert_extracted_to_processed(st.session_state.extracted_data)
-                            if processed:
-                                st.session_state.processed_data = processed
-                        st.success("✅ Dados carregados!")
+                        # Everything is loaded from cache by auto_load_state
+                        st.success("✅ Dados carregados do cache!")
                         st.rerun()
             else:
                 st.warning("❌ Nenhum dado salvo")
@@ -561,7 +639,9 @@ else:
                 
                         with col2:
                             if gerenciar_mode and st.session_state.user['role'] == 'admin':
-                                if st.button("🗑️ Excluir", key=f"del_{arquivo['id']}"):
+                                # Create unique key using file ID and a counter to handle duplicates
+                                button_key = f"del_{arquivo['id']}_{id(arquivo)}"
+                                if st.button("🗑️ Excluir", key=button_key):
                                     if hasattr(st.session_state, 'file_manager') and st.session_state.file_manager.excluir_arquivo(arquivo['id']):
                                         st.success("Arquivo excluído!")
                                         st.rerun()
@@ -625,11 +705,20 @@ else:
                     
                             # Save to database
                             try:
+                                print("DEBUG: Attempting to save to database...")
+                                print(f"DEBUG: processed_data exists: {hasattr(st.session_state, 'processed_data')}")
+                                print(f"DEBUG: monthly_data exists: {hasattr(st.session_state, 'monthly_data')}")
+                                if hasattr(st.session_state, 'processed_data') and st.session_state.processed_data:
+                                    print(f"DEBUG: processed_data keys: {list(st.session_state.processed_data.keys())}")
                                 db.auto_save_state(st.session_state)
                                 save_success = True
+                                print("DEBUG: Save completed successfully")
                             except Exception as e:
                                 st.error(f"⚠️ Erro ao salvar no banco de dados: {str(e)}")
                                 save_success = False
+                                print(f"DEBUG: Save failed with error: {str(e)}")
+                                import traceback
+                                traceback.print_exc()
                     
                             if use_flexible_extractor and flexible_data:
                                 # Show summary of detected categories
@@ -661,6 +750,15 @@ else:
             if hasattr(st.session_state, 'processed_data') and st.session_state.processed_data is not None:
                 data = st.session_state.processed_data
                 df = data.get('consolidated', pd.DataFrame())
+                
+                # Ensure df is actually a DataFrame
+                if not isinstance(df, pd.DataFrame):
+                    st.error(f"Error: 'consolidated' data is not a DataFrame, it's a {type(df)}")
+                    df = pd.DataFrame()  # Create empty DataFrame to prevent errors
+                elif df.empty or 'year' not in df.columns:
+                    st.warning("⚠️ Os dados carregados parecem estar incompletos. Por favor, faça a análise dos dados novamente.")
+                    df = pd.DataFrame()  # Reset to empty to prevent errors
+                    
                 summary = data.get('summary', {})
         
         
@@ -726,15 +824,21 @@ else:
         
                 with col_filter2:
                     if view_type in ["Mensal", "Trimestral", "Trimestre Personalizado", "Semestral", "Personalizado"]:
-                        available_years = sorted(df['year'].unique())
-                        selected_years = st.multiselect(
-                            "Anos",
-                            available_years,
-                            default=available_years[-3:] if len(available_years) >= 3 else available_years,
-                            key="dashboard_selected_years"
-                        )
+                        if not df.empty and 'year' in df.columns:
+                            available_years = sorted(df['year'].unique())
+                            selected_years = st.multiselect(
+                                "Anos",
+                                available_years,
+                                default=available_years[-3:] if len(available_years) >= 3 else available_years,
+                                key="dashboard_selected_years"
+                            )
+                        else:
+                            selected_years = []
                     else:
-                        selected_years = sorted(df['year'].unique())
+                        if not df.empty and 'year' in df.columns:
+                            selected_years = sorted(df['year'].unique())
+                        else:
+                            selected_years = []
         
                 with col_filter3:
                     if view_type == "Mensal":
@@ -795,7 +899,14 @@ else:
         
                 # Prepare data based on view type
                 if view_type == "Anual":
-                    display_df = df[df['year'].isin(selected_years)]
+                    if not df.empty and 'year' in df.columns:
+                        if not df.empty and 'year' in df.columns:
+                            display_df = df[df['year'].isin(selected_years)]
+                        else:
+                            display_df = pd.DataFrame()
+                    else:
+                        display_df = pd.DataFrame()
+                        st.warning("⚠️ Dados não disponíveis. Por favor, faça a análise dos dados primeiro.")
                 elif view_type == "Mensal":
                     if not hasattr(st.session_state, 'monthly_data') or st.session_state.monthly_data is None or st.session_state.monthly_data.empty:
                         st.warning("📋 Dados mensais não disponíveis. Mostrando visualização anual.")
@@ -807,7 +918,10 @@ else:
                                 if st.session_state.monthly_data is not None:
                                     st.info(f"Debug: monthly_data empty: {st.session_state.monthly_data.empty}")
                                     st.info(f"Debug: monthly_data shape: {st.session_state.monthly_data.shape}")
-                        display_df = df[df['year'].isin(selected_years)]
+                        if not df.empty and 'year' in df.columns:
+                            display_df = df[df['year'].isin(selected_years)]
+                        else:
+                            display_df = pd.DataFrame()
                     else:
                         # Use monthly data
                         monthly_df = st.session_state.monthly_data
@@ -837,7 +951,10 @@ else:
                 elif view_type == "Trimestral":
                     if not hasattr(st.session_state, 'monthly_data') or st.session_state.monthly_data is None or st.session_state.monthly_data.empty:
                         st.warning("📋 Dados mensais não disponíveis para visualização trimestral. Mostrando visualização anual.")
-                        display_df = df[df['year'].isin(selected_years)]
+                        if not df.empty and 'year' in df.columns:
+                            display_df = df[df['year'].isin(selected_years)]
+                        else:
+                            display_df = pd.DataFrame()
                     else:
                         # Aggregate monthly data by quarter
                         monthly_df = st.session_state.monthly_data
@@ -879,7 +996,10 @@ else:
                 elif view_type == "Trimestre Personalizado":
                     if not hasattr(st.session_state, 'monthly_data') or st.session_state.monthly_data is None or st.session_state.monthly_data.empty:
                         st.warning("📋 Dados mensais não disponíveis para trimestre personalizado. Mostrando visualização anual.")
-                        display_df = df[df['year'].isin(selected_years)]
+                        if not df.empty and 'year' in df.columns:
+                            display_df = df[df['year'].isin(selected_years)]
+                        else:
+                            display_df = pd.DataFrame()
                     else:
                         # Custom trimester logic
                         monthly_df = st.session_state.monthly_data
@@ -944,7 +1064,10 @@ else:
                 elif view_type == "Semestral":
                     if not hasattr(st.session_state, 'monthly_data') or st.session_state.monthly_data is None or st.session_state.monthly_data.empty:
                         st.warning("📋 Dados mensais não disponíveis para visualização semestral. Mostrando visualização anual.")
-                        display_df = df[df['year'].isin(selected_years)]
+                        if not df.empty and 'year' in df.columns:
+                            display_df = df[df['year'].isin(selected_years)]
+                        else:
+                            display_df = pd.DataFrame()
                     else:
                         # Aggregate monthly data by semester
                         monthly_df = st.session_state.monthly_data
@@ -983,7 +1106,10 @@ else:
                         display_df['period'] = display_df.apply(lambda x: f"{int(x['year'])}-S{int(x['semester'])}", axis=1)
                 else:
                     # Default to annual view if monthly data not available
-                    display_df = df[df['year'].isin(selected_years)].copy()
+                    if not df.empty and 'year' in df.columns:
+                        display_df = df[df['year'].isin(selected_years)].copy()
+                    else:
+                        display_df = pd.DataFrame()
             
                     # Ensure all numeric columns contain only numeric values (not dicts)
                     numeric_cols = ['revenue', 'variable_costs', 'fixed_costs', 'operational_costs', 
@@ -1162,7 +1288,9 @@ else:
                         xaxis=dict(
                             tickangle=-45 if view_type == "Mensal" else 0,
                             tickmode='linear',
-                            dtick=2 if view_type == "Mensal" and len(display_df) > 24 else None
+                            dtick=1 if view_type == "Anual" else (2 if view_type == "Mensal" and len(display_df) > 24 else None),
+                            type='category' if view_type == "Anual" else None,
+                            categoryorder='category ascending' if view_type == "Anual" else None
                         ),
                         height=500 if view_type == "Mensal" else 400,
                         margin=dict(t=50, b=100 if view_type == "Mensal" else 50)
@@ -1192,139 +1320,274 @@ else:
                         color_continuous_scale='RdYlGn'
                     )
             
-                    # Smart text positioning for monthly view
-                    if view_type == "Mensal" and len(display_df) > 20:
-                        fig_margin.update_traces(
-                            texttemplate='',
-                            hovertemplate='<b>%{x}</b><br>Margem de Lucro: %{y:.2f}%<extra></extra>'
-                        )
-                    else:
-                        fig_margin.update_traces(
-                            text=display_df['profit_margin'].apply(lambda x: f'{x:.2f}%'),
-                            textposition='outside'
-                        )
+                    # Always show values on bars
+                    fig_margin.update_traces(
+                        text=display_df['profit_margin'].apply(lambda x: f'{x:.2f}%'),
+                        textposition='outside',
+                        hovertemplate='<b>%{x}</b><br>Margem de Lucro: %{y:.2f}%<extra></extra>'
+                    )
             
                     fig_margin.update_layout(
                         yaxis_title="Margem de Lucro (%)",
                         xaxis_title=x_title,
+                        coloraxis_colorbar=dict(
+                            orientation="h",
+                            yanchor="bottom",
+                            y=1.02,
+                            xanchor="center",
+                            x=0.5,
+                            len=0.6,
+                            thickness=15
+                        ),
                         xaxis=dict(
                             tickangle=-45 if view_type == "Mensal" else 0,
                             tickmode='linear',
-                            dtick=2 if view_type == "Mensal" and len(display_df) > 24 else None
+                            dtick=1 if view_type == "Anual" else (2 if view_type == "Mensal" and len(display_df) > 24 else None),
+                            type='category' if view_type == "Anual" else None,
+                            categoryorder='category ascending' if view_type == "Anual" else None
                         ),
                         height=450 if view_type == "Mensal" else 400,
-                        margin=dict(t=50, b=100 if view_type == "Mensal" else 50),
+                        margin=dict(t=80, b=100 if view_type == "Mensal" else 50),
                         showlegend=False
                     )
                     st.plotly_chart(fig_margin, use_container_width=True)
         
-                # Growth Analysis (only for annual view)
-                if view_type == "Anual":
-                    st.subheader("📊 Análise de Crescimento")
-                    growth_cols = [col for col in display_df.columns if '_growth' in col]
-                    if growth_cols:
-                        fig_growth = go.Figure()
-                        for col in growth_cols:
-                            metric_name = col.replace('_growth', '').title()
-                            fig_growth.add_trace(go.Scatter(
-                                x=display_df['year'],
-                                y=display_df[col],
-                            mode='lines+markers',
-                            name=metric_name,
-                            line=dict(width=3)
-                        ))
-                    fig_growth.update_layout(
-                        title="Taxa de Crescimento Anual (%)",
-                        xaxis_title="Ano",
-                        yaxis_title="Crescimento (%)",
-                        hovermode='x unified'
-                    )
-                    st.plotly_chart(fig_growth, use_container_width=True)
-        
                 # New Financial Metrics Graphs
                 st.subheader("📊 Análise de Custos e Margens")
         
-                # 1. Variable Costs Evolution - Full width
-                if not display_df.empty and 'variable_costs' in display_df.columns:
+                # 1. Variable Costs vs Revenue Comparison - Full width
+                if not display_df.empty and 'variable_costs' in display_df.columns and 'revenue' in display_df.columns:
                     x_col, x_title = prepare_x_axis(display_df, view_type)
             
-                    fig_var_costs = px.line(
-                        display_df, 
-                        x=x_col, 
-                        y='variable_costs',
-                        title='💸 Custos Variáveis',
-                        markers=True,
-                        color_discrete_sequence=['#ff7f0e']
+                    # Create figure with revenue and variable costs
+                    fig_var_costs = go.Figure()
+                    
+                    # Add revenue line (lighter/background)
+                    fig_var_costs.add_trace(go.Scatter(
+                        x=display_df[x_col],
+                        y=display_df['revenue'],
+                        name='Receita',
+                        mode='lines+markers',
+                        line=dict(color='#1f77b4', width=3, dash='dot'),
+                        marker=dict(size=8),
+                        hovertemplate='<b>%{x}</b><br>Receita: R$ %{y:,.0f}<extra></extra>'
+                    ))
+                    
+                    # Add variable costs line (highlighted)
+                    fig_var_costs.add_trace(go.Scatter(
+                        x=display_df[x_col],
+                        y=display_df['variable_costs'],
+                        name='Custos Variáveis',
+                        mode='lines+markers',
+                        line=dict(color='#ff7f0e', width=4),
+                        marker=dict(size=10),
+                        hovertemplate='<b>%{x}</b><br>Custos Variáveis: R$ %{y:,.0f}<extra></extra>'
+                    ))
+                    
+                    # Calculate percentages for both cost types
+                    display_df['var_cost_pct'] = (display_df['variable_costs'] / display_df['revenue'] * 100).fillna(0)
+                    if 'fixed_costs' in display_df.columns:
+                        display_df['fixed_cost_pct'] = (display_df['fixed_costs'] / display_df['revenue'] * 100).fillna(0)
+                    
+                    # Update variable costs trace to include percentage
+                    fig_var_costs.data[1].update(
+                        customdata=display_df['var_cost_pct'],
+                        hovertemplate='<b>%{x}</b><br>Custos Variáveis: R$ %{y:,.0f}<br>% da Receita: %{customdata:.1f}%<extra></extra>'
                     )
-            
-                    # Apply same smart positioning as revenue
-                    if view_type == "Mensal" and len(display_df) > 20:
-                        fig_var_costs.update_traces(
-                            hovertemplate='<b>%{x}</b><br>Custos Variáveis: R$ %{y:,.0f}<extra></extra>'
-                        )
-                    else:
+                    
+                    # Add fixed costs line
+                    if 'fixed_costs' in display_df.columns:
+                        fig_var_costs.add_trace(go.Scatter(
+                            x=display_df[x_col],
+                            y=display_df['fixed_costs'],
+                            name='Custos Fixos',
+                            mode='lines+markers',
+                            line=dict(color='#d62728', width=3),
+                            marker=dict(size=8, symbol='square'),
+                            customdata=display_df['fixed_cost_pct'],
+                            hovertemplate='<b>%{x}</b><br>Custos Fixos: R$ %{y:,.0f}<br>% da Receita: %{customdata:.1f}%<extra></extra>'
+                        ))
+                    
+                    # Add text annotations with smart positioning
+                    if view_type != "Mensal" or len(display_df) <= 20:
+                        # For annual/quarterly views, show percentage on variable costs line
                         fig_var_costs.add_trace(go.Scatter(
                             x=display_df[x_col],
                             y=display_df['variable_costs'],
                             mode='text',
-                            text=[f'R$ {v:,.0f}' if i % 3 == 0 or v == display_df['variable_costs'].max() or v == display_df['variable_costs'].min() 
-                                  else '' for i, v in enumerate(display_df['variable_costs'])],
+                            text=[f'{pct:.1f}%' for pct in display_df['var_cost_pct']],
                             textposition='top center',
-                            textfont=dict(size=10),
+                            textfont=dict(size=10, color='#ff7f0e', weight='bold'),
                             showlegend=False
                         ))
+                        
+                        # Add percentage annotations for fixed costs if available
+                        if 'fixed_costs' in display_df.columns and 'fixed_cost_pct' in display_df.columns:
+                            fig_var_costs.add_trace(go.Scatter(
+                                x=display_df[x_col],
+                                y=display_df['fixed_costs'],
+                                mode='text',
+                                text=[f'{pct:.1f}%' for pct in display_df['fixed_cost_pct']],
+                                textposition='bottom center',
+                                textfont=dict(size=10, color='#d62728', weight='bold'),
+                                showlegend=False
+                            ))
             
                     fig_var_costs.update_layout(
-                        yaxis_title="Custos Variáveis (R$)",
+                        title='💸 Custos Variáveis e Fixos vs Receita',
+                        yaxis_title="Valores (R$)",
                         xaxis_title=x_title,
                         xaxis=dict(
                             tickangle=-45 if view_type == "Mensal" else 0,
                             tickmode='linear',
-                            dtick=2 if view_type == "Mensal" and len(display_df) > 24 else None
+                            dtick=1 if view_type == "Anual" else (2 if view_type == "Mensal" and len(display_df) > 24 else None),
+                            type='category' if view_type == "Anual" else None,
+                            categoryorder='category ascending' if view_type == "Anual" else None
                         ),
-                        height=450 if view_type == "Mensal" else 400,
-                        margin=dict(t=50, b=100 if view_type == "Mensal" else 50)
+                        height=500 if view_type == "Mensal" else 450,
+                        margin=dict(t=50, b=100 if view_type == "Mensal" else 50),
+                        hovermode='closest',
+                        legend=dict(
+                            orientation="h",
+                            yanchor="bottom",
+                            y=1.02,
+                            xanchor="right",
+                            x=1
+                        )
                     )
+                    
+                    # Add shaded area between lines to highlight the gap
+                    fig_var_costs.add_trace(go.Scatter(
+                        x=display_df[x_col].tolist() + display_df[x_col].tolist()[::-1],
+                        y=display_df['revenue'].tolist() + display_df['variable_costs'].tolist()[::-1],
+                        fill='toself',
+                        fillcolor='rgba(31, 119, 180, 0.1)',
+                        line=dict(color='rgba(255,255,255,0)'),
+                        showlegend=False,
+                        hoverinfo='skip'
+                    ))
+                    
                     st.plotly_chart(fig_var_costs, use_container_width=True)
         
                 # 2. Fixed Costs - Full width
                 if not display_df.empty and 'fixed_costs' in display_df.columns:
                     x_col, x_title = prepare_x_axis(display_df, view_type)
+                    
+                    # Calculate percentage if not already calculated
+                    if 'revenue' in display_df.columns:
+                        display_df['fixed_cost_pct'] = (display_df['fixed_costs'] / display_df['revenue'] * 100).fillna(0)
             
-                    fig_fixed = px.bar(
-                        display_df,
-                        x=x_col,
-                        y='fixed_costs',
-                        title='🏢 Custos Fixos',
-                        color_discrete_sequence=['#2ca02c']
-                    )
-            
-                    # Smart text positioning for bars
-                    if view_type == "Mensal" and len(display_df) > 20:
-                        fig_fixed.update_traces(
-                            texttemplate='',
-                            hovertemplate='<b>%{x}</b><br>Custos Fixos: R$ %{y:,.0f}<extra></extra>'
-                        )
-                    else:
-                        fig_fixed.update_traces(
-                            text=[f'R$ {v:,.0f}' if i % 2 == 0 else '' for i, v in enumerate(display_df['fixed_costs'])],
-                            textposition='outside'
-                        )
+                    # Create figure with bars for fixed costs
+                    fig_fixed = go.Figure()
+                    
+                    # Add fixed costs bars with percentage in hover
+                    fig_fixed.add_trace(go.Bar(
+                        x=display_df[x_col],
+                        y=display_df['fixed_costs'],
+                        name='Custos Fixos',
+                        marker_color='#2ca02c',
+                        text=[f'R$ {v:,.0f}' if i % 2 == 0 or view_type == "Anual" else '' for i, v in enumerate(display_df['fixed_costs'])] if view_type != "Mensal" or len(display_df) <= 20 else None,
+                        textposition='outside',
+                        customdata=display_df['fixed_cost_pct'] if 'fixed_cost_pct' in display_df.columns else None,
+                        hovertemplate='<b>%{x}</b><br>Custos Fixos: R$ %{y:,.0f}<br>% da Receita: %{customdata:.1f}%<extra></extra>'
+                    ))
+                    
+                    # Add revenue line for comparison (same axis)
+                    if 'revenue' in display_df.columns:
+                        fig_fixed.add_trace(go.Scatter(
+                            x=display_df[x_col],
+                            y=display_df['revenue'],
+                            name='Receita',
+                            mode='lines+markers',
+                            line=dict(color='#1f77b4', width=3),
+                            marker=dict(size=8),
+                            hovertemplate='<b>%{x}</b><br>Receita: R$ %{y:,.0f}<extra></extra>'
+                        ))
             
                     fig_fixed.update_layout(
-                        yaxis_title="Custos Fixos (R$)",
+                        title='🏢 Custos Fixos vs Receita',
+                        yaxis_title="Valores (R$)",
                         xaxis_title=x_title,
                         xaxis=dict(
                             tickangle=-45 if view_type == "Mensal" else 0,
                             tickmode='linear',
-                            dtick=2 if view_type == "Mensal" and len(display_df) > 24 else None
+                            dtick=1 if view_type == "Anual" else (2 if view_type == "Mensal" and len(display_df) > 24 else None),
+                            type='category' if view_type == "Anual" else None,
+                            categoryorder='category ascending' if view_type == "Anual" else None
                         ),
                         height=450 if view_type == "Mensal" else 400,
-                        margin=dict(t=50, b=100 if view_type == "Mensal" else 50)
+                        margin=dict(t=50, b=100 if view_type == "Mensal" else 50),
+                        hovermode='x unified',
+                        legend=dict(
+                            orientation="h",
+                            yanchor="bottom",
+                            y=1.02,
+                            xanchor="right",
+                            x=1
+                        )
                     )
                     st.plotly_chart(fig_fixed, use_container_width=True)
         
-                # 3. Contribution Margin - Full width
+                # 3. Variable Costs - Full width (similar to Fixed Costs)
+                if not display_df.empty and 'variable_costs' in display_df.columns:
+                    x_col, x_title = prepare_x_axis(display_df, view_type)
+                    
+                    # Calculate percentage if not already calculated
+                    if 'revenue' in display_df.columns:
+                        display_df['var_cost_pct'] = (display_df['variable_costs'] / display_df['revenue'] * 100).fillna(0)
+            
+                    # Create figure with bars for variable costs
+                    fig_variable = go.Figure()
+                    
+                    # Add variable costs bars with percentage in hover
+                    fig_variable.add_trace(go.Bar(
+                        x=display_df[x_col],
+                        y=display_df['variable_costs'],
+                        name='Custos Variáveis',
+                        marker_color='#ff7f0e',
+                        text=[f'R$ {v:,.0f}' if i % 2 == 0 or view_type == "Anual" else '' for i, v in enumerate(display_df['variable_costs'])] if view_type != "Mensal" or len(display_df) <= 20 else None,
+                        textposition='outside',
+                        customdata=display_df['var_cost_pct'] if 'var_cost_pct' in display_df.columns else None,
+                        hovertemplate='<b>%{x}</b><br>Custos Variáveis: R$ %{y:,.0f}<br>% da Receita: %{customdata:.1f}%<extra></extra>'
+                    ))
+                    
+                    # Add revenue line for comparison (same axis)
+                    if 'revenue' in display_df.columns:
+                        fig_variable.add_trace(go.Scatter(
+                            x=display_df[x_col],
+                            y=display_df['revenue'],
+                            name='Receita',
+                            mode='lines+markers',
+                            line=dict(color='#1f77b4', width=3),
+                            marker=dict(size=8),
+                            hovertemplate='<b>%{x}</b><br>Receita: R$ %{y:,.0f}<extra></extra>'
+                        ))
+            
+                    fig_variable.update_layout(
+                        title='📦 Custos Variáveis vs Receita',
+                        yaxis_title="Valores (R$)",
+                        xaxis_title=x_title,
+                        xaxis=dict(
+                            tickangle=-45 if view_type == "Mensal" else 0,
+                            tickmode='linear',
+                            dtick=1 if view_type == "Anual" else (2 if view_type == "Mensal" and len(display_df) > 24 else None),
+                            type='category' if view_type == "Anual" else None,
+                            categoryorder='category ascending' if view_type == "Anual" else None
+                        ),
+                        height=450 if view_type == "Mensal" else 400,
+                        margin=dict(t=80, b=100 if view_type == "Mensal" else 50),
+                        hovermode='x unified',
+                        legend=dict(
+                            orientation="h",
+                            yanchor="bottom",
+                            y=1.02,
+                            xanchor="center",
+                            x=0.5
+                        )
+                    )
+                    st.plotly_chart(fig_variable, use_container_width=True)
+        
+                # 4. Contribution Margin - Full width
                 if not display_df.empty and 'contribution_margin' in display_df.columns:
                     x_col, x_title = prepare_x_axis(display_df, view_type)
             
@@ -1337,35 +1600,45 @@ else:
                         color_continuous_scale='Greens'
                     )
             
-                    # Smart text positioning
-                    if view_type == "Mensal" and len(display_df) > 20:
-                        fig_contrib.update_traces(
-                            texttemplate='',
-                            hovertemplate='<b>%{x}</b><br>Margem de Contribuição: R$ %{y:,.0f}<extra></extra>'
-                        )
-                    else:
-                        fig_contrib.update_traces(
-                            text=[f'R$ {v:,.0f}' if i % 2 == 0 else '' for i, v in enumerate(display_df['contribution_margin'])],
-                            textposition='outside'
-                        )
+                    # Always show values on top of bars
+                    fig_contrib.update_traces(
+                        text=[f'R$ {v:,.0f}' for v in display_df['contribution_margin']],
+                        textposition='outside',
+                        hovertemplate='<b>%{x}</b><br>Margem de Contribuição: R$ %{y:,.0f}<extra></extra>'
+                    )
             
                     fig_contrib.update_layout(
                         yaxis_title="Margem de Contribuição (R$)",
                         xaxis_title=x_title,
                         showlegend=False,
+                        coloraxis_colorbar=dict(
+                            orientation="h",
+                            yanchor="bottom",
+                            y=1.02,
+                            xanchor="center",
+                            x=0.5,
+                            len=0.6,
+                            thickness=15
+                        ),
                         xaxis=dict(
                             tickangle=-45 if view_type == "Mensal" else 0,
                             tickmode='linear',
-                            dtick=2 if view_type == "Mensal" and len(display_df) > 24 else None
+                            dtick=1 if view_type == "Anual" else (2 if view_type == "Mensal" and len(display_df) > 24 else None),
+                            type='category' if view_type == "Anual" else None,
+                            categoryorder='category ascending' if view_type == "Anual" else None
                         ),
                         height=450 if view_type == "Mensal" else 400,
-                        margin=dict(t=50, b=100 if view_type == "Mensal" else 50)
+                        margin=dict(t=80, b=100 if view_type == "Mensal" else 50)
                     )
                     st.plotly_chart(fig_contrib, use_container_width=True)
         
                 # 4. Operational Costs - Full width  
                 if not display_df.empty and 'operational_costs' in display_df.columns:
                     x_col, x_title = prepare_x_axis(display_df, view_type)
+                    
+                    # Calculate percentage of operational costs relative to revenue
+                    if 'revenue' in display_df.columns:
+                        display_df['op_cost_pct'] = (display_df['operational_costs'] / display_df['revenue'] * 100).fillna(0)
             
                     fig_op_costs = px.area(
                         display_df,
@@ -1374,6 +1647,13 @@ else:
                         title='⚙️ Custos Operacionais',
                         color_discrete_sequence=['#d62728']
                     )
+                    
+                    # Update hover template to include percentage
+                    if 'op_cost_pct' in display_df.columns:
+                        fig_op_costs.update_traces(
+                            customdata=display_df['op_cost_pct'],
+                            hovertemplate='<b>%{x}</b><br>Custos Operacionais: R$ %{y:,.0f}<br>% da Receita: %{customdata:.1f}%<extra></extra>'
+                        )
             
                     fig_op_costs.update_layout(
                         yaxis_title="Custos Operacionais (R$)",
@@ -1381,7 +1661,9 @@ else:
                         xaxis=dict(
                             tickangle=-45 if view_type == "Mensal" else 0,
                             tickmode='linear',
-                            dtick=2 if view_type == "Mensal" and len(display_df) > 24 else None
+                            dtick=1 if view_type == "Anual" else (2 if view_type == "Mensal" and len(display_df) > 24 else None),
+                            type='category' if view_type == "Anual" else None,
+                            categoryorder='category ascending' if view_type == "Anual" else None
                         ),
                         height=450 if view_type == "Mensal" else 400,
                         margin=dict(t=50, b=100 if view_type == "Mensal" else 50),
@@ -1536,7 +1818,11 @@ else:
                             ),
                             tickfont=dict(size=12, color='#374151'),
                             showgrid=False,
-                            tickangle=-90  # Vertical labels to prevent overlap
+                            tickangle=-90,  # Vertical labels to prevent overlap
+                            tickmode='linear',
+                            dtick=1 if view_type == "Anual" else None,
+                            type='category' if view_type == "Anual" else None,
+                            categoryorder='category ascending' if view_type == "Anual" else None
                         ),
                         height=600,  # Standard height for all views
                         hovermode='x unified',
@@ -1561,6 +1847,7 @@ else:
                     fig_cost_structure.update_yaxes(showline=True, linewidth=2, linecolor='#E5E7EB')
             
                     st.plotly_chart(fig_cost_structure, use_container_width=True)
+            
             
                     # Add cost analysis metrics below the chart with clearer descriptions
                     st.markdown("### 📊 Análise de Custos - Período Mais Recente")
@@ -1613,6 +1900,29 @@ else:
                             f"**{anomaly['year']}**: {anomaly['metric']} - "
                             f"Valor: {anomaly['value']:.2f}% ({anomaly['type']})"
                         )
+        
+                # Growth Analysis (only for annual view) - Moved to be last
+                if view_type == "Anual":
+                    st.subheader("📊 Análise de Crescimento")
+                    growth_cols = [col for col in display_df.columns if '_growth' in col]
+                    if growth_cols:
+                        fig_growth = go.Figure()
+                        for col in growth_cols:
+                            metric_name = col.replace('_growth', '').title()
+                            fig_growth.add_trace(go.Scatter(
+                                x=display_df['year'],
+                                y=display_df[col],
+                                mode='lines+markers',
+                                name=metric_name,
+                                line=dict(width=3)
+                            ))
+                        fig_growth.update_layout(
+                            title="Taxa de Crescimento Anual (%)",
+                            xaxis_title="Ano",
+                            yaxis_title="Crescimento (%)",
+                            hovermode='x unified'
+                        )
+                        st.plotly_chart(fig_growth, use_container_width=True, key="growth_chart_standard")
         
                 # Data table
                 with st.expander("📋 Ver Dados Detalhados"):
@@ -1854,6 +2164,8 @@ else:
                     
                             # Prepare data for analysis
                             df = st.session_state.processed_data.get('consolidated', pd.DataFrame())
+                            if not isinstance(df, pd.DataFrame):
+                                df = pd.DataFrame()
                             summary = st.session_state.processed_data.get('summary', {})
                     
                             # Include flexible data insights
@@ -2214,16 +2526,17 @@ else:
                     # If monthly data is not available, use consolidated data
                     if not chat_data and 'consolidated' in st.session_state.processed_data:
                         consolidated_df = st.session_state.processed_data.get('consolidated', pd.DataFrame())
-                        for _, row in consolidated_df.iterrows():
-                            year = int(row['year'])  # Convert to regular int
-                            chat_data[year] = {
-                                'revenue': {'ANNUAL': row.get('revenue', 0)},
-                                'costs': {'ANNUAL': row.get('variable_costs', 0)},
-                                'fixed_costs': row.get('fixed_costs', 0),
-                                'operational_costs': row.get('operational_costs', 0),
-                                'net_profit': row.get('net_profit', 0),
-                                'profit_margin': row.get('profit_margin', 0)
-                            }
+                        if isinstance(consolidated_df, pd.DataFrame) and not consolidated_df.empty:
+                            for _, row in consolidated_df.iterrows():
+                                year = int(row['year'])  # Convert to regular int
+                                chat_data[year] = {
+                                    'revenue': {'ANNUAL': row.get('revenue', 0)},
+                                    'costs': {'ANNUAL': row.get('variable_costs', 0)},
+                                    'fixed_costs': row.get('fixed_costs', 0),
+                                    'operational_costs': row.get('operational_costs', 0),
+                                    'net_profit': row.get('net_profit', 0),
+                                    'profit_margin': row.get('profit_margin', 0)
+                                }
         
                 # Render chat interface
                 st.session_state.ai_chat_assistant.render_chat_interface(
@@ -2243,8 +2556,13 @@ else:
     
             if hasattr(st.session_state, 'processed_data') and st.session_state.processed_data is not None and show_predictions:
                 df = st.session_state.processed_data.get('consolidated', pd.DataFrame())
+                
+                # Ensure df is actually a DataFrame
+                if not isinstance(df, pd.DataFrame):
+                    st.warning("⚠️ Os dados não estão no formato esperado. Por favor, faça a análise dos dados novamente.")
+                    df = pd.DataFrame()
         
-                if 'revenue' in df.columns:
+                if not df.empty and 'revenue' in df.columns:
                     # Simple forecast
                     st.subheader("Previsão Simples")
             

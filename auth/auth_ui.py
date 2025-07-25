@@ -142,6 +142,45 @@ def show_password_reset_form():
             else:
                 st.error("Por favor, insira seu email.")
 
+def show_change_password_form():
+    """Show change password form"""
+    with st.form("change_password_form"):
+        current_password = st.text_input("Senha Atual", type="password")
+        new_password = st.text_input("Nova Senha", type="password", help="Mínimo 8 caracteres")
+        confirm_password = st.text_input("Confirmar Nova Senha", type="password")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            submit = st.form_submit_button("Alterar Senha", use_container_width=True)
+        with col2:
+            cancel = st.form_submit_button("Cancelar", use_container_width=True)
+        
+        if cancel:
+            st.session_state.show_change_password = False
+            st.rerun()
+        
+        if submit:
+            if not current_password or not new_password or not confirm_password:
+                st.error("Por favor, preencha todos os campos.")
+            elif new_password != confirm_password:
+                st.error("As senhas não coincidem.")
+            elif len(new_password) < 8:
+                st.error("A nova senha deve ter pelo menos 8 caracteres.")
+            else:
+                # Change password
+                success, message = st.session_state.auth_manager.change_password(
+                    st.session_state.user['id'], 
+                    current_password, 
+                    new_password
+                )
+                
+                if success:
+                    st.success(message)
+                    st.session_state.show_change_password = False
+                    st.rerun()
+                else:
+                    st.error(message)
+
 def show_user_menu():
     """Display user menu in sidebar"""
     if st.session_state.user:
@@ -151,10 +190,18 @@ def show_user_menu():
             st.write(f"📧 {st.session_state.user['email']}")
             st.write(f"🎭 {st.session_state.user['role'].title()}")
             
-            if st.button("Sair", use_container_width=True):
-                st.session_state.user = None
-                st.query_params.clear()
-                st.rerun()
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("🔑 Senha", use_container_width=True):
+                    st.session_state.show_change_password = True
+            with col2:
+                if st.button("Sair", use_container_width=True):
+                    st.session_state.user = None
+            
+            # Show change password modal
+            if getattr(st.session_state, 'show_change_password', False):
+                with st.expander("🔑 Alterar Senha", expanded=True):
+                    show_change_password_form()
             
             if st.session_state.user['role'] == 'admin':
                 st.divider()
