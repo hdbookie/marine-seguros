@@ -210,14 +210,15 @@ class FinancialProcessor:
         for year in sorted(all_data.keys()):
             year_data = all_data[year]
             # Use the most appropriate profit value
-            # Priority: OPERATIONAL > WITH_NON_OP > NET_FINAL > OTHER > WITHOUT_NON_OP > GROSS
-            # We prioritize OPERATIONAL because it's the main business result before adjustments
+            # Priority: OPERATIONAL > WITH_NON_OP > WITHOUT_NON_OP > OTHER > NET_FINAL > NET_ADJUSTED > GROSS
+            # We prioritize OPERATIONAL because it's the main business result
+            # NET_FINAL is deprioritized because it includes investment deductions
             profits = year_data.get('profits', {})
             net_profit = (profits.get('OPERATIONAL') or 
                          profits.get('WITH_NON_OP') or
-                         profits.get('NET_FINAL') or 
-                         profits.get('OTHER') or
                          profits.get('WITHOUT_NON_OP') or
+                         profits.get('OTHER') or
+                         profits.get('NET_FINAL') or 
                          profits.get('NET_ADJUSTED') or
                          profits.get('GROSS') or 0)
             
@@ -317,6 +318,12 @@ class FinancialProcessor:
             monthly_operational_costs = year_data.get('operational_costs', {})
             contribution_margin_annual = year_data.get('contribution_margin', 0)
             
+            # Get monthly margins from Excel
+            monthly_margins = year_data.get('margins', {})
+            
+            # Get monthly profits (RESULTADO) from Excel
+            monthly_profits = year_data.get('profits', {})
+            
             # If we don't have monthly data, fall back to distributing annual costs
             fixed_costs_annual = monthly_fixed_costs.get('ANNUAL', 0) if isinstance(monthly_fixed_costs, dict) else monthly_fixed_costs
             operational_costs_annual = monthly_operational_costs.get('ANNUAL', 0) if isinstance(monthly_operational_costs, dict) else monthly_operational_costs
@@ -342,8 +349,20 @@ class FinancialProcessor:
                     # Calculate contribution margin for the month
                     contribution_margin = revenue - variable_costs
                     
-                    # Calculate net profit for the month
-                    net_profit = contribution_margin - fixed_costs_this_month - operational_costs_this_month
+                    # Use net profit from Excel if available (RESULTADO), otherwise calculate
+                    if month in monthly_profits:
+                        net_profit = monthly_profits[month]
+                    else:
+                        # Calculate net profit for the month
+                        # Note: fixed_costs and operational_costs are the same in the Excel data
+                        # so we only subtract once to avoid double-counting
+                        net_profit = contribution_margin - fixed_costs_this_month
+                    
+                    # Use profit margin from Excel if available, otherwise calculate
+                    if month in monthly_margins:
+                        profit_margin = monthly_margins[month]
+                    else:
+                        profit_margin = (net_profit / revenue * 100) if revenue > 0 else 0
                     
                     row = {
                         'year': year,
@@ -356,7 +375,7 @@ class FinancialProcessor:
                         'operational_costs': operational_costs_this_month,
                         'contribution_margin': contribution_margin,
                         'net_profit': net_profit,
-                        'profit_margin': (net_profit / revenue * 100) if revenue > 0 else 0
+                        'profit_margin': profit_margin
                     }
                     monthly_rows.append(row)
         

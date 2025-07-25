@@ -185,7 +185,7 @@ class DirectDataExtractor:
                     
                     # Extract profit margin (Margem de lucro) - BEFORE profit check
                     # Prioritize operational margin over net margin
-                    elif 'MARGEM DE LUCRO' in value_str.upper():
+                    elif 'MARGEM DE LUCRO' in value_str.upper() and 'PONTO' not in value_str.upper():
                         # Skip the net margin version if we already have operational margin
                         if 'LÍQUIDO' in value_str.upper() or 'LIQUIDO' in value_str.upper():
                             if 'ANNUAL' in data.get('margins', {}):
@@ -200,9 +200,16 @@ class DirectDataExtractor:
                                 val = df.iloc[idx][col]
                                 if pd.notna(val):
                                     if isinstance(val, (int, float)):
-                                        # Convert decimal to percentage
-                                        margin_pct = val * 100 if val < 1 else val
-                                        data['margins'][month] = margin_pct
+                                        # Check if value is a decimal fraction (< 1) that needs converting to percentage
+                                        # Most margin percentages are between 0 and 100%, so if value < 1, it's likely a fraction
+                                        if -1 < float(val) < 1:
+                                            # Convert decimal to percentage (0.2975 -> 29.75)
+                                            data['margins'][month] = float(val) * 100
+                                            print(f"  Stored margin for {month}: {float(val) * 100:.2f}% (converted from {val})")
+                                        else:
+                                            # Value is already a percentage
+                                            data['margins'][month] = float(val)
+                                            print(f"  Stored margin for {month}: {val}%")
                         
                         # Extract annual value
                         if annual_col and annual_col in df.columns:
@@ -217,10 +224,15 @@ class DirectDataExtractor:
                                     except:
                                         pass
                                 elif isinstance(val, (int, float)):
-                                    # Convert decimal to percentage
-                                    margin_pct = val * 100 if val < 1 else val
-                                    data['margins']['ANNUAL'] = margin_pct
-                                    print(f"  Stored profit margin: {margin_pct:.2f}%")
+                                    # Check if value is a decimal fraction that needs converting to percentage
+                                    if -1 < float(val) < 1:
+                                        # Convert decimal to percentage (0.2975 -> 29.75)
+                                        data['margins']['ANNUAL'] = float(val) * 100
+                                        print(f"  Stored profit margin: {float(val) * 100:.2f}% (converted from {val})")
+                                    else:
+                                        # Value is already a percentage
+                                        data['margins']['ANNUAL'] = float(val)
+                                        print(f"  Stored profit margin: {val:.2f}%")
                     
                     # Profit/Result rows - look for specific profit indicators
                     elif any(profit_term in value_str for profit_term in ['RESULTADO', 'LUCRO']):
@@ -228,6 +240,15 @@ class DirectDataExtractor:
                         skip_terms = ['MARGEM', 'PONTO', 'EQUILIBRIO', 'EXCLUINDO']
                         if not any(skip in value_str.upper() for skip in skip_terms):
                             print(f"Found profit row at {idx}: {value_str}")
+                            
+                            # Extract monthly values first for RESULTADO
+                            if value_str.strip().upper() == 'RESULTADO':
+                                for month, col in month_cols.items():
+                                    if col in df.columns:
+                                        val = df.iloc[idx][col]
+                                        if pd.notna(val) and isinstance(val, (int, float)):
+                                            data['profits'][month] = float(val)
+                                            print(f"  Stored monthly profit for {month}: {val:,.2f}")
                             
                             # Extract annual value
                             if annual_col and annual_col in df.columns:

@@ -355,6 +355,51 @@ class AuthManager:
         
         return True
     
+    def change_password(self, user_id: int, current_password: str, new_password: str) -> Tuple[bool, str]:
+        """Change password for logged-in user"""
+        conn = sqlite3.connect(self.db_path, timeout=10.0)
+        cursor = conn.cursor()
+        
+        # Get current password hash
+        cursor.execute('''
+            SELECT password_hash FROM users WHERE id = ? AND is_active = 1
+        ''', (user_id,))
+        
+        result = cursor.fetchone()
+        if not result:
+            conn.close()
+            return False, "Usuário não encontrado"
+        
+        current_hash = result[0]
+        
+        # Verify current password
+        if not bcrypt.checkpw(current_password.encode('utf-8'), current_hash.encode('utf-8')):
+            self.log_action(user_id, "Failed password change - incorrect current password", success=False)
+            conn.close()
+            return False, "Senha atual incorreta"
+        
+        # Validate new password
+        validation_result = self.validate_password(new_password)
+        if not validation_result[0]:
+            conn.close()
+            return False, validation_result[1]
+        
+        # Hash new password
+        new_password_hash = self.hash_password(new_password)
+        
+        # Update password
+        cursor.execute('''
+            UPDATE users SET password_hash = ?
+            WHERE id = ?
+        ''', (new_password_hash, user_id))
+        
+        conn.commit()
+        conn.close()
+        
+        self.log_action(user_id, "Password changed successfully", success=True)
+        
+        return True, "Senha alterada com sucesso"
+    
     def log_action(self, user_id: Optional[int], action: str, success: bool = True):
         """Log security-relevant actions"""
         conn = sqlite3.connect(self.db_path, timeout=10.0)
