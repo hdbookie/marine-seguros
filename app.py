@@ -425,6 +425,39 @@ def prepare_x_axis(df, view_type):
     else:
         return 'year', 'Ano'
 
+def get_monthly_layout_config():
+    """Get layout configuration for monthly interactive graphs"""
+    return dict(
+        rangeslider=dict(visible=True, thickness=0.1),
+        rangeselector=dict(
+            buttons=list([
+                dict(count=3, label="3M", step="month", stepmode="backward"),
+                dict(count=6, label="6M", step="month", stepmode="backward"),
+                dict(count=12, label="12M", step="month", stepmode="backward"),
+                dict(count=24, label="24M", step="month", stepmode="backward"),
+                dict(step="all", label="Tudo")
+            ]),
+            x=0, y=1.15
+        ),
+        # Set default range to show last 12 months for better readability
+        range=None  # Will be set dynamically in each graph
+    )
+
+def get_plotly_config():
+    """Get Plotly configuration for interactive graphs"""
+    return {
+        'displayModeBar': True,
+        'displaylogo': False,
+        'modeBarButtonsToAdd': ['pan2d', 'zoom2d', 'resetScale2d'],
+        'scrollZoom': True
+    }
+
+def get_default_monthly_range(df, x_col, months=12):
+    """Calculate default range for monthly graphs to show last N months"""
+    if len(df) > months:
+        return [df[x_col].iloc[-months], df[x_col].iloc[-1]]
+    return None
+
 # Check authentication
 if st.session_state.user is None:
     show_login_page()
@@ -947,6 +980,18 @@ else:
                             (monthly_df['year'].isin(selected_years)) &
                             (monthly_df['month_num'].isin(selected_month_nums))
                         ]
+                        
+                        # Debug info
+                        if st.checkbox("🔍 Mostrar Informações de Debug"):
+                            st.info(f"Total de meses para anos selecionados: {len(monthly_df)}")
+                            st.info(f"Índice de início da janela: {st.session_state.get('monthly_window_start_idx', 'Não definido')}")
+                            st.info(f"Meses exibidos: {len(display_df)}")
+                            st.info(f"Anos selecionados: {selected_years}")
+                            if not display_df.empty:
+                                st.write("Amostra de dados mensais com margens de lucro:")
+                                debug_cols = ['year', 'month', 'revenue', 'net_profit', 'profit_margin']
+                                existing_cols = [col for col in debug_cols if col in display_df.columns]
+                                st.dataframe(display_df[existing_cols].head(12))
                 
                 elif view_type == "Trimestral":
                     if not hasattr(st.session_state, 'monthly_data') or st.session_state.monthly_data is None or st.session_state.monthly_data.empty:
@@ -1121,18 +1166,16 @@ else:
                                 lambda x: x.get('ANNUAL', 0) if isinstance(x, dict) else x
                             )
         
-                # Debug: Show what data is being displayed
-                if not display_df.empty:
-                    st.caption(f"📊 Exibindo {len(display_df)} {'registros mensais' if view_type == 'Mensal' else 'anos' if view_type == 'Anual' else 'períodos'} | Colunas: {list(display_df.columns)}")
             
                     # Ensure profit_margin column exists for all views
-                    if 'profit_margin' not in display_df.columns and 'revenue' in display_df.columns and 'net_profit' in display_df.columns:
-                        display_df['profit_margin'] = display_df.apply(
-                            lambda row: (row['net_profit'] / row['revenue'] * 100) if row['revenue'] > 0 else 0,
-                            axis=1
-                        )
-                else:
-                    st.caption("⚠️ Nenhum dado disponível para o período selecionado")
+                    if not display_df.empty:
+                        if 'profit_margin' not in display_df.columns and 'revenue' in display_df.columns and 'net_profit' in display_df.columns:
+                            display_df['profit_margin'] = display_df.apply(
+                                lambda row: (row['net_profit'] / row['revenue'] * 100) if row['revenue'] > 0 else 0,
+                                axis=1
+                            )
+                    else:
+                        st.caption("⚠️ Nenhum dado disponível para o período selecionado")
         
                 # Key metrics - Calculate based on filtered data
                 col1, col2, col3, col4 = st.columns(4)
@@ -1281,21 +1324,52 @@ else:
                             textfont=dict(size=10),
                             showlegend=False
                         ))
-                    fig_revenue.update_layout(
-                        yaxis_title="Receita (R$)",
-                        xaxis_title=x_title,
-                        hovermode='x unified',
-                        xaxis=dict(
-                            tickangle=-45 if view_type == "Mensal" else 0,
+                    # For monthly view with many data points, add interactive features
+                    if view_type == "Mensal":
+                        xaxis_config = dict(
+                            tickangle=-45,
                             tickmode='linear',
-                            dtick=1 if view_type == "Anual" else (2 if view_type == "Mensal" and len(display_df) > 24 else None),
-                            type='category' if view_type == "Anual" else None,
-                            categoryorder='category ascending' if view_type == "Anual" else None
-                        ),
-                        height=500 if view_type == "Mensal" else 400,
-                        margin=dict(t=50, b=100 if view_type == "Mensal" else 50)
-                    )
-                    st.plotly_chart(fig_revenue, use_container_width=True)
+                            **get_monthly_layout_config()
+                        )
+                        
+                        # Set default range to show last 12 months
+                        default_range = get_default_monthly_range(display_df, x_col)
+                        if default_range:
+                            xaxis_config['range'] = default_range
+                            
+                        fig_revenue.update_layout(
+                            yaxis_title="Receita (R$)",
+                            xaxis_title=x_title,
+                            hovermode='x unified',
+                            xaxis=xaxis_config,
+                            height=600,
+                            margin=dict(t=100, b=100),
+                            dragmode='pan'  # Enable panning by default
+                        )
+                        # Configure modebar for better interaction
+                        config = {
+                            'displayModeBar': True,
+                            'displaylogo': False,
+                            'modeBarButtonsToAdd': ['pan2d', 'zoom2d', 'resetScale2d'],
+                            'scrollZoom': True
+                        }
+                        st.plotly_chart(fig_revenue, use_container_width=True, config=config)
+                    else:
+                        fig_revenue.update_layout(
+                            yaxis_title="Receita (R$)",
+                            xaxis_title=x_title,
+                            hovermode='x unified',
+                            xaxis=dict(
+                                tickangle=-45 if view_type == "Mensal" else 0,
+                                tickmode='linear',
+                                dtick=1 if view_type == "Anual" else None,
+                                type='category' if view_type == "Anual" else None,
+                                categoryorder='category ascending' if view_type == "Anual" else None
+                            ),
+                            height=500 if view_type == "Mensal" else 400,
+                            margin=dict(t=50, b=100 if view_type == "Mensal" else 50)
+                        )
+                        st.plotly_chart(fig_revenue, use_container_width=True)
                 else:
                     if display_df.empty:
                         st.info("📊 Nenhum dado disponível para o período selecionado. Verifique os filtros.")
@@ -1307,8 +1381,9 @@ else:
                     st.subheader("📊 Margem de Lucro")
                     x_col, x_title = prepare_x_axis(display_df, view_type)
             
-                    # Calculate profit margin for aggregated data if needed
-                    if view_type != "Anual":
+                    # Don't recalculate profit margin for monthly view - use extracted values
+                    # Only calculate for aggregated views (Trimestral, etc.)
+                    if view_type not in ["Anual", "Mensal"]:
                         display_df['profit_margin'] = (display_df['net_profit'] / display_df['revenue'] * 100).fillna(0)
             
                     fig_margin = px.bar(
@@ -1327,30 +1402,63 @@ else:
                         hovertemplate='<b>%{x}</b><br>Margem de Lucro: %{y:.2f}%<extra></extra>'
                     )
             
-                    fig_margin.update_layout(
-                        yaxis_title="Margem de Lucro (%)",
-                        xaxis_title=x_title,
-                        coloraxis_colorbar=dict(
-                            orientation="h",
-                            yanchor="bottom",
-                            y=1.02,
-                            xanchor="center",
-                            x=0.5,
-                            len=0.6,
-                            thickness=15
-                        ),
-                        xaxis=dict(
-                            tickangle=-45 if view_type == "Mensal" else 0,
+                    # Apply interactive features for monthly view
+                    if view_type == "Mensal":
+                        xaxis_config = dict(
+                            tickangle=-45,
                             tickmode='linear',
-                            dtick=1 if view_type == "Anual" else (2 if view_type == "Mensal" and len(display_df) > 24 else None),
-                            type='category' if view_type == "Anual" else None,
-                            categoryorder='category ascending' if view_type == "Anual" else None
-                        ),
-                        height=450 if view_type == "Mensal" else 400,
-                        margin=dict(t=80, b=100 if view_type == "Mensal" else 50),
-                        showlegend=False
-                    )
-                    st.plotly_chart(fig_margin, use_container_width=True)
+                            **get_monthly_layout_config()
+                        )
+                        
+                        # Set default range to show last 12 months
+                        default_range = get_default_monthly_range(display_df, x_col)
+                        if default_range:
+                            xaxis_config['range'] = default_range
+                            
+                        fig_margin.update_layout(
+                            yaxis_title="Margem de Lucro (%)",
+                            xaxis_title=x_title,
+                            coloraxis_colorbar=dict(
+                                orientation="h",
+                                yanchor="bottom",
+                                y=1.02,
+                                xanchor="center",
+                                x=0.5,
+                                len=0.6,
+                                thickness=15
+                            ),
+                            xaxis=xaxis_config,
+                            height=600,
+                            margin=dict(t=100, b=100),
+                            showlegend=False,
+                            dragmode='pan'
+                        )
+                        st.plotly_chart(fig_margin, use_container_width=True, config=get_plotly_config())
+                    else:
+                        fig_margin.update_layout(
+                            yaxis_title="Margem de Lucro (%)",
+                            xaxis_title=x_title,
+                            coloraxis_colorbar=dict(
+                                orientation="h",
+                                yanchor="bottom",
+                                y=1.02,
+                                xanchor="center",
+                                x=0.5,
+                                len=0.6,
+                                thickness=15
+                            ),
+                            xaxis=dict(
+                                tickangle=-45 if view_type == "Mensal" else 0,
+                                tickmode='linear',
+                                dtick=1 if view_type == "Anual" else (2 if view_type == "Mensal" and len(display_df) > 24 else None),
+                                type='category' if view_type == "Anual" else None,
+                                categoryorder='category ascending' if view_type == "Anual" else None
+                            ),
+                            height=450 if view_type == "Mensal" else 400,
+                            margin=dict(t=80, b=100 if view_type == "Mensal" else 50),
+                            showlegend=False
+                        )
+                        st.plotly_chart(fig_margin, use_container_width=True)
         
                 # New Financial Metrics Graphs
                 st.subheader("📊 Análise de Custos e Margens")
@@ -1433,41 +1541,85 @@ else:
                                 showlegend=False
                             ))
             
-                    fig_var_costs.update_layout(
-                        title='💸 Custos Variáveis e Fixos vs Receita',
-                        yaxis_title="Valores (R$)",
-                        xaxis_title=x_title,
-                        xaxis=dict(
-                            tickangle=-45 if view_type == "Mensal" else 0,
+                    # Apply interactive features for monthly view
+                    if view_type == "Mensal":
+                        xaxis_config = dict(
+                            tickangle=-45,
                             tickmode='linear',
-                            dtick=1 if view_type == "Anual" else (2 if view_type == "Mensal" and len(display_df) > 24 else None),
-                            type='category' if view_type == "Anual" else None,
-                            categoryorder='category ascending' if view_type == "Anual" else None
-                        ),
-                        height=500 if view_type == "Mensal" else 450,
-                        margin=dict(t=50, b=100 if view_type == "Mensal" else 50),
-                        hovermode='closest',
-                        legend=dict(
-                            orientation="h",
-                            yanchor="bottom",
-                            y=1.02,
-                            xanchor="right",
-                            x=1
+                            **get_monthly_layout_config()
                         )
-                    )
-                    
-                    # Add shaded area between lines to highlight the gap
-                    fig_var_costs.add_trace(go.Scatter(
-                        x=display_df[x_col].tolist() + display_df[x_col].tolist()[::-1],
-                        y=display_df['revenue'].tolist() + display_df['variable_costs'].tolist()[::-1],
-                        fill='toself',
-                        fillcolor='rgba(31, 119, 180, 0.1)',
-                        line=dict(color='rgba(255,255,255,0)'),
-                        showlegend=False,
-                        hoverinfo='skip'
-                    ))
-                    
-                    st.plotly_chart(fig_var_costs, use_container_width=True)
+                        
+                        # Set default range to show last 12 months
+                        default_range = get_default_monthly_range(display_df, x_col)
+                        if default_range:
+                            xaxis_config['range'] = default_range
+                            
+                        fig_var_costs.update_layout(
+                            title='💸 Custos Variáveis e Fixos vs Receita',
+                            yaxis_title="Valores (R$)",
+                            xaxis_title=x_title,
+                            xaxis=xaxis_config,
+                            height=600,
+                            margin=dict(t=100, b=100),
+                            hovermode='closest',
+                            legend=dict(
+                                orientation="h",
+                                yanchor="bottom",
+                                y=1.02,
+                                xanchor="right",
+                                x=1
+                            ),
+                            dragmode='pan'
+                        )
+                        
+                        # Add shaded area between lines to highlight the gap
+                        fig_var_costs.add_trace(go.Scatter(
+                            x=display_df[x_col].tolist() + display_df[x_col].tolist()[::-1],
+                            y=display_df['revenue'].tolist() + display_df['variable_costs'].tolist()[::-1],
+                            fill='toself',
+                            fillcolor='rgba(31, 119, 180, 0.1)',
+                            line=dict(color='rgba(255,255,255,0)'),
+                            showlegend=False,
+                            hoverinfo='skip'
+                        ))
+                        
+                        st.plotly_chart(fig_var_costs, use_container_width=True, config=get_plotly_config())
+                    else:
+                        fig_var_costs.update_layout(
+                            title='💸 Custos Variáveis e Fixos vs Receita',
+                            yaxis_title="Valores (R$)",
+                            xaxis_title=x_title,
+                            xaxis=dict(
+                                tickangle=-45 if view_type == "Mensal" else 0,
+                                tickmode='linear',
+                                dtick=1 if view_type == "Anual" else (2 if view_type == "Mensal" and len(display_df) > 24 else None),
+                                type='category' if view_type == "Anual" else None,
+                                categoryorder='category ascending' if view_type == "Anual" else None
+                            ),
+                            height=500 if view_type == "Mensal" else 450,
+                            margin=dict(t=50, b=100 if view_type == "Mensal" else 50),
+                            hovermode='closest',
+                            legend=dict(
+                                orientation="h",
+                                yanchor="bottom",
+                                y=1.02,
+                                xanchor="right",
+                                x=1
+                            )
+                        )
+                        
+                        # Add shaded area between lines to highlight the gap
+                        fig_var_costs.add_trace(go.Scatter(
+                            x=display_df[x_col].tolist() + display_df[x_col].tolist()[::-1],
+                            y=display_df['revenue'].tolist() + display_df['variable_costs'].tolist()[::-1],
+                            fill='toself',
+                            fillcolor='rgba(31, 119, 180, 0.1)',
+                            line=dict(color='rgba(255,255,255,0)'),
+                            showlegend=False,
+                            hoverinfo='skip'
+                        ))
+                        
+                        st.plotly_chart(fig_var_costs, use_container_width=True)
         
                 # 2. Fixed Costs - Full width
                 if not display_df.empty and 'fixed_costs' in display_df.columns:
@@ -1504,29 +1656,61 @@ else:
                             hovertemplate='<b>%{x}</b><br>Receita: R$ %{y:,.0f}<extra></extra>'
                         ))
             
-                    fig_fixed.update_layout(
-                        title='🏢 Custos Fixos vs Receita',
-                        yaxis_title="Valores (R$)",
-                        xaxis_title=x_title,
-                        xaxis=dict(
-                            tickangle=-45 if view_type == "Mensal" else 0,
+                    # Apply interactive features for monthly view
+                    if view_type == "Mensal":
+                        xaxis_config = dict(
+                            tickangle=-45,
                             tickmode='linear',
-                            dtick=1 if view_type == "Anual" else (2 if view_type == "Mensal" and len(display_df) > 24 else None),
-                            type='category' if view_type == "Anual" else None,
-                            categoryorder='category ascending' if view_type == "Anual" else None
-                        ),
-                        height=450 if view_type == "Mensal" else 400,
-                        margin=dict(t=50, b=100 if view_type == "Mensal" else 50),
-                        hovermode='x unified',
-                        legend=dict(
-                            orientation="h",
-                            yanchor="bottom",
-                            y=1.02,
-                            xanchor="right",
-                            x=1
+                            **get_monthly_layout_config()
                         )
-                    )
-                    st.plotly_chart(fig_fixed, use_container_width=True)
+                        
+                        # Set default range to show last 12 months
+                        default_range = get_default_monthly_range(display_df, x_col)
+                        if default_range:
+                            xaxis_config['range'] = default_range
+                            
+                        fig_fixed.update_layout(
+                            title='🏢 Custos Fixos vs Receita',
+                            yaxis_title="Valores (R$)",
+                            xaxis_title=x_title,
+                            xaxis=xaxis_config,
+                            height=600,
+                            margin=dict(t=100, b=100),
+                            hovermode='x unified',
+                            legend=dict(
+                                orientation="h",
+                                yanchor="bottom",
+                                y=1.02,
+                                xanchor="right",
+                                x=1
+                            ),
+                            dragmode='pan'
+                        )
+                        st.plotly_chart(fig_fixed, use_container_width=True, config=get_plotly_config())
+                    else:
+                        fig_fixed.update_layout(
+                            title='🏢 Custos Fixos vs Receita',
+                            yaxis_title="Valores (R$)",
+                            xaxis_title=x_title,
+                            xaxis=dict(
+                                tickangle=-45 if view_type == "Mensal" else 0,
+                                tickmode='linear',
+                                dtick=1 if view_type == "Anual" else (2 if view_type == "Mensal" and len(display_df) > 24 else None),
+                                type='category' if view_type == "Anual" else None,
+                                categoryorder='category ascending' if view_type == "Anual" else None
+                            ),
+                            height=450 if view_type == "Mensal" else 400,
+                            margin=dict(t=50, b=100 if view_type == "Mensal" else 50),
+                            hovermode='x unified',
+                            legend=dict(
+                                orientation="h",
+                                yanchor="bottom",
+                                y=1.02,
+                                xanchor="right",
+                                x=1
+                            )
+                        )
+                        st.plotly_chart(fig_fixed, use_container_width=True)
         
                 # 3. Variable Costs - Full width (similar to Fixed Costs)
                 if not display_df.empty and 'variable_costs' in display_df.columns:
@@ -1563,29 +1747,61 @@ else:
                             hovertemplate='<b>%{x}</b><br>Receita: R$ %{y:,.0f}<extra></extra>'
                         ))
             
-                    fig_variable.update_layout(
-                        title='📦 Custos Variáveis vs Receita',
-                        yaxis_title="Valores (R$)",
-                        xaxis_title=x_title,
-                        xaxis=dict(
-                            tickangle=-45 if view_type == "Mensal" else 0,
+                    # Apply interactive features for monthly view
+                    if view_type == "Mensal":
+                        xaxis_config = dict(
+                            tickangle=-45,
                             tickmode='linear',
-                            dtick=1 if view_type == "Anual" else (2 if view_type == "Mensal" and len(display_df) > 24 else None),
-                            type='category' if view_type == "Anual" else None,
-                            categoryorder='category ascending' if view_type == "Anual" else None
-                        ),
-                        height=450 if view_type == "Mensal" else 400,
-                        margin=dict(t=80, b=100 if view_type == "Mensal" else 50),
-                        hovermode='x unified',
-                        legend=dict(
-                            orientation="h",
-                            yanchor="bottom",
-                            y=1.02,
-                            xanchor="center",
-                            x=0.5
+                            **get_monthly_layout_config()
                         )
-                    )
-                    st.plotly_chart(fig_variable, use_container_width=True)
+                        
+                        # Set default range to show last 12 months
+                        default_range = get_default_monthly_range(display_df, x_col)
+                        if default_range:
+                            xaxis_config['range'] = default_range
+                            
+                        fig_variable.update_layout(
+                            title='📦 Custos Variáveis vs Receita',
+                            yaxis_title="Valores (R$)",
+                            xaxis_title=x_title,
+                            xaxis=xaxis_config,
+                            height=600,
+                            margin=dict(t=100, b=100),
+                            hovermode='x unified',
+                            legend=dict(
+                                orientation="h",
+                                yanchor="bottom",
+                                y=1.02,
+                                xanchor="center",
+                                x=0.5
+                            ),
+                            dragmode='pan'
+                        )
+                        st.plotly_chart(fig_variable, use_container_width=True, config=get_plotly_config())
+                    else:
+                        fig_variable.update_layout(
+                            title='📦 Custos Variáveis vs Receita',
+                            yaxis_title="Valores (R$)",
+                            xaxis_title=x_title,
+                            xaxis=dict(
+                                tickangle=-45 if view_type == "Mensal" else 0,
+                                tickmode='linear',
+                                dtick=1 if view_type == "Anual" else (2 if view_type == "Mensal" and len(display_df) > 24 else None),
+                                type='category' if view_type == "Anual" else None,
+                                categoryorder='category ascending' if view_type == "Anual" else None
+                            ),
+                            height=450 if view_type == "Mensal" else 400,
+                            margin=dict(t=80, b=100 if view_type == "Mensal" else 50),
+                            hovermode='x unified',
+                            legend=dict(
+                                orientation="h",
+                                yanchor="bottom",
+                                y=1.02,
+                                xanchor="center",
+                                x=0.5
+                            )
+                        )
+                        st.plotly_chart(fig_variable, use_container_width=True)
         
                 # 4. Contribution Margin - Full width
                 if not display_df.empty and 'contribution_margin' in display_df.columns:
@@ -1607,30 +1823,63 @@ else:
                         hovertemplate='<b>%{x}</b><br>Margem de Contribuição: R$ %{y:,.0f}<extra></extra>'
                     )
             
-                    fig_contrib.update_layout(
-                        yaxis_title="Margem de Contribuição (R$)",
-                        xaxis_title=x_title,
-                        showlegend=False,
-                        coloraxis_colorbar=dict(
-                            orientation="h",
-                            yanchor="bottom",
-                            y=1.02,
-                            xanchor="center",
-                            x=0.5,
-                            len=0.6,
-                            thickness=15
-                        ),
-                        xaxis=dict(
-                            tickangle=-45 if view_type == "Mensal" else 0,
+                    # Apply interactive features for monthly view
+                    if view_type == "Mensal":
+                        xaxis_config = dict(
+                            tickangle=-45,
                             tickmode='linear',
-                            dtick=1 if view_type == "Anual" else (2 if view_type == "Mensal" and len(display_df) > 24 else None),
-                            type='category' if view_type == "Anual" else None,
-                            categoryorder='category ascending' if view_type == "Anual" else None
-                        ),
-                        height=450 if view_type == "Mensal" else 400,
-                        margin=dict(t=80, b=100 if view_type == "Mensal" else 50)
-                    )
-                    st.plotly_chart(fig_contrib, use_container_width=True)
+                            **get_monthly_layout_config()
+                        )
+                        
+                        # Set default range to show last 12 months
+                        default_range = get_default_monthly_range(display_df, x_col)
+                        if default_range:
+                            xaxis_config['range'] = default_range
+                            
+                        fig_contrib.update_layout(
+                            yaxis_title="Margem de Contribuição (R$)",
+                            xaxis_title=x_title,
+                            showlegend=False,
+                            coloraxis_colorbar=dict(
+                                orientation="h",
+                                yanchor="bottom",
+                                y=1.02,
+                                xanchor="center",
+                                x=0.5,
+                                len=0.6,
+                                thickness=15
+                            ),
+                            xaxis=xaxis_config,
+                            height=600,
+                            margin=dict(t=100, b=100),
+                            dragmode='pan'
+                        )
+                        st.plotly_chart(fig_contrib, use_container_width=True, config=get_plotly_config())
+                    else:
+                        fig_contrib.update_layout(
+                            yaxis_title="Margem de Contribuição (R$)",
+                            xaxis_title=x_title,
+                            showlegend=False,
+                            coloraxis_colorbar=dict(
+                                orientation="h",
+                                yanchor="bottom",
+                                y=1.02,
+                                xanchor="center",
+                                x=0.5,
+                                len=0.6,
+                                thickness=15
+                            ),
+                            xaxis=dict(
+                                tickangle=-45 if view_type == "Mensal" else 0,
+                                tickmode='linear',
+                                dtick=1 if view_type == "Anual" else (2 if view_type == "Mensal" and len(display_df) > 24 else None),
+                                type='category' if view_type == "Anual" else None,
+                                categoryorder='category ascending' if view_type == "Anual" else None
+                            ),
+                            height=450 if view_type == "Mensal" else 400,
+                            margin=dict(t=80, b=100 if view_type == "Mensal" else 50)
+                        )
+                        st.plotly_chart(fig_contrib, use_container_width=True)
         
                 # 4. Operational Costs - Full width  
                 if not display_df.empty and 'operational_costs' in display_df.columns:
@@ -1655,21 +1904,45 @@ else:
                             hovertemplate='<b>%{x}</b><br>Custos Operacionais: R$ %{y:,.0f}<br>% da Receita: %{customdata:.1f}%<extra></extra>'
                         )
             
-                    fig_op_costs.update_layout(
-                        yaxis_title="Custos Operacionais (R$)",
-                        xaxis_title=x_title,
-                        xaxis=dict(
-                            tickangle=-45 if view_type == "Mensal" else 0,
+                    # Apply interactive features for monthly view
+                    if view_type == "Mensal":
+                        xaxis_config = dict(
+                            tickangle=-45,
                             tickmode='linear',
-                            dtick=1 if view_type == "Anual" else (2 if view_type == "Mensal" and len(display_df) > 24 else None),
-                            type='category' if view_type == "Anual" else None,
-                            categoryorder='category ascending' if view_type == "Anual" else None
-                        ),
-                        height=450 if view_type == "Mensal" else 400,
-                        margin=dict(t=50, b=100 if view_type == "Mensal" else 50),
-                        hovermode='x unified'
-                    )
-                    st.plotly_chart(fig_op_costs, use_container_width=True)
+                            **get_monthly_layout_config()
+                        )
+                        
+                        # Set default range to show last 12 months
+                        default_range = get_default_monthly_range(display_df, x_col)
+                        if default_range:
+                            xaxis_config['range'] = default_range
+                            
+                        fig_op_costs.update_layout(
+                            yaxis_title="Custos Operacionais (R$)",
+                            xaxis_title=x_title,
+                            xaxis=xaxis_config,
+                            height=600,
+                            margin=dict(t=100, b=100),
+                            hovermode='x unified',
+                            dragmode='pan'
+                        )
+                        st.plotly_chart(fig_op_costs, use_container_width=True, config=get_plotly_config())
+                    else:
+                        fig_op_costs.update_layout(
+                            yaxis_title="Custos Operacionais (R$)",
+                            xaxis_title=x_title,
+                            xaxis=dict(
+                                tickangle=-45 if view_type == "Mensal" else 0,
+                                tickmode='linear',
+                                dtick=1 if view_type == "Anual" else (2 if view_type == "Mensal" and len(display_df) > 24 else None),
+                                type='category' if view_type == "Anual" else None,
+                                categoryorder='category ascending' if view_type == "Anual" else None
+                            ),
+                            height=450 if view_type == "Mensal" else 400,
+                            margin=dict(t=50, b=100 if view_type == "Mensal" else 50),
+                            hovermode='x unified'
+                        )
+                        st.plotly_chart(fig_op_costs, use_container_width=True)
         
                 # 5. Result (Profit) - Full width
                 st.subheader("💰 Resultado (Lucro Líquido)")
@@ -1692,14 +1965,39 @@ else:
                     # Add a zero line
                     fig_result.add_hline(y=0, line_dash="dash", line_color="gray")
             
-                    fig_result.update_layout(
-                        title=f'Resultado {view_type} (Lucro/Prejuízo)',
-                        yaxis_title="Resultado (R$)",
-                        xaxis_title=x_title,
-                        height=500,
-                        showlegend=False
-                    )
-                    st.plotly_chart(fig_result, use_container_width=True)
+                    # Apply interactive features for monthly view
+                    if view_type == "Mensal":
+                        xaxis_config = dict(
+                            tickangle=-45,
+                            tickmode='linear',
+                            **get_monthly_layout_config()
+                        )
+                        
+                        # Set default range to show last 12 months
+                        default_range = get_default_monthly_range(display_df, x_col)
+                        if default_range:
+                            xaxis_config['range'] = default_range
+                            
+                        fig_result.update_layout(
+                            title=f'Resultado {view_type} (Lucro/Prejuízo)',
+                            yaxis_title="Resultado (R$)",
+                            xaxis_title=x_title,
+                            xaxis=xaxis_config,
+                            height=600,
+                            margin=dict(t=100, b=100),
+                            showlegend=False,
+                            dragmode='pan'
+                        )
+                        st.plotly_chart(fig_result, use_container_width=True, config=get_plotly_config())
+                    else:
+                        fig_result.update_layout(
+                            title=f'Resultado {view_type} (Lucro/Prejuízo)',
+                            yaxis_title="Resultado (R$)",
+                            xaxis_title=x_title,
+                            height=500,
+                            showlegend=False
+                        )
+                        st.plotly_chart(fig_result, use_container_width=True)
         
                 # Cost Structure Comparison
                 st.subheader("📊 Estrutura de Custos")
@@ -1792,26 +2090,9 @@ else:
                     # Clean x-axis labels with just periods (revenue moved to hover)
             
             
-                    # Update layout with single y-axis for percentages
-                    fig_cost_structure.update_layout(
-                        title={
-                            'text': '💰 Estrutura de Custos vs Receita (% da Receita)',
-                            'font': {'size': 24, 'color': '#1F2937'}
-                        },
-                        barmode='stack',
-                        yaxis=dict(
-                            title=dict(
-                                text="Percentual da Receita (%)",
-                                font=dict(size=16, color='#1F2937', weight='bold')
-                            ),
-                            tickformat='.1f',
-                            ticksuffix='%',
-                            tickfont=dict(size=12, color='#374151'),
-                            showgrid=True,
-                            gridcolor='rgba(0,0,0,0.1)',
-                            range=[0, 100]
-                        ),
-                        xaxis=dict(
+                    # Apply interactive features for monthly view
+                    if view_type == "Mensal":
+                        xaxis_config = dict(
                             title=dict(
                                 text=x_title,
                                 font=dict(size=16, color='#1F2937', weight='bold')
@@ -1820,33 +2101,111 @@ else:
                             showgrid=False,
                             tickangle=-90,  # Vertical labels to prevent overlap
                             tickmode='linear',
-                            dtick=1 if view_type == "Anual" else None,
-                            type='category' if view_type == "Anual" else None,
-                            categoryorder='category ascending' if view_type == "Anual" else None
-                        ),
-                        height=600,  # Standard height for all views
-                        hovermode='x unified',
-                        plot_bgcolor='rgba(248,249,250,0.8)',
-                        paper_bgcolor='white',
-                        legend=dict(
-                            orientation="h",
-                            yanchor="bottom",
-                            y=1.02,
-                            xanchor="center",
-                            x=0.5,
-                            bgcolor="rgba(255,255,255,0.9)",
-                            bordercolor="rgba(0,0,0,0.1)",
-                            borderwidth=1,
-                            font=dict(size=14, color='#374151', weight='bold')
-                        ),
-                        margin=dict(t=120, b=50)
-                    )
-            
-                    # Add shapes for visual appeal
-                    fig_cost_structure.update_xaxes(showline=True, linewidth=2, linecolor='#E5E7EB')
-                    fig_cost_structure.update_yaxes(showline=True, linewidth=2, linecolor='#E5E7EB')
-            
-                    st.plotly_chart(fig_cost_structure, use_container_width=True)
+                            **get_monthly_layout_config()
+                        )
+                        
+                        # Set default range to show last 12 months
+                        default_range = get_default_monthly_range(display_df, x_col)
+                        if default_range:
+                            xaxis_config['range'] = default_range
+                        fig_cost_structure.update_layout(
+                            title={
+                                'text': '💰 Estrutura de Custos vs Receita (% da Receita)',
+                                'font': {'size': 24, 'color': '#1F2937'}
+                            },
+                            barmode='stack',
+                            yaxis=dict(
+                                title=dict(
+                                    text="Percentual da Receita (%)",
+                                    font=dict(size=16, color='#1F2937', weight='bold')
+                                ),
+                                tickformat='.1f',
+                                ticksuffix='%',
+                                tickfont=dict(size=12, color='#374151'),
+                                showgrid=True,
+                                gridcolor='rgba(0,0,0,0.1)',
+                                range=[0, 100]
+                            ),
+                            xaxis=xaxis_config,
+                            height=700,  # Increased height for monthly view
+                            hovermode='x unified',
+                            plot_bgcolor='rgba(248,249,250,0.8)',
+                            paper_bgcolor='white',
+                            legend=dict(
+                                orientation="h",
+                                yanchor="bottom",
+                                y=1.02,
+                                xanchor="center",
+                                x=0.5,
+                                bgcolor="rgba(255,255,255,0.9)",
+                                bordercolor="rgba(0,0,0,0.1)",
+                                borderwidth=1,
+                                font=dict(size=14, color='#374151', weight='bold')
+                            ),
+                            margin=dict(t=120, b=100),
+                            dragmode='pan'
+                        )
+                        
+                        # Add shapes for visual appeal
+                        fig_cost_structure.update_xaxes(showline=True, linewidth=2, linecolor='#E5E7EB')
+                        fig_cost_structure.update_yaxes(showline=True, linewidth=2, linecolor='#E5E7EB')
+                        
+                        st.plotly_chart(fig_cost_structure, use_container_width=True, config=get_plotly_config())
+                    else:
+                        fig_cost_structure.update_layout(
+                            title={
+                                'text': '💰 Estrutura de Custos vs Receita (% da Receita)',
+                                'font': {'size': 24, 'color': '#1F2937'}
+                            },
+                            barmode='stack',
+                            yaxis=dict(
+                                title=dict(
+                                    text="Percentual da Receita (%)",
+                                    font=dict(size=16, color='#1F2937', weight='bold')
+                                ),
+                                tickformat='.1f',
+                                ticksuffix='%',
+                                tickfont=dict(size=12, color='#374151'),
+                                showgrid=True,
+                                gridcolor='rgba(0,0,0,0.1)',
+                                range=[0, 100]
+                            ),
+                            xaxis=dict(
+                                title=dict(
+                                    text=x_title,
+                                    font=dict(size=16, color='#1F2937', weight='bold')
+                                ),
+                                tickfont=dict(size=12, color='#374151'),
+                                showgrid=False,
+                                tickangle=-90,  # Vertical labels to prevent overlap
+                                tickmode='linear',
+                                dtick=1 if view_type == "Anual" else None,
+                                type='category' if view_type == "Anual" else None,
+                                categoryorder='category ascending' if view_type == "Anual" else None
+                            ),
+                            height=600,  # Standard height for all views
+                            hovermode='x unified',
+                            plot_bgcolor='rgba(248,249,250,0.8)',
+                            paper_bgcolor='white',
+                            legend=dict(
+                                orientation="h",
+                                yanchor="bottom",
+                                y=1.02,
+                                xanchor="center",
+                                x=0.5,
+                                bgcolor="rgba(255,255,255,0.9)",
+                                bordercolor="rgba(0,0,0,0.1)",
+                                borderwidth=1,
+                                font=dict(size=14, color='#374151', weight='bold')
+                            ),
+                            margin=dict(t=120, b=50)
+                        )
+                        
+                        # Add shapes for visual appeal
+                        fig_cost_structure.update_xaxes(showline=True, linewidth=2, linecolor='#E5E7EB')
+                        fig_cost_structure.update_yaxes(showline=True, linewidth=2, linecolor='#E5E7EB')
+                        
+                        st.plotly_chart(fig_cost_structure, use_container_width=True)
             
             
                     # Add cost analysis metrics below the chart with clearer descriptions
