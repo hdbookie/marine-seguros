@@ -604,9 +604,58 @@ def process_detailed_monthly_data(flexible_data):
             annual_value = item_data['annual']
             monthly_values = item_data.get('monthly', {})
             
-            # Skip calculated items, margins, and revenue
-            if category in ['calculated_results', 'margins', 'revenue'] or item_data.get('is_subtotal', False):
+            # Skip calculated items, margins, revenue, results, and headers
+            # Focus only on costs and expenses for analysis
+            if category in ['calculated_results', 'margins', 'revenue', 'results', 'resultados', 'faturamento'] or item_data.get('is_subtotal', False):
                 continue
+            
+            # Only include actual cost and expense categories
+            cost_expense_categories = [
+                'variable_costs', 'fixed_costs', 'admin_expenses', 
+                'operational_expenses', 'marketing_expenses', 'financial_expenses',
+                'tax_expenses', 'other_expenses', 'other_costs', 'other'
+            ]
+            if category not in cost_expense_categories:
+                continue
+            
+            # Only include items that are explicitly marked as line items
+            if not item_data.get('is_line_item', True):
+                continue
+            
+            # Additional check: Skip if label is a known header or calculation
+            label_upper = label.upper().strip()
+            skip_patterns = [
+                'FATURAMENTO', 'CUSTOS VARIÁVEIS', 'CUSTOS FIXOS', 
+                'CUSTOS NÃO OPERACIONAIS', 'MARGEM DE CONTRIBUIÇÃO',
+                'RESULTADO', 'PONTO EQUILIBRIO', 'PONTO EQUILÍBRIO',
+                'LUCRO', 'LUCRO LÍQUIDO', 'MARGEM DE LUCRO', 'TOTAL DESPESAS',
+                'COMPOSIÇÃO DE SALDOS', 'APLICAÇÕES', 'RETIRADA',
+                'DESPESAS - TOTAL', 'CUSTO FIXO + VARIAVEL',
+                'CUSTOS FIXOS + VARIÁVEIS', 'CUSTOS VARIÁVEIS + FIXOS',
+                'CUSTOS FIXOS + VARIÁVEIS + NÃO OPERACIONAIS',
+                'TOTAL CUSTOS', 'CUSTO TOTAL', 'TOTAL GERAL',
+                'DESPESA TOTAL', 'TOTAL DE CUSTOS', 'TOTAL DE DESPESAS',
+                'SUBTOTAL', 'SUB TOTAL', 'SUB-TOTAL'
+            ]
+            if any(pattern in label_upper for pattern in skip_patterns):
+                continue
+            
+            # Skip if label contains mathematical operators (likely a calculation)
+            if any(op in label for op in ['+', '=', ' - ', '(', ')']):
+                continue
+            
+            # Skip if it's ALL CAPS (likely a header) but not a known abbreviation
+            exceptions = ['IRRF', 'INSS', 'FGTS', 'IPTU', 'IPVA', 'ISS', 'PIS', 'COFINS']
+            if label_upper == label.strip() and len(label.strip()) > 3 and label_upper not in exceptions:
+                continue
+            
+            # Skip if annual value is suspiciously high (likely a total/sum)
+            # Most individual expense line items should be under 500k annually
+            if annual_value > 500000:
+                # Only allow high-value items if they're clearly individual expenses
+                allowed_high_value = ['salário', 'folha', 'aluguel', 'energia', 'comissão']
+                if not any(term in label.lower() for term in allowed_high_value):
+                    continue
             
             detailed_data['summary']['total_categories'].add(category)
             detailed_data['summary']['total_items'] += 1
@@ -2651,11 +2700,11 @@ else:
         if use_flexible_extractor:
             with tab3:
                 # Clear header with purpose statement
-                st.header("🔬 Análise Micro - Despesas Detalhadas")
+                st.header("🔬 Análise Micro - Custos e Despesas Detalhados")
                 st.markdown("""
                 <div style='background-color: #f0f9ff; padding: 15px; border-radius: 10px; margin-bottom: 20px;'>
                     <p style='margin: 0; color: #0c5690;'>
-                        🔎 <strong>Veja exatamente onde cada real está sendo gasto</strong> - Analise linha por linha todas as despesas específicas que compõem seus custos variáveis, fixos e operacionais.
+                        🔎 <strong>Investigue por que alguns anos foram melhores que outros</strong> - Analise linha por linha todos os custos e despesas para identificar onde houve aumentos ou reduções que impactaram os resultados.
                     </p>
                 </div>
                 """, unsafe_allow_html=True)
@@ -2684,6 +2733,245 @@ else:
                         if 'details_search_term' not in st.session_state:
                             st.session_state.details_search_term = ""
                         
+                        # Calculate all_items early for use in filters
+                        all_items = [item for item in detailed_data['line_items'] if item['categoria'] != 'revenue']
+                        
+                        # FILTERS SECTION - Moved to top for better UX
+                        st.markdown("### 🔍 Filtros")
+                        
+                        # Time period quick filters
+                        st.markdown("##### ⏱️ Período Rápido")
+                        time_cols = st.columns(6)
+                        
+                        # Get current year for calculations
+                        from datetime import datetime
+                        today = datetime.now()
+                        current_year_int = today.year
+                        current_month = today.month
+                        
+                        with time_cols[0]:
+                            if st.button("Este Ano", key="details_this_year", use_container_width=True):
+                                current_year_str = str(current_year_int)
+                                if current_year_str in years:
+                                    st.session_state.details_year_filter = [current_year_str]
+                                elif years:  # If current year not in data, use most recent
+                                    st.session_state.details_year_filter = [years[-1]]
+                                st.session_state.details_month_filter = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 
+                                                                       'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ']
+                                st.rerun()
+                        
+                        with time_cols[1]:
+                            if st.button("Ano Passado", key="details_last_year", use_container_width=True):
+                                last_year = str(current_year_int - 1)
+                                if last_year in years:
+                                    st.session_state.details_year_filter = [last_year]
+                                    st.session_state.details_month_filter = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 
+                                                                           'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ']
+                                    st.rerun()
+                        
+                        with time_cols[2]:
+                            if st.button("YTD", key="details_ytd", use_container_width=True):
+                                current_year_str = str(current_year_int)
+                                if current_year_str in years:
+                                    months_ytd = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 
+                                                 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'][:current_month]
+                                    st.session_state.details_year_filter = [current_year_str]
+                                    st.session_state.details_month_filter = months_ytd
+                                elif years:  # If current year not in data, use most recent year
+                                    st.session_state.details_year_filter = [years[-1]]
+                                    st.session_state.details_month_filter = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 
+                                                                           'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ']
+                                st.rerun()
+                        
+                        with time_cols[3]:
+                            if st.button("Últimos 12M", key="details_12m", use_container_width=True):
+                                # Calculate last 12 months
+                                months_12m = []
+                                years_12m = []
+                                
+                                for i in range(12):
+                                    month_idx = (current_month - 1 - i) % 12
+                                    year_offset = (current_month - 1 - i) // 12
+                                    calc_year = str(current_year_int - year_offset - (1 if month_idx > current_month - 1 else 0))
+                                    
+                                    if calc_year in years:
+                                        if calc_year not in years_12m:
+                                            years_12m.append(calc_year)
+                                        month_name = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 
+                                                     'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'][month_idx]
+                                        if month_name not in months_12m:
+                                            months_12m.append(month_name)
+                                
+                                st.session_state.details_year_filter = years_12m
+                                st.session_state.details_month_filter = months_12m
+                                st.rerun()
+                        
+                        with time_cols[4]:
+                            if st.button("Q4", key="details_q4", use_container_width=True):
+                                st.session_state.details_month_filter = ['OUT', 'NOV', 'DEZ']
+                                if not st.session_state.details_year_filter:
+                                    st.session_state.details_year_filter = [str(current_year_int)]
+                                st.rerun()
+                        
+                        with time_cols[5]:
+                            if st.button("Todos", key="details_all", use_container_width=True):
+                                st.session_state.details_year_filter = years
+                                st.session_state.details_month_filter = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 
+                                                                       'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ']
+                                st.rerun()
+                        
+                        # Primary filters in columns
+                        filter_col1, filter_col2, filter_col3 = st.columns([2, 2, 3])
+                        
+                        with filter_col1:
+                            # Year filter with smart default
+                            # Ensure default values exist in options
+                            valid_defaults = [y for y in st.session_state.details_year_filter if y in years]
+                            if not valid_defaults and years:
+                                valid_defaults = [years[-1]]  # Use most recent year if no valid defaults
+                            
+                            selected_years = st.multiselect(
+                                "📅 Anos",
+                                options=years,
+                                default=valid_defaults,
+                                key="year_filter_details"
+                            )
+                            st.session_state.details_year_filter = selected_years
+                        
+                        with filter_col2:
+                            # Category filter - exclude revenue
+                            all_categories = [cat for cat in detailed_data['summary']['total_categories'] if cat != 'revenue']
+                            selected_categories = st.multiselect(
+                                "📂 Categorias",
+                                options=all_categories,
+                                format_func=lambda x: f"{get_category_icon(x)} {get_category_name(x)}",
+                                default=all_categories
+                            )
+                        
+                        with filter_col3:
+                            # Enhanced search with suggestions
+                            search_term = st.text_input(
+                                "🔍 Buscar",
+                                placeholder="Digite para buscar (ex: vale, salário, João)",
+                                value=st.session_state.details_search_term,
+                                key="search_details"
+                            )
+                            st.session_state.details_search_term = search_term
+                            
+                            # Quick search buttons
+                            quick_cols = st.columns(4)
+                            quick_searches = [
+                                ("👤 Pessoal", "salário"),
+                                ("🚌 Vale", "vale"),
+                                ("🍽️ Alimentação", "alimentação"),
+                                ("🏢 Aluguel", "aluguel")
+                            ]
+                            for idx, (label, term) in enumerate(quick_searches):
+                                with quick_cols[idx]:
+                                    if st.button(label, key=f"quick_{idx}"):
+                                        st.session_state.details_search_term = term
+                                        st.rerun()
+                        
+                        # Advanced filters (hidden by default)
+                        with st.expander("Filtros Avançados", expanded=False):
+                            adv_col1, adv_col2, adv_col3 = st.columns(3)
+                            
+                            with adv_col1:
+                                # Subcategory filter
+                                subcategories_data = get_expense_subcategories()
+                                main_categories = list(subcategories_data.keys()) + ['outros']
+                                selected_main_categories = st.multiselect(
+                                    "Categorias Principais",
+                                    options=main_categories,
+                                    format_func=lambda x: subcategories_data.get(x, {}).get('name', '📌 Outros') if x != 'outros' else '📌 Outros',
+                                    default=main_categories
+                                )
+                            
+                            with adv_col2:
+                                # Month filter
+                                months = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 
+                                         'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ']
+                                selected_months = st.multiselect(
+                                    "📅 Meses",
+                                    options=months,
+                                    default=st.session_state.details_month_filter,
+                                    key="month_filter_details"
+                                )
+                                st.session_state.details_month_filter = selected_months
+                            
+                            with adv_col3:
+                                # Value range
+                                all_values = [item['valor_anual'] for item in all_items]
+                                min_val = min(all_values) if all_values else 0
+                                max_val = max(all_values) if all_values else 1000000
+                                
+                                value_range = st.slider(
+                                    "Faixa de Valores (R$)",
+                                    min_value=min_val,
+                                    max_value=max_val,
+                                    value=(min_val, max_val),
+                                    format="R$ %d",
+                                    key="value_range_details"
+                                )
+                        
+                        st.markdown("---")
+                        
+                        # Build available subcategories for filtering
+                        subcategories_data = get_expense_subcategories()
+                        available_subcategories = []
+                        for main_cat in selected_main_categories:
+                            if main_cat in subcategories_data:
+                                for sub_cat in subcategories_data[main_cat]['subcategories'].keys():
+                                    available_subcategories.append(f"{main_cat}_{sub_cat}")
+                            elif main_cat == 'outros':
+                                available_subcategories.append('outros_nao_categorizado')
+                        
+                        # Apply all filters to get filtered items
+                        filtered_items = []
+                        for item in detailed_data['line_items']:
+                            # Exclude revenue items completely
+                            if item['categoria'] == 'revenue':
+                                continue
+                                
+                            # Year filter - convert to string for comparison
+                            if str(item['ano']) not in [str(y) for y in selected_years]:
+                                continue
+                            
+                            # Category filter
+                            if item['categoria'] not in selected_categories:
+                                continue
+                            
+                            # Subcategory filter (only if advanced filters expanded)
+                            if 'selected_main_categories' in locals():
+                                item_subcat_key = f"{item['subcategoria_principal']}_{item['subcategoria']}"
+                                if item_subcat_key not in available_subcategories:
+                                    continue
+                            
+                            # Month filter - always apply based on session state
+                            if hasattr(st.session_state, 'details_month_filter'):
+                                # Check if item has any value in selected months
+                                has_value_in_month = any(
+                                    item['valores_mensais'].get(month, 0) > 0 
+                                    for month in st.session_state.details_month_filter
+                                )
+                                if not has_value_in_month:
+                                    continue
+                            
+                            # Value filter (only if advanced filters expanded)
+                            if 'value_range' in locals():
+                                min_value, max_value = value_range
+                                if not (min_value <= item['valor_anual'] <= max_value):
+                                    continue
+                            
+                            # Search filter
+                            if search_term:
+                                search_words = search_term.lower().split()
+                                item_desc_lower = item['descricao'].lower()
+                                if not any(word in item_desc_lower for word in search_words):
+                                    continue
+                            
+                            filtered_items.append(item)
+                        
                         # Analysis Mode Selector
                         st.markdown("### 🎯 O que você quer analisar?")
                         
@@ -2694,26 +2982,22 @@ else:
                             key="micro_analysis_mode"
                         )
                         
-                        # Calculate insights - exclude revenue items
-                        all_items = [item for item in detailed_data['line_items'] if item['categoria'] != 'revenue']
-                        current_year_items = [item for item in all_items if str(item['ano']) == str(current_year)] if current_year else all_items
-                        
                         # Quick Summary Cards
                         st.markdown("### 📊 Resumo Rápido")
                         summary_cols = st.columns(5)
                         
                         with summary_cols[0]:
-                            total_annual = sum(item['valor_anual'] for item in current_year_items)
+                            total_annual = sum(item['valor_anual'] for item in filtered_items)
                             st.metric(
-                                "💰 Total Anual",
+                                "💸 Total Custos/Despesas",
                                 format_currency(total_annual),
-                                f"{len(current_year_items)} itens"
+                                f"{len(filtered_items)} itens"
                             )
                             
                         with summary_cols[1]:
                             # Biggest single expense
-                            if current_year_items:
-                                biggest_expense = max(current_year_items, key=lambda x: x['valor_anual'])
+                            if filtered_items:
+                                biggest_expense = max(filtered_items, key=lambda x: x['valor_anual'])
                                 st.metric(
                                     "🔝 Maior Gasto",
                                     format_currency(biggest_expense['valor_anual']),
@@ -2724,7 +3008,7 @@ else:
                                 
                         with summary_cols[2]:
                             # Average expense
-                            avg_expense = total_annual / len(current_year_items) if current_year_items else 0
+                            avg_expense = total_annual / len(filtered_items) if filtered_items else 0
                             st.metric(
                                 "📊 Média",
                                 format_currency(avg_expense),
@@ -2747,7 +3031,7 @@ else:
                                 
                         with summary_cols[4]:
                             # Concentration
-                            top_10_expenses = sorted(current_year_items, key=lambda x: x['valor_anual'], reverse=True)[:10]
+                            top_10_expenses = sorted(filtered_items, key=lambda x: x['valor_anual'], reverse=True)[:10]
                             top_10_total = sum(item['valor_anual'] for item in top_10_expenses)
                             concentration = (top_10_total / total_annual * 100) if total_annual > 0 else 0
                             st.metric(
@@ -2764,7 +3048,7 @@ else:
                             # Show top expenses with reduction opportunities
                             st.info("🎯 **Foco:** Seus maiores gastos - onde pequenas otimizações geram grandes economias")
                             
-                            top_expenses = sorted(current_year_items, key=lambda x: x['valor_anual'], reverse=True)[:20]
+                            top_expenses = sorted(filtered_items, key=lambda x: x['valor_anual'], reverse=True)[:20]
                             
                             # Group similar expenses
                             expense_groups = {}
@@ -2870,7 +3154,7 @@ else:
                             
                             # Find recurring expenses (present in 10+ months)
                             recurring_expenses = []
-                            for item in current_year_items:
+                            for item in filtered_items:
                                 months_with_value = sum(1 for v in item['valores_mensais'].values() if v > 0)
                                 if months_with_value >= 10:
                                     monthly_avg = item['valor_anual'] / months_with_value
@@ -2933,7 +3217,7 @@ else:
                             
                             # 1. Duplicate or similar expenses
                             descriptions = {}
-                            for item in current_year_items:
+                            for item in filtered_items:
                                 # Normalize description
                                 key_words = sorted(item['descricao'].lower().split()[:3])  # First 3 words
                                 key = ' '.join(key_words)
@@ -2953,7 +3237,7 @@ else:
                                     })
                             
                             # 2. Expenses that vary significantly month to month
-                            for item in current_year_items:
+                            for item in filtered_items:
                                 monthly_values = [v for v in item['valores_mensais'].values() if v > 0]
                                 if len(monthly_values) >= 6:
                                     avg = sum(monthly_values) / len(monthly_values)
@@ -2969,7 +3253,7 @@ else:
                                         })
                             
                             # 3. Small recurring expenses that add up
-                            small_recurring = [item for item in current_year_items 
+                            small_recurring = [item for item in filtered_items 
                                              if item['valor_anual'] < 5000 and 
                                              sum(1 for v in item['valores_mensais'].values() if v > 0) >= 10]
                             
@@ -3015,184 +3299,7 @@ else:
                             else:
                                 st.success("✅ Estrutura de custos otimizada - poucas oportunidades óbvias de economia")
                         
-                        # Collapsible Filter Section
-                        with st.expander("⚙️ **Filtros e Configurações**", expanded=True):
-                            # Time period quick filters
-                            st.markdown("##### ⏱️ Período Rápido")
-                            time_cols = st.columns(6)
-                            
-                            # Get current year for calculations
-                            from datetime import datetime
-                            today = datetime.now()
-                            current_year_int = today.year
-                            current_month = today.month
-                            
-                            with time_cols[0]:
-                                if st.button("Este Ano", key="details_this_year", use_container_width=True):
-                                    current_year_str = str(current_year_int)
-                                    if current_year_str in years:
-                                        st.session_state.details_year_filter = [current_year_str]
-                                    elif years:  # If current year not in data, use most recent
-                                        st.session_state.details_year_filter = [years[-1]]
-                                    st.session_state.details_month_filter = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 
-                                                                           'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ']
-                                    st.rerun()
-                            
-                            with time_cols[1]:
-                                if st.button("Ano Passado", key="details_last_year", use_container_width=True):
-                                    last_year = str(current_year_int - 1)
-                                    if last_year in years:
-                                        st.session_state.details_year_filter = [last_year]
-                                        st.session_state.details_month_filter = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 
-                                                                               'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ']
-                                        st.rerun()
-                            
-                            with time_cols[2]:
-                                if st.button("YTD", key="details_ytd", use_container_width=True):
-                                    current_year_str = str(current_year_int)
-                                    if current_year_str in years:
-                                        months_ytd = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 
-                                                     'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'][:current_month]
-                                        st.session_state.details_year_filter = [current_year_str]
-                                        st.session_state.details_month_filter = months_ytd
-                                    elif years:  # If current year not in data, use most recent year
-                                        st.session_state.details_year_filter = [years[-1]]
-                                        st.session_state.details_month_filter = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 
-                                                                               'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ']
-                                    st.rerun()
-                            
-                            with time_cols[3]:
-                                if st.button("Últimos 12M", key="details_12m", use_container_width=True):
-                                    # Calculate last 12 months
-                                    months_12m = []
-                                    years_12m = []
-                                    
-                                    for i in range(12):
-                                        month_idx = (current_month - 1 - i) % 12
-                                        year_offset = (current_month - 1 - i) // 12
-                                        calc_year = str(current_year_int - year_offset - (1 if month_idx > current_month - 1 else 0))
-                                        
-                                        if calc_year in years:
-                                            if calc_year not in years_12m:
-                                                years_12m.append(calc_year)
-                                            month_name = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 
-                                                         'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'][month_idx]
-                                            if month_name not in months_12m:
-                                                months_12m.append(month_name)
-                                    
-                                    st.session_state.details_year_filter = years_12m
-                                    st.session_state.details_month_filter = months_12m
-                                    st.rerun()
-                            
-                            with time_cols[4]:
-                                if st.button("Q4", key="details_q4", use_container_width=True):
-                                    st.session_state.details_month_filter = ['OUT', 'NOV', 'DEZ']
-                                    if not st.session_state.details_year_filter:
-                                        st.session_state.details_year_filter = [str(current_year_int)]
-                                    st.rerun()
-                            
-                            with time_cols[5]:
-                                if st.button("Todos", key="details_all", use_container_width=True):
-                                    st.session_state.details_year_filter = years
-                                    st.session_state.details_month_filter = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 
-                                                                           'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ']
-                                    st.rerun()
-                            
-                            st.markdown("---")
-                            
-                            # Primary filters in columns
-                            filter_col1, filter_col2, filter_col3 = st.columns([2, 2, 3])
-                            
-                            with filter_col1:
-                                # Year filter with smart default
-                                # Ensure default values exist in options
-                                valid_defaults = [y for y in st.session_state.details_year_filter if y in years]
-                                if not valid_defaults and years:
-                                    valid_defaults = [years[-1]]  # Use most recent year if no valid defaults
-                                
-                                selected_years = st.multiselect(
-                                    "📅 Anos",
-                                    options=years,
-                                    default=valid_defaults,
-                                    key="year_filter_details"
-                                )
-                                st.session_state.details_year_filter = selected_years
-                            
-                            with filter_col2:
-                                # Category filter - exclude revenue
-                                all_categories = [cat for cat in detailed_data['summary']['total_categories'] if cat != 'revenue']
-                                selected_categories = st.multiselect(
-                                    "📂 Categorias",
-                                    options=all_categories,
-                                    format_func=lambda x: f"{get_category_icon(x)} {get_category_name(x)}",
-                                    default=all_categories
-                                )
-                            
-                            with filter_col3:
-                                # Enhanced search with suggestions
-                                search_term = st.text_input(
-                                    "🔍 Buscar",
-                                    placeholder="Digite para buscar (ex: vale, salário, João)",
-                                    value=st.session_state.details_search_term,
-                                    key="search_details"
-                                )
-                                st.session_state.details_search_term = search_term
-                                
-                                # Quick search buttons
-                                quick_cols = st.columns(4)
-                                quick_searches = [
-                                    ("👤 Pessoal", "salário"),
-                                    ("🚌 Vale", "vale"),
-                                    ("🍽️ Alimentação", "alimentação"),
-                                    ("🏢 Aluguel", "aluguel")
-                                ]
-                                for idx, (label, term) in enumerate(quick_searches):
-                                    with quick_cols[idx]:
-                                        if st.button(label, key=f"quick_{idx}"):
-                                            st.session_state.details_search_term = term
-                                            st.rerun()
-                            
-                            # Advanced filters (hidden by default)
-                            with st.expander("Filtros Avançados", expanded=False):
-                                adv_col1, adv_col2, adv_col3 = st.columns(3)
-                                
-                                with adv_col1:
-                                    # Subcategory filter
-                                    subcategories_data = get_expense_subcategories()
-                                    main_categories = list(subcategories_data.keys()) + ['outros']
-                                    selected_main_categories = st.multiselect(
-                                        "Categorias Principais",
-                                        options=main_categories,
-                                        format_func=lambda x: subcategories_data.get(x, {}).get('name', '📌 Outros') if x != 'outros' else '📌 Outros',
-                                        default=main_categories
-                                    )
-                                
-                                with adv_col2:
-                                    # Month filter
-                                    months = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 
-                                             'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ']
-                                    selected_months = st.multiselect(
-                                        "📅 Meses",
-                                        options=months,
-                                        default=st.session_state.details_month_filter,
-                                        key="month_filter_details"
-                                    )
-                                    st.session_state.details_month_filter = selected_months
-                                
-                                with adv_col3:
-                                    # Value range
-                                    all_values = [item['valor_anual'] for item in all_items]
-                                    min_val = min(all_values) if all_values else 0
-                                    max_val = max(all_values) if all_values else 1000000
-                                    
-                                    value_range = st.slider(
-                                        "Faixa de Valores (R$)",
-                                        min_value=min_val,
-                                        max_value=max_val,
-                                        value=(min_val, max_val),
-                                        format="R$ %d"
-                                    )
-                                    min_value, max_value = value_range
+                        # Filters have been moved to the top of the page for better UX
                         
                         # Build available subcategories for filtering
                         available_subcategories = []

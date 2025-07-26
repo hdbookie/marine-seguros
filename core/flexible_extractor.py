@@ -102,6 +102,8 @@ class FlexibleFinancialExtractor:
         rows_checked = 0
         rows_with_labels = 0
         rows_with_data = 0
+        current_category = None
+        current_subcategory = None
         
         for idx in range(len(df)):
             rows_checked += 1
@@ -109,12 +111,29 @@ class FlexibleFinancialExtractor:
             if not row_label:
                 continue
             rows_with_labels += 1
+            
+            # Check if this is a category header
+            if self._is_category_header(row_label):
+                current_category = row_label
+                current_subcategory = None
+                print(f"  Category header found: {row_label}")
+                continue
                 
             # Check if this row has numerical data
             row_data = self._extract_row_data(df, idx, month_cols, annual_col)
             if not row_data['has_data']:
+                # Could be a subcategory header
+                if not self._is_subtotal(row_label):
+                    current_subcategory = row_label
+                    print(f"    Subcategory found: {row_label}")
                 continue
             rows_with_data += 1
+            
+            # Skip if this is a subtotal/calculation
+            is_subtotal = self._is_subtotal(row_label)
+            if is_subtotal:
+                print(f"  Skipping subtotal/calculation: {row_label}")
+                continue
                 
             # Classify the line item
             category = self._classify_line_item(row_label)
@@ -124,10 +143,13 @@ class FlexibleFinancialExtractor:
             data['line_items'][item_key] = {
                 'label': row_label,
                 'category': category,
+                'parent_category': current_category,
+                'parent_subcategory': current_subcategory,
                 'monthly': row_data['monthly'],
                 'annual': row_data['annual'],
                 'row_index': idx,
-                'is_subtotal': self._is_subtotal(row_label)
+                'is_subtotal': is_subtotal,
+                'is_line_item': True  # Mark as actual line item
             }
             
             # Group by category
@@ -135,7 +157,7 @@ class FlexibleFinancialExtractor:
                 data['categories'][category] = []
             data['categories'][category].append(item_key)
             
-            print(f"  [{category}] {row_label}: R$ {row_data['annual']:,.2f}")
+            print(f"  [{category}] {row_label}: R$ {row_data['annual']:,.2f} (under {current_category or 'None'})")
             
         # Debug: Print category summary
         print(f"\nCategory summary for year {year}:")
@@ -149,6 +171,7 @@ class FlexibleFinancialExtractor:
         data['hierarchy'] = self._build_hierarchy(df, data['line_items'])
         
         print(f"Row processing stats: {rows_checked} checked, {rows_with_labels} with labels, {rows_with_data} with data")
+        print(f"Line items extracted: {len(data['line_items'])}")
         
         return data
     
@@ -275,9 +298,52 @@ class FlexibleFinancialExtractor:
         return key
     
     def _is_subtotal(self, label: str) -> bool:
-        """Check if a line item is a subtotal or total"""
-        label_upper = label.upper()
-        return any(term in label_upper for term in ['TOTAL', 'SUBTOTAL', 'SOMA'])
+        """Check if a line item is a subtotal, total, header, or calculation"""
+        label_upper = label.upper().strip()
+        
+        # Check if it's a calculation or result
+        calculation_terms = [
+            'TOTAL', 'SUBTOTAL', 'SOMA', 'RESULTADO', 'MARGEM', 
+            'PONTO EQUILIBRIO', 'PONTO EQUILÍBRIO', 'LUCRO LÍQUIDO',
+            'APLICAÇÕES', 'RETIRADA', 'COMPOSIÇÃO', 'SALDOS',
+            'EXCLUINDO', 'DESPESAS - TOTAL', 'CUSTO FIXO + VARIAVEL',
+            'CUSTOS FIXOS + VARIÁVEIS', 'CUSTOS VARIÁVEIS + FIXOS',
+            'CUSTOS FIXOS + VARIÁVEIS + NÃO OPERACIONAIS',
+            'TOTAL CUSTOS', 'CUSTO TOTAL', 'TOTAL GERAL',
+            'DESPESA TOTAL', 'TOTAL DE CUSTOS', 'TOTAL DE DESPESAS'
+        ]
+        if any(term in label_upper for term in calculation_terms):
+            return True
+        
+        # Check if it's ALL CAPS (likely a header)
+        # But exclude some known line items that might be all caps
+        exceptions = ['IRRF', 'INSS', 'FGTS', 'IPTU', 'IPVA', 'ISS', 'PIS', 'COFINS']
+        if label_upper == label.strip() and len(label.strip()) > 3 and label_upper not in exceptions:
+            # It's all caps - likely a header
+            return True
+        
+        # Check for specific header patterns
+        header_patterns = [
+            'FATURAMENTO', 'CUSTOS VARIÁVEIS', 'CUSTOS FIXOS', 
+            'CUSTOS NÃO OPERACIONAIS', 'RECEITA', 'DESPESAS',
+            'MARGEM DE CONTRIBUIÇÃO', 'COMPOSIÇÃO DE SALDOS'
+        ]
+        if label_upper in header_patterns:
+            return True
+            
+        return False
+    
+    def _is_category_header(self, label: str) -> bool:
+        """Check if a label is a main category header"""
+        label_upper = label.upper().strip()
+        
+        # Main category headers from the Excel structure
+        category_headers = [
+            'FATURAMENTO', 'CUSTOS VARIÁVEIS', 'CUSTOS FIXOS', 
+            'CUSTOS NÃO OPERACIONAIS', 'RECEITA', 'DESPESAS'
+        ]
+        
+        return label_upper in category_headers
     
     def _build_hierarchy(self, df: pd.DataFrame, line_items: Dict) -> List[Dict]:
         """Build a hierarchical structure based on row positions"""
