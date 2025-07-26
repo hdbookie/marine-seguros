@@ -3361,6 +3361,117 @@ else:
                                     
                                     if idx < display_limit - 1:
                                         st.divider()
+                                        avg_value = total_filtered / len(filtered_items) if filtered_items else 0
+                                        st.info(f"**Média por item:** {format_currency(avg_value)}")
+                                    with stat_cols[3]:
+                                        median_value = sorted([item['valor_anual'] for item in filtered_items])[len(filtered_items)//2] if filtered_items else 0
+                                        st.info(f"**Mediana:** {format_currency(median_value)}")
+                                    
+                                    # Show all items (or top 100 if too many)
+                                    display_limit = min(100, len(filtered_items))
+                                    if len(filtered_items) > 100:
+                                        st.warning(f"Mostrando top {display_limit} de {len(filtered_items)} despesas. Use os filtros para refinar.")
+                                    
+                                    # Sort all items by value
+                                    sorted_items = sorted(filtered_items, key=lambda x: x['valor_anual'], reverse=True)[:display_limit]
+                                    
+                                    # Create a more detailed table view
+                                    for idx, item in enumerate(sorted_items):
+                                        percentage = (item['valor_anual'] / total_filtered * 100) if total_filtered > 0 else 0
+                                        
+                                        # Main expense row
+                                        col1, col2, col3, col4, col5 = st.columns([0.5, 3.5, 1.5, 1.5, 1])
+                                        
+                                        with col1:
+                                            st.write(f"**{idx+1}.**")
+                                        
+                                        with col2:
+                                            # Show full description
+                                            st.markdown(f"**{item['descricao']}**")
+                                            # Show what macro category this belongs to
+                                            macro_cat = get_category_name(item['categoria'])
+                                            st.caption(f"📁 {macro_cat} → {item['subcategoria_principal_nome']} → {item['subcategoria_nome']}")
+                                        
+                                        with col3:
+                                            st.metric("Valor Anual", format_currency(item['valor_anual']))
+                                        
+                                        with col4:
+                                            # Show monthly average
+                                            months_with_value = sum(1 for v in item['valores_mensais'].values() if v > 0)
+                                            monthly_avg = item['valor_anual'] / months_with_value if months_with_value > 0 else 0
+                                            st.metric("Média Mensal", format_currency(monthly_avg))
+                                        
+                                        with col5:
+                                            st.metric("% Total", f"{percentage:.1f}%")
+                                            
+                                        # Monthly details expander
+                                        with st.expander(f"Ver detalhes mensais", expanded=False):
+                                            monthly_cols = st.columns(4)
+                                            months = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 
+                                                     'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ']
+                                            
+                                            for i, month in enumerate(months):
+                                                with monthly_cols[i % 4]:
+                                                    value = item['valores_mensais'].get(month, 0)
+                                                    if value > 0:
+                                                        st.metric(month, format_currency(value))
+                                                    else:
+                                                        st.metric(month, "-")
+                                        
+                                        st.divider()
+                                
+                                else:  # Por Categoria view
+                                    # Group items by subcategory for better organization
+                                    grouped_data = {}
+                                    for item in filtered_items:
+                                        subcat_key = f"{item['subcategoria_principal']}_{item['subcategoria']}"
+                                        subcat_name = f"{item['subcategoria_principal_nome']} - {item['subcategoria_nome']}"
+                                        
+                                        if subcat_key not in grouped_data:
+                                            grouped_data[subcat_key] = {
+                                                'name': subcat_name,
+                                                'items': [],
+                                                'total': 0
+                                            }
+                                        
+                                        grouped_data[subcat_key]['items'].append(item)
+                                        grouped_data[subcat_key]['total'] += item['valor_anual']
+                                    
+                                    # Sort groups by total value
+                                    sorted_groups = sorted(grouped_data.items(), key=lambda x: x[1]['total'], reverse=True)
+                                    
+                                    # Display top categories with expandable details
+                                    st.markdown("#### 🏆 Top Categorias de Despesas")
+                                    
+                                    for idx, (group_key, group_data) in enumerate(sorted_groups[:10]):
+                                        percentage = (group_data['total'] / total_filtered * 100) if total_filtered > 0 else 0
+                                        
+                                        with st.expander(
+                                            f"{idx+1}. {group_data['name']} - {format_currency(group_data['total'])} ({percentage:.1f}%)",
+                                            expanded=(idx < 3)  # Expand top 3
+                                        ):
+                                            # Group summary
+                                            col1, col2, col3 = st.columns(3)
+                                            with col1:
+                                                st.metric("Total", format_currency(group_data['total']))
+                                            with col2:
+                                                st.metric("Itens", len(group_data['items']))
+                                            with col3:
+                                                avg = group_data['total'] / len(group_data['items'])
+                                                st.metric("Média", format_currency(avg))
+                                            
+                                            # Top items in this category
+                                            st.markdown("##### Top 5 Despesas")
+                                            top_items = sorted(group_data['items'], key=lambda x: x['valor_anual'], reverse=True)[:5]
+                                            
+                                            for item in top_items:
+                                                item_pct = (item['valor_anual'] / group_data['total'] * 100)
+                                                st.markdown(f"• **{item['descricao']}** ({item['ano']})")
+                                                st.progress(item_pct / 100)
+                                                st.caption(f"{format_currency(item['valor_anual'])} - {item_pct:.1f}% da categoria")
+                                    
+                                    if len(sorted_groups) > 10:
+                                        st.info(f"Mostrando top 10 de {len(sorted_groups)} categorias")
                                 
                                 # Option to export data
                                 if st.button("📥 Exportar Dados Filtrados", key="export_details"):
@@ -3412,7 +3523,7 @@ else:
                                 selected_items_keys = [item['key'] for item in filtered_items[:10]]  # Top 10 items
                                 
                                 for year in sorted(flexible_data.keys()):
-                                    if year in selected_years:
+                                    if year in selected_anos:
                                         year_data = flexible_data[year].get('line_items', {})
                                         
                                         if time_view == "Mensal":
@@ -3584,6 +3695,379 @@ else:
                                     st.info("📊 Não há dados temporais suficientes para análise")
                             else:
                                 st.info("📊 Selecione despesas para visualizar a evolução temporal")
+                                    # Show monthly evolution of expenses
+                                    months = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 
+                                             'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ']
+                                    
+                                    # Get all available year-month combinations
+                                    all_year_months = []
+                                    year_month_values = {}
+                                    
+                                    for item in filtered_items:
+                                        year = item['ano']
+                                        for month in months:
+                                            if month in item['valores_mensais']:
+                                                year_month = f"{year}-{month}"
+                                                if year_month not in year_month_values:
+                                                    year_month_values[year_month] = 0
+                                                    all_year_months.append((year, months.index(month) + 1, month))
+                                                year_month_values[year_month] += item['valores_mensais'][month]
+                                    
+                                    # Sort year-months chronologically
+                                    all_year_months.sort(key=lambda x: (x[0], x[1]))
+                                    
+                                    if all_year_months:
+                                        # Create month labels for display
+                                        month_labels = [f"{ym[2]}/{str(ym[0])[-2:]}" for ym in all_year_months]
+                                        month_values = [year_month_values.get(f"{ym[0]}-{ym[2]}", 0) for ym in all_year_months]
+                                        
+                                        # Interactive range selector
+                                        st.markdown("##### 🎯 Selecione o Período")
+                                        
+                                        # Quick period buttons
+                                        period_cols = st.columns(5)
+                                        
+                                        with period_cols[0]:
+                                            if st.button("Últimos 6M", key="trend_6m"):
+                                                start_idx = max(0, len(month_labels) - 6)
+                                                st.session_state.trend_range = (start_idx, len(month_labels) - 1)
+                                        
+                                        with period_cols[1]:
+                                            if st.button("Último Ano", key="trend_1y"):
+                                                start_idx = max(0, len(month_labels) - 12)
+                                                st.session_state.trend_range = (start_idx, len(month_labels) - 1)
+                                        
+                                        with period_cols[2]:
+                                            if st.button("Últimos 2 Anos", key="trend_2y"):
+                                                start_idx = max(0, len(month_labels) - 24)
+                                                st.session_state.trend_range = (start_idx, len(month_labels) - 1)
+                                        
+                                        with period_cols[3]:
+                                            if st.button("Todos", key="trend_all"):
+                                                st.session_state.trend_range = (0, len(month_labels) - 1)
+                                        
+                                        with period_cols[4]:
+                                            if st.button("YTD", key="trend_ytd"):
+                                                # Find the start of current year
+                                                from datetime import datetime
+                                                current_year = datetime.now().year
+                                                start_idx = 0
+                                                for i, ym in enumerate(all_year_months):
+                                                    if ym[0] == current_year and ym[1] == 1:
+                                                        start_idx = i
+                                                        break
+                                                st.session_state.trend_range = (start_idx, len(month_labels) - 1)
+                                        
+                                        # Initialize range if not in session state
+                                        if 'trend_range' not in st.session_state:
+                                            # Default to last 12 months
+                                            default_start = max(0, len(month_labels) - 12)
+                                            st.session_state.trend_range = (default_start, len(month_labels) - 1)
+                                        
+                                        # Range slider
+                                        if len(month_labels) > 1:
+                                            # Create columns for the slider with labels
+                                            col1, col2, col3 = st.columns([1, 4, 1])
+                                            
+                                            with col2:
+                                                range_values = st.slider(
+                                                    "Período de Análise",
+                                                    min_value=0,
+                                                    max_value=len(month_labels) - 1,
+                                                    value=st.session_state.trend_range,
+                                                    key="trend_slider"
+                                                )
+                                                st.session_state.trend_range = range_values
+                                            
+                                            # Show selected period labels
+                                            with col1:
+                                                st.write(f"**De:** {month_labels[range_values[0]]}")
+                                            with col3:
+                                                st.write(f"**Até:** {month_labels[range_values[1]]}")
+                                            
+                                            # Filter data based on selected range
+                                            start_idx, end_idx = range_values
+                                            selected_labels = month_labels[start_idx:end_idx + 1]
+                                            selected_values = month_values[start_idx:end_idx + 1]
+                                        else:
+                                            selected_labels = month_labels
+                                            selected_values = month_values
+                                    else:
+                                        selected_labels = months
+                                        selected_values = [0] * len(months)
+                                    
+                                    # Create line chart
+                                    fig = go.Figure()
+                                    fig.add_trace(go.Scatter(
+                                        x=selected_labels,
+                                        y=selected_values,
+                                        mode='lines+markers',
+                                        line=dict(width=3, color='#3498db'),
+                                        marker=dict(size=10),
+                                        text=[format_currency(v) for v in selected_values],
+                                        textposition='top center'
+                                    ))
+                                    
+                                    fig.update_layout(
+                                        title="Evolução Mensal das Despesas",
+                                        xaxis_title="Mês",
+                                        yaxis_title="Valor Total (R$)",
+                                        height=400,
+                                        hovermode='x unified'
+                                    )
+                                    st.plotly_chart(fig, use_container_width=True)
+                                    
+                                    # Monthly insights based on selected period
+                                    if selected_values:
+                                        max_idx = selected_values.index(max(selected_values))
+                                        min_idx = selected_values.index(min(selected_values))
+                                        max_month = selected_labels[max_idx] if selected_labels else "N/A"
+                                        min_month = selected_labels[min_idx] if selected_labels else "N/A"
+                                        avg_monthly = sum(selected_values) / len(selected_values) if selected_values else 0
+                                    else:
+                                        max_month = min_month = "N/A"
+                                        avg_monthly = 0
+                                    
+                                    col1, col2, col3 = st.columns(3)
+                                    with col1:
+                                        max_value = max(selected_values) if selected_values else 0
+                                        st.metric("Mês mais caro", max_month, format_currency(max_value))
+                                    with col2:
+                                        min_value = min(selected_values) if selected_values else 0
+                                        st.metric("Mês mais econômico", min_month, format_currency(min_value))
+                                    with col3:
+                                        st.metric("Média do período", "", format_currency(avg_monthly))
+                                
+                                elif trend_type == "Comparação Anual":
+                                    # Year-over-year comparison
+                                    yearly_data = {}
+                                    for item in filtered_items:
+                                        year = item['ano']
+                                        if year not in yearly_data:
+                                            yearly_data[year] = {'total': 0, 'categories': {}}
+                                        yearly_data[year]['total'] += item['valor_anual']
+                                        
+                                        cat = item['categoria']
+                                        if cat not in yearly_data[year]['categories']:
+                                            yearly_data[year]['categories'][cat] = 0
+                                        yearly_data[year]['categories'][cat] += item['valor_anual']
+                                    
+                                    if len(yearly_data) > 1:
+                                        # Create comparison chart
+                                        years = sorted(yearly_data.keys())
+                                        fig = go.Figure()
+                                        
+                                        # Add traces for each category
+                                        all_categories = set()
+                                        for year_data in yearly_data.values():
+                                            all_categories.update(year_data['categories'].keys())
+                                        
+                                        for cat in sorted(all_categories):
+                                            values = [yearly_data[year]['categories'].get(cat, 0) for year in years]
+                                            fig.add_trace(go.Bar(
+                                                name=get_category_name(cat),
+                                                x=years,
+                                                y=values,
+                                                text=[format_currency(v) if v > 0 else '' for v in values],
+                                                textposition='auto'
+                                            ))
+                                        
+                                        fig.update_layout(
+                                            title="Comparação de Despesas por Ano",
+                                            xaxis_title="Ano",
+                                            yaxis_title="Valor (R$)",
+                                            barmode='stack',
+                                            height=500,
+                                            hovermode='x unified'
+                                        )
+                                        st.plotly_chart(fig, use_container_width=True)
+                                        
+                                        # YoY growth metrics
+                                        if len(years) >= 2:
+                                            prev_total = yearly_data[years[-2]]['total']
+                                            curr_total = yearly_data[years[-1]]['total']
+                                            growth = ((curr_total - prev_total) / prev_total * 100) if prev_total > 0 else 0
+                                            
+                                            st.metric(
+                                                f"Variação {years[-2]} → {years[-1]}",
+                                                f"{growth:+.1f}%",
+                                                f"Δ {format_currency(curr_total - prev_total)}"
+                                            )
+                                    else:
+                                        st.info("Selecione múltiplos anos para ver a comparação")
+                                
+                                else:  # Sazonalidade
+                                    # Seasonality analysis
+                                    st.markdown("##### 🌊 Padrões de Sazonalidade")
+                                    
+                                    # Group by quarters
+                                    quarters = {
+                                        'Q1': ['JAN', 'FEV', 'MAR'],
+                                        'Q2': ['ABR', 'MAI', 'JUN'],
+                                        'Q3': ['JUL', 'AGO', 'SET'],
+                                        'Q4': ['OUT', 'NOV', 'DEZ']
+                                    }
+                                    
+                                    quarterly_data = {q: 0 for q in quarters}
+                                    
+                                    for item in filtered_items:
+                                        for quarter, months in quarters.items():
+                                            for month in months:
+                                                quarterly_data[quarter] += item['valores_mensais'].get(month, 0)
+                                    
+                                    # Create pie chart
+                                    fig = go.Figure(data=[go.Pie(
+                                        labels=list(quarterly_data.keys()),
+                                        values=list(quarterly_data.values()),
+                                        hole=0.3,
+                                        marker_colors=['#3498db', '#2ecc71', '#f39c12', '#e74c3c']
+                                    )])
+                                    
+                                    fig.update_traces(
+                                        textposition='inside',
+                                        textinfo='percent+label',
+                                        hovertemplate='<b>%{label}</b><br>Valor: R$ %{value:,.2f}<br>%{percent}<extra></extra>'
+                                    )
+                                    
+                                    fig.update_layout(
+                                        title="Distribuição Trimestral de Despesas",
+                                        height=400
+                                    )
+                                    st.plotly_chart(fig, use_container_width=True)
+                                    
+                                    # Seasonality insights
+                                    max_q = max(quarterly_data, key=quarterly_data.get)
+                                    min_q = min(quarterly_data, key=quarterly_data.get)
+                                    
+                                    col1, col2 = st.columns(2)
+                                    with col1:
+                                        st.metric("Trimestre mais caro", max_q, format_currency(quarterly_data[max_q]))
+                                    with col2:
+                                        st.metric("Trimestre mais econômico", min_q, format_currency(quarterly_data[min_q]))
+                            else:
+                                st.info("Nenhum item encontrado com os filtros selecionados")
+                        
+                        # Tab 4: Insights
+                        with viz_tab4:
+                            if filtered_items:
+                                st.markdown("#### 🎯 Insights Automáticos")
+                                
+                                # Analyze data for insights
+                                insights = []
+                                
+                                # Insight 1: Concentration analysis
+                                sorted_expenses = sorted(filtered_items, key=lambda x: x['valor_anual'], reverse=True)
+                                top_10_total = sum(item['valor_anual'] for item in sorted_expenses[:10])
+                                concentration_pct = (top_10_total / total_filtered * 100) if total_filtered > 0 else 0
+                                
+                                if concentration_pct > 50:
+                                    insights.append({
+                                        'type': 'warning',
+                                        'title': 'Alta Concentração de Despesas',
+                                        'message': f'As 10 maiores despesas representam {concentration_pct:.1f}% do total. Considere negociar estes contratos prioritariamente.',
+                                        'icon': '⚠️'
+                                    })
+                                
+                                # Insight 2: Seasonal patterns
+                                monthly_totals = {}
+                                for item in filtered_items:
+                                    for month, value in item['valores_mensais'].items():
+                                        monthly_totals[month] = monthly_totals.get(month, 0) + value
+                                
+                                if monthly_totals:
+                                    avg_monthly = sum(monthly_totals.values()) / len(monthly_totals)
+                                    high_months = [m for m, v in monthly_totals.items() if v > avg_monthly * 1.2]
+                                    
+                                    if high_months:
+                                        insights.append({
+                                            'type': 'info',
+                                            'title': 'Picos de Despesas',
+                                            'message': f'Os meses {", ".join(high_months)} têm despesas acima da média. Planeje o fluxo de caixa adequadamente.',
+                                            'icon': '📊'
+                                        })
+                                
+                                # Insight 3: Category recommendations
+                                category_totals = {}
+                                for item in filtered_items:
+                                    cat = item['categoria']
+                                    category_totals[cat] = category_totals.get(cat, 0) + item['valor_anual']
+                                
+                                if category_totals:
+                                    largest_cat = max(category_totals.items(), key=lambda x: x[1])
+                                    cat_pct = (largest_cat[1] / total_filtered * 100) if total_filtered > 0 else 0
+                                    
+                                    if cat_pct > 30:
+                                        insights.append({
+                                            'type': 'success',
+                                            'title': 'Oportunidade de Economia',
+                                            'message': f'{get_category_name(largest_cat[0])} representa {cat_pct:.1f}% das despesas. Foque otimizações nesta categoria.',
+                                            'icon': '💰'
+                                        })
+                                
+                                # Display insights as cards
+                                for insight in insights[:3]:  # Show top 3 insights
+                                    color_map = {
+                                        'warning': '#fef3c7',
+                                        'info': '#dbeafe',
+                                        'success': '#d1fae5'
+                                    }
+                                    
+                                    st.markdown(f"""
+                                    <div style='background-color: {color_map.get(insight['type'], '#f3f4f6')}; 
+                                              padding: 15px; border-radius: 10px; margin-bottom: 10px;'>
+                                        <h4 style='margin: 0; color: #1f2937;'>{insight['icon']} {insight['title']}</h4>
+                                        <p style='margin: 5px 0 0 0; color: #4b5563;'>{insight['message']}</p>
+                                    </div>
+                                    """, unsafe_allow_html=True)
+                                
+                                # Summary recommendations
+                                st.markdown("---")
+                                st.markdown("#### 📋 Recomendações de Ação")
+                                
+                                action_items = []
+                                
+                                # Action 1: Review top expenses
+                                top_5_items = sorted_expenses[:5]
+                                top_5_total = sum(item['valor_anual'] for item in top_5_items)
+                                action_items.append(f"✅ **Revisar contratos**: Os 5 maiores gastos somam {format_currency(top_5_total)}")
+                                
+                                # Action 2: Category optimization
+                                if len(category_totals) > 3:
+                                    sorted_cats = sorted(category_totals.items(), key=lambda x: x[1], reverse=True)
+                                    action_items.append(f"✅ **Otimizar categorias**: Priorize {get_category_name(sorted_cats[0][0])} e {get_category_name(sorted_cats[1][0])}")
+                                
+                                # Action 3: Monthly planning
+                                if monthly_totals:
+                                    max_month = max(monthly_totals.items(), key=lambda x: x[1])
+                                    action_items.append(f"✅ **Planejar fluxo de caixa**: Reserve recursos extras para {max_month[0]}")
+                                
+                                for action in action_items:
+                                    st.markdown(action)
+                                
+                                # Export insights button
+                                if st.button("📄 Gerar Relatório de Insights", key="export_insights"):
+                                    insights_text = f"RELATÓRIO DE INSIGHTS - {current_year}\\n\\n"
+                                    insights_text += f"Total Analisado: {format_currency(total_filtered)}\\n"
+                                    insights_text += f"Itens: {len(filtered_items)}\\n\\n"
+                                    
+                                    insights_text += "PRINCIPAIS INSIGHTS:\\n"
+                                    for insight in insights:
+                                        insights_text += f"\\n{insight['icon']} {insight['title']}\\n"
+                                        insights_text += f"   {insight['message']}\\n"
+                                    
+                                    insights_text += "\\n\\nRECOMENDAÇÕES DE AÇÃO:\\n"
+                                    for action in action_items:
+                                        insights_text += f"{action}\\n"
+                                    
+                                    st.download_button(
+                                        label="💾 Baixar Relatório",
+                                        data=insights_text,
+                                        file_name=f"insights_despesas_{current_year}.txt",
+                                        mime="text/plain"
+                                    )
+                            else:
+                                st.info("Nenhum item encontrado com os filtros selecionados")
+                    
                     # Close the details section
                     else:
                         st.info("👆 Carregue arquivos na aba 'Upload' primeiro.")
