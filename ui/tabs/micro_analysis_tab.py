@@ -30,6 +30,10 @@ def render_micro_analysis_tab(flexible_data):
         render_quarterly_analysis(flexible_data, selected_years)
     elif view_type == "Semestral":
         render_semester_analysis(flexible_data, selected_years)
+    elif view_type == "Trimestre Personalizado":
+        st.info("🚧 Análise de Trimestre Personalizado em desenvolvimento.")
+    elif view_type == "Personalizado":
+        st.info("🚧 Análise Personalizada em desenvolvimento.")
 
 
 def render_filters_section(flexible_data):
@@ -44,7 +48,7 @@ def render_filters_section(flexible_data):
     with col_filter1:
         view_type = st.selectbox(
             "Visualização",
-            ["Anual", "Mensal", "Trimestral", "Semestral"],
+            ["Anual", "Mensal", "Trimestral", "Trimestre Personalizado", "Semestral", "Personalizado"],
             key="micro_view_type"
         )
     

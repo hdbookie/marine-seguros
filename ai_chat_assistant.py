@@ -467,6 +467,8 @@ class AIChatAssistant:
             total = sum(v for k, v in revenue.items() if k != 'ANNUAL' and isinstance(v, (int, float)))
             # Ensure year is a regular int, not numpy int64
             total_revenue_by_year[int(year)] = float(total)
+            if year == '2025':
+                print(f"DEBUG: Extracted data for 2025: {year_data}")
         
         context_parts.append(f"Receita por ano: {json.dumps(total_revenue_by_year, indent=2)}")
         
@@ -590,7 +592,7 @@ class AIChatAssistant:
         
         for year in years:
             revenue_data = data[year].get('revenue', {})
-            total = sum(v for k, v in revenue_data.items() 
+            total = sum(v for k, v in revenue.items() 
                        if k != 'ANNUAL' and isinstance(v, (int, float)))
             revenues.append(total)
         

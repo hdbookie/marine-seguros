@@ -123,7 +123,8 @@ class FlexibleFinancialExtractor:
             row_data = self._extract_row_data(df, idx, month_cols, annual_col)
             if not row_data['has_data']:
                 # Could be a subcategory header
-                if not self._is_subtotal(row_label):
+                # For headers without data, just check the label
+                if not self._is_calculation_row(row_label):
                     current_subcategory = row_label
                     print(f"    Subcategory found: {row_label}")
                 continue
@@ -299,6 +300,34 @@ class FlexibleFinancialExtractor:
         key = re.sub(r'[^\w\s]', '', label)
         key = '_'.join(key.lower().split())
         return key
+    
+    def _is_calculation_row(self, label: str) -> bool:
+        """Check if a label is a calculation/result row based on text only"""
+        label_upper = label.upper().strip()
+        
+        # Check if it's a calculation or result
+        calculation_terms = [
+            'TOTAL', 'SUBTOTAL', 'SOMA', 'RESULTADO', 'MARGEM', 
+            'PONTO EQUILIBRIO', 'PONTO EQUILÍBRIO', 'LUCRO LÍQUIDO',
+            'APLICAÇÕES', 'RETIRADA', 'COMPOSIÇÃO', 'SALDOS',
+            'EXCLUINDO', 'DESPESAS - TOTAL', 'CUSTO FIXO + VARIAVEL',
+            'CUSTOS FIXOS + VARIÁVEIS', 'CUSTOS VARIÁVEIS + FIXOS',
+            'CUSTOS FIXOS + VARIÁVEIS + NÃO OPERACIONAIS',
+            'TOTAL CUSTOS', 'CUSTO TOTAL', 'TOTAL GERAL',
+            'DESPESA TOTAL', 'TOTAL DE CUSTOS', 'TOTAL DE DESPESAS'
+        ]
+        if any(term in label_upper for term in calculation_terms):
+            return True
+            
+        # Check for specific header patterns that are calculations/results
+        header_patterns = [
+            'MARGEM DE CONTRIBUIÇÃO', 'COMPOSIÇÃO DE SALDOS',
+            'RESULTADO', 'PONTO EQUILIBRIO', 'PONTO EQUILÍBRIO'
+        ]
+        if label_upper in header_patterns:
+            return True
+            
+        return False
     
     def _is_subtotal(self, label: str, row_data: Dict, df: pd.DataFrame, row_idx: int) -> bool:
         """Check if a line item is a subtotal, total, header, or calculation.
