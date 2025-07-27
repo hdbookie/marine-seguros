@@ -16,6 +16,8 @@ class ProfitExtractor:
 
     def extract_profits(self, df: pd.DataFrame, year: int) -> Dict:
         extracted_profits = {
+            'annual': 0,
+            'monthly': {},
             'line_items': {},
             'categories': {}
         }
@@ -58,6 +60,50 @@ class ProfitExtractor:
                     if category not in extracted_profits['categories']:
                         extracted_profits['categories'][category] = []
                     extracted_profits['categories'][category].append(item_key)
+        
+        # Find and use the appropriate profit line item as the main profit value
+        resultado_key = None
+        priority_order = [
+            'RESULTADO',  # Exact match for newer files
+            'RESULTADO C/CUSTOS NÃO OP',  # For older files
+            'LUCRO LÍQUIDO',
+            'LUCRO'
+        ]
+        
+        # Check each priority level
+        for priority_label in priority_order:
+            for item_key, item_data in extracted_profits['line_items'].items():
+                label_upper = item_data['label'].upper().strip()
+                
+                # For exact matches
+                if priority_label in ['RESULTADO', 'LUCRO LÍQUIDO', 'LUCRO']:
+                    if label_upper == priority_label:
+                        resultado_key = item_key
+                        break
+                # For partial matches
+                else:
+                    if priority_label in label_upper:
+                        resultado_key = item_key
+                        break
+            
+            # If we found a match at this priority level, stop looking
+            if resultado_key:
+                break
+        
+        # If we found RESULTADO or LUCRO LÍQUIDO, use it as the main profit
+        if resultado_key:
+            resultado_data = extracted_profits['line_items'][resultado_key]
+            extracted_profits['annual'] = resultado_data['annual']
+            extracted_profits['monthly'] = resultado_data['monthly'].copy()
+        else:
+            # If no RESULTADO found, try to find other profit indicators
+            for item_key, item_data in extracted_profits['line_items'].items():
+                if item_data['category'] == 'net_profit' and not item_data.get('is_subtotal', False):
+                    # Use the first non-subtotal net profit item
+                    extracted_profits['annual'] = item_data['annual']
+                    extracted_profits['monthly'] = item_data['monthly'].copy()
+                    break
+        
         return extracted_profits
 
     def _find_annual_column(self, df: pd.DataFrame) -> Any:

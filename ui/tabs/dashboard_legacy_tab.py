@@ -360,6 +360,12 @@ def render_dashboard_tab(db, use_unified_extractor=True):
                     'variable_costs': 'sum',
                     'fixed_costs': 'sum',
                     'operational_costs': 'sum',
+                    'non_operational_costs': 'sum',
+                    'taxes': 'sum',
+                    'commissions': 'sum',
+                    'admin_expenses': 'sum',
+                    'marketing_expenses': 'sum',
+                    'financial_expenses': 'sum',
                     'contribution_margin': 'sum',
                     'net_profit': 'sum',
                     'profit_margin': 'mean'  # Average the profit margins
@@ -424,6 +430,12 @@ def render_dashboard_tab(db, use_unified_extractor=True):
                     'variable_costs': 'sum',
                     'fixed_costs': 'sum',
                     'operational_costs': 'sum',
+                    'non_operational_costs': 'sum',
+                    'taxes': 'sum',
+                    'commissions': 'sum',
+                    'admin_expenses': 'sum',
+                    'marketing_expenses': 'sum',
+                    'financial_expenses': 'sum',
                     'contribution_margin': 'sum',
                     'net_profit': 'sum',
                     'profit_margin': 'mean'  # Average the profit margins
@@ -473,6 +485,12 @@ def render_dashboard_tab(db, use_unified_extractor=True):
                     'variable_costs': 'sum',
                     'fixed_costs': 'sum',
                     'operational_costs': 'sum',
+                    'non_operational_costs': 'sum',
+                    'taxes': 'sum',
+                    'commissions': 'sum',
+                    'admin_expenses': 'sum',
+                    'marketing_expenses': 'sum',
+                    'financial_expenses': 'sum',
                     'contribution_margin': 'sum',
                     'net_profit': 'sum',
                     'profit_margin': 'mean'  # Average the profit margins
@@ -1347,21 +1365,28 @@ def render_dashboard_tab(db, use_unified_extractor=True):
         if not display_df.empty and all(col in display_df.columns for col in ['variable_costs', 'fixed_costs', 'revenue']):
             x_col, x_title = prepare_x_axis(display_df, view_type)
     
-            # Calculate total costs and profit margins
-            display_df['total_costs'] = display_df['variable_costs'] + display_df['fixed_costs']
-            # Use actual net_profit from data instead of calculating
+            # Use actual net_profit from data
             if 'net_profit' in display_df.columns:
                 display_df['profit'] = display_df['net_profit']
             else:
-                display_df['profit'] = display_df['revenue'] - display_df['total_costs']
-            display_df['cost_percentage'] = (display_df['total_costs'] / display_df['revenue'] * 100).fillna(0)
-    
+                # Simple calculation: Revenue - Variable Costs - Fixed Costs - Non-Op Costs = Profit
+                basic_costs = display_df['variable_costs'] + display_df['fixed_costs']
+                if 'non_operational_costs' in display_df.columns:
+                    basic_costs += display_df['non_operational_costs']
+                display_df['profit'] = display_df['revenue'] - basic_costs
+            
             # Create stacked bar chart with improved styling
             fig_cost_structure = go.Figure()
     
-            # Calculate percentages of revenue for better visualization
+            # Calculate percentages of revenue for the categories
             display_df['var_cost_pct'] = (display_df['variable_costs'] / display_df['revenue'] * 100).fillna(0)
             display_df['fixed_cost_pct'] = (display_df['fixed_costs'] / display_df['revenue'] * 100).fillna(0)
+            
+            # Initialize non-operational costs if not present
+            if 'non_operational_costs' not in display_df.columns:
+                display_df['non_operational_costs'] = 0
+            display_df['non_op_cost_pct'] = (display_df['non_operational_costs'] / display_df['revenue'] * 100).fillna(0)
+            
             display_df['profit_pct'] = (display_df['profit'] / display_df['revenue'] * 100).fillna(0)
     
             # Add variable costs bar (as percentage)
@@ -1403,6 +1428,27 @@ def render_dashboard_tab(db, use_unified_extractor=True):
                              '<extra></extra>',
                 customdata=list(zip(display_df['fixed_costs'], display_df['revenue']))
             ))
+    
+            # Add non-operational costs bar if they exist
+            if display_df['non_op_cost_pct'].sum() > 0:
+                fig_cost_structure.add_trace(go.Bar(
+                    name='Custos Não Operacionais',
+                    x=display_df[x_col],
+                    y=display_df['non_op_cost_pct'],
+                    text=display_df['non_op_cost_pct'].apply(lambda x: f"{x:.2f}%"),
+                    textposition='inside',
+                    textfont=dict(color='white', size=11, weight='bold'),
+                    marker=dict(
+                        color='#6B7280',  # Gray for non-operational costs
+                        line=dict(color='#4B5563', width=1)
+                    ),
+                    hovertemplate='<b>Custos Não Operacionais</b><br>' +
+                                 'Percentual: %{y:.1f}%<br>' +
+                                 'Valor: R$ %{customdata[0]:,.0f}<br>' +
+                                 '<b>Receita Total: R$ %{customdata[1]:,.0f}</b><br>' +
+                                 '<extra></extra>',
+                    customdata=list(zip(display_df['non_operational_costs'], display_df['revenue']))
+                ))
     
             # Add profit margin bar
             fig_cost_structure.add_trace(go.Bar(

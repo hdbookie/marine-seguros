@@ -104,202 +104,106 @@ class FinancialProcessor:
         return self.consolidate_all_years(excel_data)
     
     def consolidate_all_years(self, excel_data: Dict, include_monthly: bool = False) -> Tuple[pd.DataFrame, Dict]:
-        """Consolidate financial data from all years into a single DataFrame
-        
-        Returns:
-            Tuple[pd.DataFrame, Dict]: (consolidated_df, extracted_data)
-        """
-        # Use unified extractor for both core metrics and line items
+        """Consolidate financial data from all years into a single DataFrame"""
         extractor = UnifiedFinancialExtractor()
         all_data = {}
-        
-        print(f"Processing {len(excel_data)} files with unified extractor...")
-        
-        # Extract from all loaded files
         for file in excel_data.keys():
-            try:
-                print(f"Extracting data from: {file}")
-                file_data = extractor.extract_from_excel(file)
-                if file_data:
-                    all_data.update(file_data)
-                    print(f"✓ Extracted years from {file}: {sorted(file_data.keys())}")
-                else:
-                    print(f"✗ No data extracted from {file}")
-            except Exception as e:
-                print(f"Error extracting from {file}: {e}")
-        
-        # Convert to DataFrame
+            file_data = extractor.extract_from_excel(file)
+            if file_data:
+                all_data.update(file_data)
+
         consolidated_data = []
-        for year in sorted(all_data.keys()):
-            year_data = all_data[year]
-            # Get revenue and costs first
-            revenue = year_data.get('revenue', {}).get('ANNUAL', 0)
-            variable_costs = year_data.get('costs', {}).get('ANNUAL', 0)
+        for year, year_data in all_data.items():
+            revenue = year_data.get('revenue', {}).get('annual', 0)
+            variable_costs = year_data.get('variable_costs', {}).get('annual', 0)
+            fixed_costs = year_data.get('fixed_costs', {}).get('annual', 0)
+            non_operational_costs = year_data.get('non_operational_costs', {}).get('annual', 0)
+            taxes = year_data.get('taxes', {}).get('annual', 0)
+            commissions = year_data.get('commissions', {}).get('annual', 0)
+            admin_expenses = year_data.get('administrative_expenses', {}).get('annual', 0)
+            marketing_expenses = year_data.get('marketing_expenses', {}).get('annual', 0)
+            financial_expenses = year_data.get('financial_expenses', {}).get('annual', 0)
+
+            # Get the actual profit from RESULTADO if available
+            profit_annual = year_data.get('profits', {}).get('annual', 0)
             
-            # Extract fixed_costs first (moved up)
-            fixed_costs_data = year_data.get('fixed_costs', 0)
-            if isinstance(fixed_costs_data, dict):
-                fixed_costs = fixed_costs_data.get('ANNUAL', 0)
+            # Only calculate if we don't have extracted profit
+            if profit_annual != 0:
+                net_profit = profit_annual
             else:
-                fixed_costs = fixed_costs_data
+                # Fallback calculation
+                total_costs = variable_costs + fixed_costs + non_operational_costs + taxes + commissions + admin_expenses + marketing_expenses + financial_expenses
+                net_profit = revenue - total_costs
             
-            # Get profits data (needed for gross_profit later)
-            profits = year_data.get('profits', {})
-            
-            # For years before 2020, calculate net profit directly
-            if year < 2020:
-                net_profit = revenue - variable_costs - fixed_costs
-                print(f"DEBUG: Calculating annual net profit for {year}: {revenue:,.2f} - {variable_costs:,.2f} - {fixed_costs:,.2f} = {net_profit:,.2f}")
-            else:
-                # Use the most appropriate profit value from Excel
-                # Priority: ANNUAL first (for annual totals), then other profit types
-                net_profit = (profits.get('ANNUAL') or
-                             profits.get('OPERATIONAL') or 
-                             profits.get('WITH_NON_OP') or
-                             profits.get('WITHOUT_NON_OP') or
-                             profits.get('OTHER') or
-                             profits.get('NET_FINAL') or 
-                             profits.get('NET_ADJUSTED') or
-                             profits.get('GROSS') or 0)
-                print(f"DEBUG: Using RESULTADO from Excel for year {year}: {net_profit:,.2f}")
-                print(f"DEBUG: Available profit types: {list(profits.keys())}")
-            
-            # Extract operational_costs (fixed_costs already extracted above)
-            operational_costs_data = year_data.get('operational_costs', 0)
-            if isinstance(operational_costs_data, dict):
-                operational_costs = operational_costs_data.get('ANNUAL', 0)
-            else:
-                operational_costs = operational_costs_data
-            
+            profit_margin = (net_profit / revenue) * 100 if revenue > 0 else 0
+
+            contribution_margin = revenue - variable_costs
+
             row = {
                 'year': year,
                 'revenue': revenue,
                 'variable_costs': variable_costs,
                 'fixed_costs': fixed_costs,
-                'operational_costs': operational_costs,
-                'contribution_margin': year_data.get('contribution_margin', 0),
+                'operational_costs': fixed_costs, # For compatibility
+                'non_operational_costs': non_operational_costs,
+                'taxes': taxes,
+                'commissions': commissions,
+                'admin_expenses': admin_expenses,
+                'marketing_expenses': marketing_expenses,
+                'financial_expenses': financial_expenses,
+                'contribution_margin': contribution_margin,
                 'net_profit': net_profit,
-                'gross_profit': year_data.get('gross_profit', profits.get('GROSS', 0)),
-                'gross_margin': year_data.get('margins', {}).get('ANNUAL', 0),
-                'profit_margin': year_data.get('margins', {}).get('ANNUAL', 0)
+                'profit_margin': profit_margin,
+                'gross_profit': net_profit, # For compatibility
+                'gross_margin': profit_margin # For compatibility
             }
-            
-            # Use extracted profit margin if available, otherwise calculate
-            if row['revenue'] > 0:
-                # For years before 2020, always recalculate margin
-                # For 2020+, only recalculate if we don't have an extracted margin
-                if year < 2020 or row['profit_margin'] == 0:
-                    row['profit_margin'] = (row['net_profit'] / row['revenue']) * 100
-                
-                # Calculate contribution margin if not provided
-                if row['contribution_margin'] == 0:
-                    row['contribution_margin'] = row['revenue'] - row['variable_costs']
-                    
             consolidated_data.append(row)
-        
-        # Check if we have any data
+
         if not consolidated_data:
-            print("Warning: No data was consolidated. Returning empty DataFrame with expected columns.")
-            # Return empty DataFrame with expected columns and empty dict
-            return pd.DataFrame(columns=['year', 'revenue', 'variable_costs', 'net_profit', 'profit_margin']), {}
-        
+            return pd.DataFrame(), {}
+
         df = pd.DataFrame(consolidated_data)
-        print(f"Consolidated data shape: {df.shape}")
-        print(f"Columns: {df.columns.tolist()}")
-        # Return both the consolidated DataFrame and the extracted data
         return df, all_data
     
     def get_monthly_data(self, excel_data: Dict) -> pd.DataFrame:
         """Get monthly financial data from all years"""
-        # Use unified extractor
         extractor = UnifiedFinancialExtractor()
         all_data = {}
-        
-        print(f"Processing {len(excel_data)} files for monthly data...")
-        
-        # Extract from all loaded files - make sure file paths exist
         for file_path in excel_data.keys():
-            try:
-                # Check if file exists and extract
-                if os.path.exists(file_path):
-                    print(f"Extracting monthly data from: {file_path}")
-                    file_data = extractor.extract_from_excel(file_path)
-                    if file_data:
-                        all_data.update(file_data)
-                        print(f"✓ Extracted {len(file_data)} years from {file_path}")
-                    else:
-                        print(f"✗ No data extracted from {file_path}")
-                else:
-                    print(f"✗ File not found: {file_path}")
-            except Exception as e:
-                print(f"Error extracting from {file_path}: {e}")
-                import traceback
-                print(traceback.format_exc())
-        
-        # Convert to monthly DataFrame
+            if os.path.exists(file_path):
+                file_data = extractor.extract_from_excel(file_path)
+                if file_data:
+                    all_data.update(file_data)
+
         monthly_rows = []
-        months = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 
-                  'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ']
-        
+        months = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ']
         for year in sorted(all_data.keys()):
             year_data = all_data[year]
-            
-            # Get monthly revenue and costs
-            monthly_revenue = year_data.get('revenue', {})
-            monthly_costs = year_data.get('costs', {})
-            
-            # Extract monthly fixed costs and operational costs
-            monthly_fixed_costs = year_data.get('fixed_costs', {})
-            monthly_operational_costs = year_data.get('operational_costs', {})
-            contribution_margin_annual = year_data.get('contribution_margin', 0)
-            
-            # Get monthly margins from Excel
-            monthly_margins = year_data.get('margins', {})
-            
-            # Get monthly profits (RESULTADO) from Excel
-            monthly_profits = year_data.get('profits', {})
-            
-            # If we don't have monthly data, fall back to distributing annual costs
-            fixed_costs_annual = monthly_fixed_costs.get('ANNUAL', 0) if isinstance(monthly_fixed_costs, dict) else monthly_fixed_costs
-            operational_costs_annual = monthly_operational_costs.get('ANNUAL', 0) if isinstance(monthly_operational_costs, dict) else monthly_operational_costs
-            
-            # For fallback case only
-            fixed_costs_monthly_fallback = fixed_costs_annual / 12 if fixed_costs_annual else 0
-            operational_costs_monthly_fallback = operational_costs_annual / 12 if operational_costs_annual else 0
-            
+            monthly_revenue = year_data.get('revenue', {}).get('monthly', {})
             for i, month in enumerate(months):
                 if month in monthly_revenue:
                     revenue = monthly_revenue[month]
-                    variable_costs = monthly_costs.get(month, 0)
+                    variable_costs = year_data.get('variable_costs', {}).get('monthly', {}).get(month, 0)
+                    fixed_costs = year_data.get('fixed_costs', {}).get('monthly', {}).get(month, 0)
+                    non_operational_costs = year_data.get('non_operational_costs', {}).get('monthly', {}).get(month, 0)
+                    taxes = year_data.get('taxes', {}).get('monthly', {}).get(month, 0)
+                    commissions = year_data.get('commissions', {}).get('monthly', {}).get(month, 0)
+                    admin_expenses = year_data.get('administrative_expenses', {}).get('monthly', {}).get(month, 0)
+                    marketing_expenses = year_data.get('marketing_expenses', {}).get('monthly', {}).get(month, 0)
+                    financial_expenses = year_data.get('financial_expenses', {}).get('monthly', {}).get(month, 0)
+
+                    # Get actual monthly profit from RESULTADO if available
+                    monthly_profit = year_data.get('profits', {}).get('monthly', {}).get(month, 0)
                     
-                    # Get actual monthly fixed costs if available, otherwise use fallback
-                    if isinstance(monthly_fixed_costs, dict) and month in monthly_fixed_costs:
-                        fixed_costs_this_month = monthly_fixed_costs[month]
-                        operational_costs_this_month = monthly_operational_costs.get(month, fixed_costs_this_month)
+                    if monthly_profit != 0:
+                        net_profit = monthly_profit
                     else:
-                        # Fallback to distributed annual costs
-                        fixed_costs_this_month = fixed_costs_monthly_fallback
-                        operational_costs_this_month = operational_costs_monthly_fallback
-                    
-                    # Always calculate contribution margin from revenue - variable costs
-                    # Don't use the MARGEM DE CONTRIBUIÇÃO row values as they might be wrong
+                        # Fallback calculation
+                        total_costs = variable_costs + fixed_costs + non_operational_costs + taxes + commissions + admin_expenses + marketing_expenses + financial_expenses
+                        net_profit = revenue - total_costs
+                    profit_margin = (net_profit / revenue) * 100 if revenue > 0 else 0
                     contribution_margin = revenue - variable_costs
-                    
-                    # Use net profit from Excel if available (RESULTADO), otherwise calculate
-                    if month in monthly_profits and year >= 2020:  # Only trust RESULTADO from 2020 onwards
-                        net_profit = monthly_profits[month]
-                        print(f"DEBUG: Using RESULTADO from Excel for {year}/{month}: {net_profit:,.2f}")
-                    else:
-                        # Calculate net profit: Revenue - Variable Costs - Fixed Costs
-                        net_profit = revenue - variable_costs - fixed_costs_this_month
-                        print(f"DEBUG: Calculating net profit for {year}/{month}: {revenue:,.2f} - {variable_costs:,.2f} - {fixed_costs_this_month:,.2f} = {net_profit:,.2f}")
-                    
-                    # Use profit margin from Excel if available, otherwise calculate
-                    if month in monthly_margins:
-                        profit_margin = monthly_margins[month]
-                    else:
-                        profit_margin = (net_profit / revenue * 100) if revenue > 0 else 0
-                    
+
                     row = {
                         'year': year,
                         'month': month,
@@ -307,8 +211,14 @@ class FinancialProcessor:
                         'date': pd.Timestamp(year, i + 1, 1),
                         'revenue': revenue,
                         'variable_costs': variable_costs,
-                        'fixed_costs': fixed_costs_this_month,
-                        'operational_costs': operational_costs_this_month,
+                        'fixed_costs': fixed_costs,
+                        'operational_costs': fixed_costs, # For compatibility
+                        'non_operational_costs': non_operational_costs,
+                        'taxes': taxes,
+                        'commissions': commissions,
+                        'admin_expenses': admin_expenses,
+                        'marketing_expenses': marketing_expenses,
+                        'financial_expenses': financial_expenses,
                         'contribution_margin': contribution_margin,
                         'net_profit': net_profit,
                         'profit_margin': profit_margin
@@ -316,12 +226,10 @@ class FinancialProcessor:
                     monthly_rows.append(row)
         
         if not monthly_rows:
-            print("Warning: No monthly data found")
             return pd.DataFrame()
         
         df = pd.DataFrame(monthly_rows)
-        df = df.sort_values(['year', 'month_num'])
-        return df
+        return df.sort_values(['year', 'month_num'])
     
     def calculate_growth_metrics(self, df: pd.DataFrame) -> pd.DataFrame:
         """Calculate year-over-year growth rates"""

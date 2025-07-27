@@ -3,9 +3,40 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
+import plotly.express as px
 from datetime import datetime
 from utils import format_currency
 from utils.categories import get_category_name
+
+def render_detailed_cost_chart(flexible_data, selected_years):
+    """Render the detailed cost structure chart."""
+    all_costs = {}
+    for year in selected_years:
+        year_key = int(year) if year.isdigit() else year
+        if year_key not in flexible_data:
+            continue
+        year_data = flexible_data[year_key]
+        for cost_type in ['variable_costs', 'fixed_costs', 'non_operational_costs', 'taxes', 'commissions', 'administrative_expenses', 'marketing_expenses', 'financial_expenses']:
+            if cost_type not in all_costs:
+                all_costs[cost_type] = {}
+            for item, data in year_data.get(cost_type, {}).get('line_items', {}).items():
+                if item not in all_costs[cost_type]:
+                    all_costs[cost_type][item] = 0
+                all_costs[cost_type][item] += data['annual']
+
+    df_data = []
+    for cost_type, items in all_costs.items():
+        for item, value in items.items():
+            df_data.append({'CostType': get_category_name(cost_type), 'Category': item, 'Value': value})
+    
+    if not df_data:
+        st.warning("Nenhum dado de custo detalhado para os anos selecionados.")
+        return
+
+    df_costs = pd.DataFrame(df_data)
+    fig = px.bar(df_costs, x="CostType", y="Value", color="Category", title="Estrutura de Custos Detalhada")
+    st.plotly_chart(fig, use_container_width=True)
+
 
 
 def render_micro_analysis_tab(flexible_data):
@@ -24,6 +55,7 @@ def render_micro_analysis_tab(flexible_data):
     # Filter and prepare data based on selections
     if view_type == "Anual":
         render_annual_sankey(flexible_data, selected_years)
+        render_detailed_cost_chart(flexible_data, selected_years)
     elif view_type == "Mensal":
         render_monthly_analysis(flexible_data, selected_years, selected_months)
     elif view_type == "Trimestral":

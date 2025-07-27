@@ -18,6 +18,8 @@ class FixedCostExtractor:
 
     def extract_fixed_costs(self, df: pd.DataFrame, year: int) -> Dict:
         extracted_costs = {
+            'annual': 0,
+            'monthly': {},
             'line_items': {},
             'categories': {}
         }
@@ -30,7 +32,7 @@ class FixedCostExtractor:
                 continue
 
             category = self._classify_line_item(row_label)
-            if category: # Only process fixed cost/expense categories
+            if category == 'fixed_costs': # Only process fixed cost category, not other expenses
                 item_key = self._normalize_key(row_label)
                 annual_value = 0
                 monthly_values = {}
@@ -61,6 +63,22 @@ class FixedCostExtractor:
                     if category not in extracted_costs['categories']:
                         extracted_costs['categories'][category] = []
                     extracted_costs['categories'][category].append(item_key)
+        
+        # Aggregate totals from line items
+        for item_key, item_data in extracted_costs['line_items'].items():
+            # Skip subtotals to avoid double counting
+            if item_data.get('is_subtotal', False):
+                continue
+                
+            # Add to annual total
+            extracted_costs['annual'] += item_data['annual']
+            
+            # Add to monthly totals
+            for month, value in item_data['monthly'].items():
+                if month not in extracted_costs['monthly']:
+                    extracted_costs['monthly'][month] = 0
+                extracted_costs['monthly'][month] += value
+                
         return extracted_costs
 
     def _find_annual_column(self, df: pd.DataFrame) -> Any:

@@ -2,14 +2,9 @@ import pandas as pd
 from typing import Dict, Any
 import re
 
-class NonOperationalCostExtractor:
+class MarketingExpenseExtractor:
     def __init__(self):
-        self.patterns = [
-            "CUSTOS NÃO OPERACIONAIS", "REFORMA", "EMPRESTIMO BADESC",
-            "MOVEIS/UTENSILIOS/EQUIPAMENTOS", "PATROCINIO", "INDENIZAÇÕES",
-            "EVENTOS /CONFRATERNIZAÇÃO", "PRESENTES/ BRINDES",
-            "MANUTENÇÃO DE INSTALAÇÕES", "FEIRA LOGISTIQUE"
-        ]
+        self.patterns = ["MARKETING", "PUBLICIDADE", "PROPAGANDA", "MÍDIA", "TRÁFEGO PAGO", "ENDOMARKETING"]
         self.months = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ']
 
     def extract(self, df: pd.DataFrame) -> Dict:
@@ -77,5 +72,5 @@ class NonOperationalCostExtractor:
             return 0.0
 
     def _normalize_key(self, label: str) -> str:
-        key = re.sub(r'[^\\w\\s]', '', label)
+        key = re.sub(r'[^\w\s]', '', label)
         return '_'.join(key.lower().split())
