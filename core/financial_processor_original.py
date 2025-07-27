@@ -5,8 +5,8 @@ from datetime import datetime
 from typing import Dict, List, Tuple
 import warnings
 warnings.filterwarnings('ignore')
-from core.direct_extractor import DirectDataExtractor
-from core.flexible_extractor import FlexibleFinancialExtractor
+from .direct_extractor import DirectDataExtractor
+from .flexible_extractor import FlexibleFinancialExtractor
 
 class FinancialProcessor:
     def __init__(self):
@@ -274,9 +274,8 @@ class FinancialProcessor:
                 print(f"DEBUG: Calculating annual net profit for {year}: {revenue:,.2f} - {variable_costs:,.2f} - {fixed_costs:,.2f} = {net_profit:,.2f}")
             else:
                 # Use the most appropriate profit value from Excel
-                # Priority: ANNUAL first (for annual totals), then other profit types
-                net_profit = (profits.get('ANNUAL') or
-                             profits.get('OPERATIONAL') or 
+                # Priority: OPERATIONAL > WITH_NON_OP > WITHOUT_NON_OP > OTHER > NET_FINAL > NET_ADJUSTED > GROSS
+                net_profit = (profits.get('OPERATIONAL') or 
                              profits.get('WITH_NON_OP') or
                              profits.get('WITHOUT_NON_OP') or
                              profits.get('OTHER') or
@@ -302,7 +301,7 @@ class FinancialProcessor:
                 'contribution_margin': year_data.get('contribution_margin', 0),
                 'net_profit': net_profit,
                 'gross_profit': year_data.get('gross_profit', profits.get('GROSS', 0)),
-                'gross_margin': year_data.get('margins', {}).get('ANNUAL', 0),
+                'gross_margin': year_data.get('gross_margin', 0),
                 'profit_margin': year_data.get('margins', {}).get('ANNUAL', 0)
             }
             

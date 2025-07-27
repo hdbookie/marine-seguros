@@ -94,11 +94,13 @@ class DirectDataExtractor:
         
         print(f"Found month columns: {list(month_cols.keys())}")
         
-        # Find annual column
+        # Find annual column (case-insensitive search)
         annual_col = None
-        for col in df.columns:
-            if 'ANUAL' in str(col).upper():
-                annual_col = col
+        for idx, col in enumerate(df.columns):
+            col_str = str(col).upper()
+            if 'ANUAL' in col_str or 'ANNUAL' in col_str:
+                annual_col = idx  # Store index instead of column name
+                print(f"Found annual column at index {idx}: {col}")
                 break
         
         # Extract revenue and costs
@@ -129,8 +131,8 @@ class DirectDataExtractor:
                                             print(f"Could not parse value: {val}")
                         
                         # Extract annual value - store as PRIMARY revenue
-                        if annual_col and annual_col in df.columns:
-                            val = df.iloc[idx][annual_col]
+                        if annual_col is not None and annual_col < len(df.columns):
+                            val = df.iloc[idx, annual_col]
                             if pd.notna(val):
                                 if isinstance(val, (int, float)):
                                     data['revenue']['ANNUAL'] = float(val)
@@ -147,8 +149,8 @@ class DirectDataExtractor:
                     elif 'RECEITA' in value_str and 'PRIMARY' not in data.get('revenue', {}):
                         print(f"Found secondary revenue row at {idx}: {value_str}")
                         # Only update if we don't have primary revenue yet
-                        if annual_col and annual_col in df.columns:
-                            val = df.iloc[idx][annual_col]
+                        if annual_col is not None and annual_col < len(df.columns):
+                            val = df.iloc[idx, annual_col]
                             if pd.notna(val) and isinstance(val, (int, float)):
                                 if 'ANNUAL' not in data['revenue']:
                                     data['revenue']['ANNUAL'] = float(val)
@@ -171,8 +173,8 @@ class DirectDataExtractor:
                                             print(f"Could not parse value: {val}")
                         
                         # Extract annual value
-                        if annual_col and annual_col in df.columns:
-                            val = df.iloc[idx][annual_col]
+                        if annual_col is not None and annual_col < len(df.columns):
+                            val = df.iloc[idx, annual_col]
                             if pd.notna(val):
                                 if isinstance(val, (int, float)):
                                     data['costs']['ANNUAL'] = float(val)
@@ -212,8 +214,8 @@ class DirectDataExtractor:
                                             print(f"  Stored margin for {month}: {val}%")
                         
                         # Extract annual value
-                        if annual_col and annual_col in df.columns:
-                            val = df.iloc[idx][annual_col]
+                        if annual_col is not None and annual_col < len(df.columns):
+                            val = df.iloc[idx, annual_col]
                             if pd.notna(val):
                                 # Extract percentage value
                                 if isinstance(val, str):
@@ -249,10 +251,20 @@ class DirectDataExtractor:
                                         if pd.notna(val) and isinstance(val, (int, float)):
                                             data['profits'][month] = float(val)
                                             print(f"  Stored monthly profit for {month}: {val:,.2f}")
+                                
+                                # Store annual value from RESULTADO row as ANNUAL
+                                if annual_col is not None and annual_col < len(df.columns):
+                                    annual_val = df.iloc[idx, annual_col]
+                                    if pd.notna(annual_val) and isinstance(annual_val, (int, float)):
+                                        data['profits']['ANNUAL'] = float(annual_val)
+                                        print(f"  Stored RESULTADO annual total: {annual_val:,.2f}")
+                                
+                                # Skip further processing for RESULTADO row to avoid double storage
+                                continue
                             
-                            # Extract annual value
-                            if annual_col and annual_col in df.columns:
-                                val = df.iloc[idx][annual_col]
+                            # Extract annual value for other profit types
+                            elif annual_col is not None and annual_col < len(df.columns):
+                                val = df.iloc[idx, annual_col]
                                 if pd.notna(val) and isinstance(val, (int, float)):
                                     # Prioritize different types of profit/result
                                     if value_str.strip().upper() == 'LUCRO' or value_str.strip().upper() == 'LUCRO BRUTO':
@@ -280,9 +292,11 @@ class DirectDataExtractor:
                                         data['profits']['WITHOUT_NON_OP'] = float(val)
                                         print(f"  Stored result without non-op costs: {val:,.2f}")
                                     elif value_str.strip().upper() == 'RESULTADO':
-                                        # Plain "RESULTADO" is usually operational result
-                                        data['profits']['OPERATIONAL'] = float(val)
-                                        print(f"  Stored operational result: {val:,.2f}")
+                                        # Plain "RESULTADO" should have been handled above
+                                        # This is a fallback if somehow it reaches here
+                                        if 'ANNUAL' not in data['profits']:
+                                            data['profits']['ANNUAL'] = float(val)
+                                            print(f"  Stored RESULTADO as annual result: {val:,.2f}")
                                     else:
                                         # Other profit types
                                         data['profits']['OTHER'] = float(val)
@@ -291,16 +305,16 @@ class DirectDataExtractor:
                     # Extract other important financial metrics
                     elif 'MARGEM DE CONTRIBUIÇÃO' in value_str:
                         print(f"Found contribution margin at {idx}: {value_str}")
-                        if annual_col and annual_col in df.columns:
-                            val = df.iloc[idx][annual_col]
+                        if annual_col is not None and annual_col < len(df.columns):
+                            val = df.iloc[idx, annual_col]
                             if pd.notna(val) and isinstance(val, (int, float)):
                                 data['contribution_margin'] = float(val)
                                 print(f"  Stored contribution margin: {val:,.2f}")
                     
-                    elif 'MARGEM BRUTA' in value_str and '%' in str(df.iloc[idx][annual_col] if annual_col else ''):
+                    elif 'MARGEM BRUTA' in value_str and annual_col is not None and '%' in str(df.iloc[idx, annual_col] if annual_col < len(df.columns) else ''):
                         print(f"Found gross margin % at {idx}: {value_str}")
-                        if annual_col and annual_col in df.columns:
-                            val = df.iloc[idx][annual_col]
+                        if annual_col is not None and annual_col < len(df.columns):
+                            val = df.iloc[idx, annual_col]
                             if pd.notna(val):
                                 # Extract percentage value
                                 if isinstance(val, str):
@@ -343,22 +357,25 @@ class DirectDataExtractor:
                                             print(f"Could not parse fixed cost value: {val}")
                         
                         # Extract annual value
-                        if annual_col and annual_col in df.columns:
-                            val = df.iloc[idx][annual_col]
+                        if annual_col is not None and annual_col < len(df.columns):
+                            val = df.iloc[idx, annual_col]
                             if pd.notna(val) and isinstance(val, (int, float)):
                                 data['fixed_costs']['ANNUAL'] = float(val)
                                 data['operational_costs']['ANNUAL'] = float(val)
                                 print(f"  Stored annual fixed costs: {val:,.2f}")
                                 print(f"  Stored monthly fixed costs: {len([k for k in data['fixed_costs'].keys() if k != 'ANNUAL'])} months")
         
-        # Calculate profits and only calculate margins if not already extracted from Excel
+        # Calculate profits and margins ONLY for months that don't already have extracted values
         if data['revenue'] and data['costs']:
             for month in data['revenue']:
                 if month in data['costs']:
                     revenue = data['revenue'][month]
                     cost = data['costs'][month]
                     if revenue > 0:
-                        data['profits'][month] = revenue - cost
+                        # Only calculate profit if we don't already have an extracted value
+                        if month not in data['profits']:
+                            data['profits'][month] = revenue - cost
+                            print(f"  Calculated profit for {month}: {revenue - cost:,.2f}")
                         # Only calculate margin if we don't have it from Excel already
                         if month not in data['margins']:
                             data['margins'][month] = ((revenue - cost) / revenue) * 100

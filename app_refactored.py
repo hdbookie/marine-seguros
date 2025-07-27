@@ -134,14 +134,18 @@ with st.sidebar:
     - 💬 Assistente de Chat IA
     """)
 
+# Initialize session state
+initialize_session_state(db, False) # Initialize with data_loaded = False
+
 # Load state from database
 data_loaded = db.auto_load_state(st.session_state)
 
 # Convert extracted data to processed format if needed
-if data_loaded and hasattr(st.session_state, 'extracted_data') and st.session_state.extracted_data:
-    if not hasattr(st.session_state, 'processed_data') or st.session_state.processed_data is None:
-        st.session_state.processed_data = convert_extracted_to_processed(st.session_state.extracted_data)
-        
+# This block should always regenerate processed_data from extracted_data
+# if extracted_data is present, to ensure consistency.
+if hasattr(st.session_state, 'extracted_data') and st.session_state.extracted_data:
+    st.session_state.processed_data = convert_extracted_to_processed(st.session_state.extracted_data)
+
     # Generate monthly data from extracted data
     if not hasattr(st.session_state, 'monthly_data') or st.session_state.monthly_data is None:
         try:
@@ -150,9 +154,6 @@ if data_loaded and hasattr(st.session_state, 'extracted_data') and st.session_st
             print(f"Error generating monthly data: {e}")
             import traceback
             traceback.print_exc()
-
-# Initialize session state
-initialize_session_state(db, data_loaded)
 
 # Main content - Tabs
 tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([

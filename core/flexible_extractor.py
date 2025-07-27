@@ -130,7 +130,7 @@ class FlexibleFinancialExtractor:
             rows_with_data += 1
             
             # Check if this is a subtotal/calculation
-            is_subtotal = self._is_subtotal(row_label)
+            is_subtotal = self._is_subtotal(row_label, row_data, df, idx)
             
             # Always skip subtotals/calculations regardless of value
             if is_subtotal:
@@ -279,11 +279,12 @@ class FlexibleFinancialExtractor:
                 if pattern in label_upper:
                     return category
                     
-        # Check if it's a calculated result
-        for pattern in self.result_patterns:
-            if pattern in label_upper:
-                return 'calculated_results'
-                
+        # If not matched by specific patterns, check for general result/margin terms
+        if any(term in label_upper for term in ['RESULTADO', 'LUCRO', 'PREJUÍZO']):
+            return 'results'
+        if any(term in label_upper for term in ['MARGEM', 'MARGIN']):
+            return 'margins'
+
         # Default category for unclassified items
         if any(term in label_upper for term in ['DESPESA', 'GASTO', 'EXPENSE']):
             return 'other_expenses'
@@ -299,45 +300,50 @@ class FlexibleFinancialExtractor:
         key = '_'.join(key.lower().split())
         return key
     
-    def _is_subtotal(self, label: str) -> bool:
-        """Check if a line item is a subtotal, total, header, or calculation"""
+    def _is_subtotal(self, label: str, row_data: Dict, df: pd.DataFrame, row_idx: int) -> bool:
+        """Check if a line item is a subtotal, total, header, or calculation.
+        This function is crucial for filtering out aggregated rows that would otherwise
+        lead to double-counting in detailed analyses.
+        """
         label_upper = label.upper().strip()
-        
-        # Items that should NEVER be excluded
-        keep_items = ['FUNCIONÁRIOS', 'PRO LABORE', 'LUCRO', 'SEGUROS', 'MARKETING']
-        if any(item in label_upper for item in keep_items):
-            return False
-            
-        # Check if it's a calculation or result
+
+        # --- Rule 1: Explicit Calculation Terms ---
+        # These terms strongly suggest an aggregated or calculated row.
         calculation_terms = [
-            'TOTAL', 'SUBTOTAL', 'SOMA', 'RESULTADO', 'MARGEM', 
-            'PONTO EQUILIBRIO', 'PONTO EQUILÍBRIO', 'LUCRO LÍQUIDO',
+            'TOTAL', 'SUBTOTAL', 'SOMA', 'PONTO EQUILIBRIO', 'PONTO EQUILÍBRIO',
             'APLICAÇÕES', 'RETIRADA', 'COMPOSIÇÃO', 'SALDOS',
             'EXCLUINDO', 'DESPESAS - TOTAL', 'CUSTO FIXO + VARIAVEL',
             'CUSTOS FIXOS + VARIÁVEIS', 'CUSTOS VARIÁVEIS + FIXOS',
             'CUSTOS FIXOS + VARIÁVEIS + NÃO OPERACIONAIS',
             'TOTAL CUSTOS', 'CUSTO TOTAL', 'TOTAL GERAL',
-            'DESPESA TOTAL', 'TOTAL DE CUSTOS', 'TOTAL DE DESPESAS'
+            'DESPESA TOTAL', 'TOTAL DE CUSTOS', 'TOTAL DE DESPESAS',
+            'DEMONSTRATIVO DE RESULTADO', 'DRE' # Common report titles
         ]
         if any(term in label_upper for term in calculation_terms):
             return True
-        
-        # Check if it's ALL CAPS (likely a header)
-        # But exclude some known line items that might be all caps
-        exceptions = ['IRRF', 'INSS', 'FGTS', 'IPTU', 'IPVA', 'ISS', 'PIS', 'COFINS', 'PPR', 'CIEE']
-        if label_upper == label.strip() and len(label.strip()) > 3 and label_upper not in exceptions:
-            # It's all caps - but check if it has values before marking as subtotal
-            # This is checked elsewhere, so for now just mark potentially
-            return False  # Don't automatically mark ALL CAPS as subtotal
-        
-        # Check for specific header patterns that are calculations/results
-        header_patterns = [
-            'MARGEM DE CONTRIBUIÇÃO', 'COMPOSIÇÃO DE SALDOS',
-            'RESULTADO', 'PONTO EQUILIBRIO', 'PONTO EQUILÍBRIO'
+
+        # --- Rule 2: Specific known aggregated rows that might not have "TOTAL" ---
+        # These are often key financial metrics that are themselves a result of other lines.
+        # We want to capture their value, but not treat them as individual expenses for micro-analysis.
+        # They are handled by the 'results' or 'margins' categories.
+        aggregated_metrics = [
+            'MARGEM DE CONTRIBUIÇÃO', 'RESULTADO OPERACIONAL', 'LUCRO LÍQUIDO',
+            'RESULTADO ANTES DO IR E CSLL', 'RESULTADO BRUTO', 'RESULTADO LÍQUIDO',
+            'RESULTADO DO EXERCÍCIO', 'RESULTADO FINANCEIRO', 'RESULTADO NÃO OPERACIONAL',
+            'RESULTADO C/CUSTOS NÃO OP.', 'RESULTADO S/CUSTOS NÃO OP.',
+            'RESULTADO COM INVESTIMENTOS', 'RESULTADO C/ RETIRADA PADRÃO',
+            'RESULTADO - INVESTIMENTOS + RETIRADA', 'RESULTADO - CUSTOS N OPERACIONAIS - RETIRADA EXCEDENTE',
+            'LUCRO', 'PREJUÍZO', 'MARGEM' # General terms that often indicate a calculated row
         ]
-        if label_upper in header_patterns:
+        if any(term in label_upper for term in aggregated_metrics):
             return True
             
+        # --- Rule 3: Check for indentation (heuristic for sub-items) ---
+        # If a row is significantly indented compared to the previous non-empty row,
+        # it's likely a line item. If it's at the same or less indentation, it might be a header/subtotal.
+        # This requires more context, so we'll use it carefully.
+        # For now, we rely mostly on keyword matching.
+
         return False
     
     def _is_category_header(self, label: str) -> bool:
