@@ -39,6 +39,8 @@ def render_detailed_cost_chart(flexible_data, selected_years):
 
 
 
+from visualizations.charts import create_detailed_cost_structure_chart
+
 def render_micro_analysis_tab(flexible_data):
     """Render the micro analysis tab with Sankey flow diagram"""
     
@@ -55,7 +57,9 @@ def render_micro_analysis_tab(flexible_data):
     # Filter and prepare data based on selections
     if view_type == "Anual":
         render_annual_sankey(flexible_data, selected_years)
-        render_detailed_cost_chart(flexible_data, selected_years)
+        df = pd.DataFrame([item for item in flexible_data.values() if item['year'] in selected_years])
+        if not df.empty:
+            create_detailed_cost_structure_chart(df)
     elif view_type == "Mensal":
         render_monthly_analysis(flexible_data, selected_years, selected_months)
     elif view_type == "Trimestral":

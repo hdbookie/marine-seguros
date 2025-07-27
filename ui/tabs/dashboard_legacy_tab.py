@@ -127,12 +127,23 @@ def render_dashboard_tab(db, use_unified_extractor=True):
 
         with col_filter2:
             if view_type in ["Mensal", "Trimestral", "Trimestre Personalizado", "Semestral", "Personalizado"]:
-                if not df.empty and 'year' in df.columns:
+                # For monthly-based views, check if monthly data is available
+                if view_type != "Anual" and hasattr(st.session_state, 'monthly_data') and st.session_state.monthly_data is not None and not st.session_state.monthly_data.empty:
+                    available_years = sorted(st.session_state.monthly_data['year'].unique())
+                elif not df.empty and 'year' in df.columns:
                     available_years = sorted(df['year'].unique())
-                    # Use saved selected_years if available, otherwise default to last 3 years
+                else:
+                    available_years = []
+                
+                if available_years:
+                    # Use saved selected_years if available and valid, otherwise default to last 3 years
+                    saved_years = st.session_state.get('selected_years', [])
+                    # Filter saved years to only include those that are available
+                    valid_saved_years = [y for y in saved_years if y in available_years]
+                    
                     default_years = (
-                        st.session_state.get('selected_years', []) 
-                        if st.session_state.get('selected_years') 
+                        valid_saved_years 
+                        if valid_saved_years 
                         else available_years[-3:] if len(available_years) >= 3 else available_years
                     )
                     selected_years = st.multiselect(

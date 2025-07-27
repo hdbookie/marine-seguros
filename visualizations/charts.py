@@ -362,3 +362,46 @@ def create_cost_structure_chart(df, title="Estrutura de Custos vs. Receita"):
     )
 
     return fig
+
+def create_detailed_cost_structure_chart(df, title="Estrutura de Custos Detalhada"):
+    """Create a detailed stacked bar chart showing cost structure against revenue"""
+    fig = go.Figure()
+
+    cost_categories = ['variable_costs', 'fixed_costs', 'non_operational_costs', 'taxes', 'commissions', 'administrative_expenses', 'marketing_expenses', 'financial_expenses']
+    colors = px.colors.qualitative.Plotly
+
+    for i, cost_type in enumerate(cost_categories):
+        fig.add_trace(go.Bar(
+            name=cost_type.replace('_', ' ').title(),
+            x=df['year'],
+            y=df[cost_type],
+            text=[format_currency(v) for v in df[cost_type]],
+            textposition='auto',
+            marker_color=colors[i % len(colors)],
+            hovertemplate=f'<b>Ano:</b> %{{x}}<br><b>{cost_type.replace('_', ' ').title()}:</b> %{{text}}<extra></extra>'
+        ))
+
+    # Add Revenue as a line on top
+    fig.add_trace(go.Scatter(
+        name='Receita Total',
+        x=df['year'],
+        y=df['revenue'],
+        mode='lines+markers+text',
+        text=[format_currency(v) for v in df['revenue']],
+        textposition='top center',
+        line=dict(color='rgba(54, 162, 235, 1)', width=3),
+        marker=dict(size=10),
+        hovertemplate='<b>Ano:</b> %{x}<br><b>Receita:</b> %{text}<extra></extra>'
+    ))
+
+    fig.update_layout(
+        title=title,
+        xaxis_title='Ano',
+        yaxis_title='Valores (R$)',
+        barmode='stack',
+        template='plotly_white',
+        legend=dict(x=0.01, y=0.99),
+        margin=dict(l=50, r=50, t=80, b=50)
+    )
+
+    return fig
