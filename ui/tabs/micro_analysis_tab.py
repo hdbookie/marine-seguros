@@ -33,7 +33,15 @@ def render_micro_analysis_tab(flexible_data: Dict) -> None:
         flexible_data: Processed financial data from flexible extractor
     """
     # Header with purpose statement
-    st.header("🔬 Análise Micro - Custos e Despesas Detalhados")
+    col1, col2 = st.columns([5, 1])
+    with col1:
+        st.header("🔬 Análise Micro - Custos e Despesas Detalhados")
+    with col2:
+        if st.button("🔄 Atualizar Dados", help="Reprocessar dados com os novos filtros"):
+            if 'detailed_monthly_data' in st.session_state:
+                del st.session_state.detailed_monthly_data
+            st.rerun()
+    
     st.markdown("""
     <div style='background-color: #f0f9ff; padding: 15px; border-radius: 10px; margin-bottom: 20px;'>
         <p style='margin: 0; color: #0c5690;'>
@@ -119,18 +127,56 @@ def render_micro_analysis_tab(flexible_data: Dict) -> None:
         render_opportunities_analysis(filtered_items)
     
     # Debug info
-    if len(filtered_items) == 0 and detailed_data['line_items']:
-        with st.expander("🔍 Debug: Por que não há itens?", expanded=False):
-            st.write(f"Total de itens antes dos filtros: {len(detailed_data['line_items'])}")
-            st.write(f"Anos selecionados: {selected_years}")
-            st.write(f"Meses selecionados: {filters.get('months', 'Todos')}")
-            st.write(f"Categorias selecionadas: {selected_categories}")
-            st.write(f"Termo de busca: '{search_term}'")
+    with st.expander("🔍 Debug: Informações sobre os dados", expanded=False):
+        st.write(f"Total de itens processados: {len(detailed_data['line_items'])}")
+        st.write(f"Total após filtros: {len(filtered_items)}")
+        st.write(f"Anos selecionados: {selected_years}")
+        st.write(f"Meses selecionados: {filters.get('months', 'Todos')}")
+        st.write(f"Categorias selecionadas: {selected_categories}")
+        
+        # Show total by year
+        year_totals = {}
+        for item in detailed_data['line_items']:
+            year = item['ano']
+            if year not in year_totals:
+                year_totals[year] = 0
+            year_totals[year] += item['valor_anual']
+        
+        st.write("\nTotais por ano (todos os itens):")
+        for year, total in sorted(year_totals.items()):
+            st.write(f"  {year}: {format_currency(total)}")
+        
+        # Show category distribution
+        cat_totals = {}
+        for item in detailed_data['line_items']:
+            cat = item['categoria']
+            if cat not in cat_totals:
+                cat_totals[cat] = 0
+            cat_totals[cat] += item['valor_anual']
+        
+        st.write("\nDistribuição por categoria:")
+        for cat, total in sorted(cat_totals.items(), key=lambda x: x[1], reverse=True):
+            st.write(f"  {get_category_name(cat)}: {format_currency(total)}")
 
 
 def render_summary_cards(items: List[Dict]) -> None:
     """Render summary metric cards"""
-    st.markdown("### 📊 Resumo Rápido")
+    # Get selected time period from session state
+    selected_years = st.session_state.get('details_year_filter', [])
+    selected_months = st.session_state.get('details_month_filter', [])
+    
+    # Format time period display
+    if selected_years:
+        year_display = f"{', '.join(selected_years)}"
+        if len(selected_months) < 12:
+            month_display = f" ({len(selected_months)} meses)"
+        else:
+            month_display = ""
+        time_period = f"📅 Período: {year_display}{month_display}"
+    else:
+        time_period = "📅 Período: Todos os anos"
+    
+    st.markdown(f"### 📊 Resumo Rápido - {time_period}")
     summary_cols = st.columns(5)
     
     with summary_cols[0]:

@@ -129,9 +129,14 @@ class FlexibleFinancialExtractor:
                 continue
             rows_with_data += 1
             
-            # Skip if this is a subtotal/calculation
+            # Check if this is a subtotal/calculation
             is_subtotal = self._is_subtotal(row_label)
-            if is_subtotal:
+            
+            # For debugging - don't skip items with substantial values even if they look like headers
+            if is_subtotal and row_data['annual'] > 10000:
+                print(f"  WARNING: Item '{row_label}' marked as subtotal but has value R$ {row_data['annual']:,.2f}")
+                is_subtotal = False  # Include it anyway
+            elif is_subtotal:
                 print(f"  Skipping subtotal/calculation: {row_label}")
                 continue
                 
@@ -301,6 +306,11 @@ class FlexibleFinancialExtractor:
         """Check if a line item is a subtotal, total, header, or calculation"""
         label_upper = label.upper().strip()
         
+        # Items that should NEVER be excluded
+        keep_items = ['FUNCIONÁRIOS', 'PRO LABORE', 'LUCRO', 'SEGUROS', 'MARKETING']
+        if any(item in label_upper for item in keep_items):
+            return False
+            
         # Check if it's a calculation or result
         calculation_terms = [
             'TOTAL', 'SUBTOTAL', 'SOMA', 'RESULTADO', 'MARGEM', 
@@ -317,16 +327,16 @@ class FlexibleFinancialExtractor:
         
         # Check if it's ALL CAPS (likely a header)
         # But exclude some known line items that might be all caps
-        exceptions = ['IRRF', 'INSS', 'FGTS', 'IPTU', 'IPVA', 'ISS', 'PIS', 'COFINS']
+        exceptions = ['IRRF', 'INSS', 'FGTS', 'IPTU', 'IPVA', 'ISS', 'PIS', 'COFINS', 'PPR', 'CIEE']
         if label_upper == label.strip() and len(label.strip()) > 3 and label_upper not in exceptions:
-            # It's all caps - likely a header
-            return True
+            # It's all caps - but check if it has values before marking as subtotal
+            # This is checked elsewhere, so for now just mark potentially
+            return False  # Don't automatically mark ALL CAPS as subtotal
         
-        # Check for specific header patterns
+        # Check for specific header patterns that are calculations/results
         header_patterns = [
-            'FATURAMENTO', 'CUSTOS VARIÁVEIS', 'CUSTOS FIXOS', 
-            'CUSTOS NÃO OPERACIONAIS', 'RECEITA', 'DESPESAS',
-            'MARGEM DE CONTRIBUIÇÃO', 'COMPOSIÇÃO DE SALDOS'
+            'MARGEM DE CONTRIBUIÇÃO', 'COMPOSIÇÃO DE SALDOS',
+            'RESULTADO', 'PONTO EQUILIBRIO', 'PONTO EQUILÍBRIO'
         ]
         if label_upper in header_patterns:
             return True
@@ -338,6 +348,7 @@ class FlexibleFinancialExtractor:
         label_upper = label.upper().strip()
         
         # Main category headers from the Excel structure
+        # These are section headers, not necessarily to be excluded from data
         category_headers = [
             'FATURAMENTO', 'CUSTOS VARIÁVEIS', 'CUSTOS FIXOS', 
             'CUSTOS NÃO OPERACIONAIS', 'RECEITA', 'DESPESAS'

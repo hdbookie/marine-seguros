@@ -271,6 +271,7 @@ class FinancialProcessor:
             # For years before 2020, calculate net profit directly
             if year < 2020:
                 net_profit = revenue - variable_costs - fixed_costs
+                print(f"DEBUG: Calculating annual net profit for {year}: {revenue:,.2f} - {variable_costs:,.2f} - {fixed_costs:,.2f} = {net_profit:,.2f}")
             else:
                 # Use the most appropriate profit value from Excel
                 # Priority: OPERATIONAL > WITH_NON_OP > WITHOUT_NON_OP > OTHER > NET_FINAL > NET_ADJUSTED > GROSS
@@ -281,6 +282,8 @@ class FinancialProcessor:
                              profits.get('NET_FINAL') or 
                              profits.get('NET_ADJUSTED') or
                              profits.get('GROSS') or 0)
+                print(f"DEBUG: Using RESULTADO from Excel for year {year}: {net_profit:,.2f}")
+                print(f"DEBUG: Available profit types: {list(profits.keys())}")
             
             # Extract operational_costs (fixed_costs already extracted above)
             operational_costs_data = year_data.get('operational_costs', 0)
@@ -406,9 +409,11 @@ class FinancialProcessor:
                     # Use net profit from Excel if available (RESULTADO), otherwise calculate
                     if month in monthly_profits and year >= 2020:  # Only trust RESULTADO from 2020 onwards
                         net_profit = monthly_profits[month]
+                        print(f"DEBUG: Using RESULTADO from Excel for {year}/{month}: {net_profit:,.2f}")
                     else:
                         # Calculate net profit: Revenue - Variable Costs - Fixed Costs
                         net_profit = revenue - variable_costs - fixed_costs_this_month
+                        print(f"DEBUG: Calculating net profit for {year}/{month}: {revenue:,.2f} - {variable_costs:,.2f} - {fixed_costs_this_month:,.2f} = {net_profit:,.2f}")
                     
                     # Use profit margin from Excel if available, otherwise calculate
                     if month in monthly_margins:
