@@ -1587,8 +1587,19 @@ def render_dashboard_tab(db, use_flexible_extractor):
             growth_cols = [col for col in display_df.columns if '_growth' in col]
             if growth_cols:
                 fig_growth = go.Figure()
+                
+                # Translation mapping for metric names
+                metric_translations = {
+                    'revenue': 'Receita',
+                    'variable_costs': 'Custos Variáveis',
+                    'net_profit': 'Lucro Líquido',
+                    'fixed_costs': 'Custos Fixos',
+                    'operational_costs': 'Custos Operacionais'
+                }
+                
                 for col in growth_cols:
-                    metric_name = col.replace('_growth', '').title()
+                    metric_key = col.replace('_growth', '')
+                    metric_name = metric_translations.get(metric_key, metric_key.title())
                     fig_growth.add_trace(go.Scatter(
                         x=display_df['year'],
                         y=display_df[col],
@@ -1600,7 +1611,14 @@ def render_dashboard_tab(db, use_flexible_extractor):
                     title="Taxa de Crescimento Anual (%)",
                     xaxis_title="Ano",
                     yaxis_title="Crescimento (%)",
-                    height=400
+                    height=400,
+                    legend=dict(
+                        orientation="h",
+                        yanchor="bottom",
+                        y=1.02,
+                        xanchor="right",
+                        x=1
+                    )
                 )
                 st.plotly_chart(fig_growth, use_container_width=True, key="growth_chart_standard")
 

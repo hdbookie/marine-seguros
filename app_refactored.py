@@ -89,7 +89,7 @@ st.title("📊 Marine Seguros - Financial Analytics Dashboard")
 
 # Sidebar
 with st.sidebar:
-    st.header("⚙️ Configuration")
+    st.header("⚙️ Configuração")
     
     # User menu
     show_user_menu()
@@ -100,18 +100,18 @@ with st.sidebar:
     
     # API Key input
     gemini_api_key = st.text_input(
-        "🔑 Gemini API Key",
+        "🔑 Chave API Gemini",
         type="password",
         value=os.getenv("GEMINI_API_KEY", ""),
-        help="Get your API key from Google AI Studio"
+        help="Obtenha sua chave API no Google AI Studio"
     )
     
     # Settings
-    st.subheader("🎛️ Settings")
+    st.subheader("🎛️ Configurações")
     
     # Language selector
     language = st.selectbox(
-        "🌐 Language / Idioma",
+        "🌐 Idioma",
         ["Português", "English"],
         index=0
     )
@@ -122,16 +122,16 @@ with st.sidebar:
     
     # About section
     st.markdown("---")
-    st.markdown("### About")
+    st.markdown("### Sobre")
     st.info("""
-    **Marine Seguros Financial Analytics**  
-    Version 3.0 - Refactored  
+    **Marine Seguros Análise Financeira**  
+    Versão 3.0 - Refatorada  
     
-    Features:
-    - 📊 Financial Dashboard
-    - 🔬 Micro Analysis
-    - 🤖 AI Insights
-    - 💬 AI Chat Assistant
+    Recursos:
+    - 📊 Dashboard Financeiro
+    - 🔬 Análise Micro
+    - 🤖 Insights IA
+    - 💬 Assistente de Chat IA
     """)
 
 # Load state from database

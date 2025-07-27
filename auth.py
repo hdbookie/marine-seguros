@@ -84,32 +84,32 @@ def show_login_page():
     st.title("🔐 Marine Seguros - Login")
     
     with st.container():
-        st.markdown("### Please login to continue")
+        st.markdown("### Por favor, faça login para continuar")
         
         with st.form("login_form"):
-            username = st.text_input("Username")
-            password = st.text_input("Password", type="password")
-            submitted = st.form_submit_button("Login", type="primary")
+            username = st.text_input("Nome de usuário")
+            password = st.text_input("Senha", type="password")
+            submitted = st.form_submit_button("Entrar", type="primary")
             
             if submitted:
                 user = authenticate(username, password)
                 if user:
                     st.session_state.user = user
-                    st.success(f"Welcome, {user['name']}!")
+                    st.success(f"Bem-vindo, {user['name']}!")
                     st.rerun()
                 else:
-                    st.error("Invalid username or password")
+                    st.error("Nome de usuário ou senha inválidos")
         
         # Show default credentials hint
-        with st.expander("ℹ️ Demo Credentials"):
+        with st.expander("ℹ️ Credenciais de Demonstração"):
             st.info("""
-            **Admin Access:**
-            - Username: admin
-            - Password: admin123
+            **Acesso Administrador:**
+            - Usuário: admin
+            - Senha: admin123
             
-            **User Access:**
-            - Username: user
-            - Password: user123
+            **Acesso Usuário:**
+            - Usuário: user
+            - Senha: user123
             """)
 
 
@@ -118,9 +118,10 @@ def show_user_menu():
     if st.session_state.user:
         st.sidebar.markdown("---")
         st.sidebar.markdown(f"**👤 {st.session_state.user['name']}**")
-        st.sidebar.caption(f"Role: {st.session_state.user['role'].title()}")
+        role_pt = "Administrador" if st.session_state.user['role'] == 'admin' else "Usuário"
+        st.sidebar.caption(f"Função: {role_pt}")
         
-        if st.sidebar.button("🚪 Logout", use_container_width=True):
+        if st.sidebar.button("🚪 Sair", use_container_width=True):
             st.session_state.user = None
             st.rerun()
 
@@ -128,17 +129,17 @@ def show_user_menu():
 def show_admin_panel():
     """Show admin panel in sidebar"""
     if st.session_state.user and st.session_state.user['role'] == 'admin':
-        with st.sidebar.expander("👨‍💼 Admin Panel"):
-            st.markdown("### User Management")
+        with st.sidebar.expander("👨‍💼 Painel Administrativo"):
+            st.markdown("### Gerenciamento de Usuários")
             
             # Add new user
-            st.markdown("**Add New User**")
-            new_username = st.text_input("Username", key="new_username")
-            new_password = st.text_input("Password", key="new_password", type="password")
-            new_name = st.text_input("Full Name", key="new_name")
-            new_role = st.selectbox("Role", ["user", "admin"], key="new_role")
+            st.markdown("**Adicionar Novo Usuário**")
+            new_username = st.text_input("Nome de usuário", key="new_username")
+            new_password = st.text_input("Senha", key="new_password", type="password")
+            new_name = st.text_input("Nome completo", key="new_name")
+            new_role = st.selectbox("Função", ["user", "admin"], key="new_role", format_func=lambda x: "Usuário" if x == "user" else "Administrador")
             
-            if st.button("➕ Add User"):
+            if st.button("➕ Adicionar Usuário"):
                 if new_username and new_password and new_name:
                     users = st.session_state.users
                     if new_username not in users:
@@ -149,14 +150,15 @@ def show_admin_panel():
                         }
                         save_users(users)
                         st.session_state.users = users
-                        st.success(f"User '{new_username}' added successfully!")
+                        st.success(f"Usuário '{new_username}' adicionado com sucesso!")
                     else:
-                        st.error("Username already exists")
+                        st.error("Nome de usuário já existe")
                 else:
-                    st.error("Please fill all fields")
+                    st.error("Por favor, preencha todos os campos")
             
             # List users
-            st.markdown("**Current Users**")
+            st.markdown("**Usuários Atuais**")
             users = st.session_state.users
             for username, user_data in users.items():
-                st.text(f"• {username} ({user_data['role']})")
+                role_display = "admin" if user_data['role'] == 'admin' else "usuário"
+                st.text(f"• {username} ({role_display})")

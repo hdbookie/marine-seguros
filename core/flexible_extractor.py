@@ -132,12 +132,9 @@ class FlexibleFinancialExtractor:
             # Check if this is a subtotal/calculation
             is_subtotal = self._is_subtotal(row_label)
             
-            # For debugging - don't skip items with substantial values even if they look like headers
-            if is_subtotal and row_data['annual'] > 10000:
-                print(f"  WARNING: Item '{row_label}' marked as subtotal but has value R$ {row_data['annual']:,.2f}")
-                is_subtotal = False  # Include it anyway
-            elif is_subtotal:
-                print(f"  Skipping subtotal/calculation: {row_label}")
+            # Always skip subtotals/calculations regardless of value
+            if is_subtotal:
+                print(f"  Skipping subtotal/calculation: {row_label} (R$ {row_data['annual']:,.2f})")
                 continue
                 
             # Classify the line item

@@ -136,6 +136,11 @@ def render_annual_sankey(flexible_data, selected_years):
             category = item_data.get('category', '')
             label = item_data.get('label', '')
             annual_value = item_data.get('annual', 0)
+            is_subtotal = item_data.get('is_subtotal', False)
+            
+            # Skip calculated items, subtotals, and revenue
+            if is_subtotal or category in ['calculated_results', 'revenue', 'margins', 'results']:
+                continue
             
             # Variable costs go to variable category
             if category == 'variable_costs':
@@ -294,9 +299,16 @@ def render_monthly_analysis(flexible_data, selected_years, selected_months):
             category = item_data.get('category', '')
             label = item_data.get('label', '')
             monthly_values = item_data.get('monthly', {})
+            is_subtotal = item_data.get('is_subtotal', False)
             
-            # Only include variable and fixed costs
-            if category in ['fixed_costs', 'variable_costs']:
+            # Skip calculated items and subtotals
+            if is_subtotal or category in ['calculated_results', 'revenue', 'margins', 'results']:
+                continue
+            
+            # Include all cost categories (variable costs stay as variable, all others as fixed)
+            if category in ['variable_costs', 'fixed_costs', 'admin_expenses', 'operational_expenses', 
+                           'marketing_expenses', 'financial_expenses', 'tax_expenses', 
+                           'other_expenses', 'other_costs']:
                 for month, value in monthly_values.items():
                     if month in selected_months:
                         month_key = f"{year}-{month}"
@@ -307,10 +319,10 @@ def render_monthly_analysis(flexible_data, selected_years, selected_months):
                                 'items': []
                             }
                         
-                        if category == 'fixed_costs':
-                            monthly_data[month_key]['fixed'] += value
-                        else:
+                        if category == 'variable_costs':
                             monthly_data[month_key]['variable'] += value
+                        else:
+                            monthly_data[month_key]['fixed'] += value
                             
                         monthly_data[month_key]['items'].append({
                             'label': label,
