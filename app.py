@@ -16,6 +16,7 @@ from database_manager import DatabaseManager
 from core.direct_extractor import DirectDataExtractor
 from comparative_analyzer import ComparativeAnalyzer
 from auth import init_auth, require_auth, show_login_page, show_user_menu, show_admin_panel
+from ui.tabs.micro_analysis_tab import render_micro_analysis_tab
 
 # Load environment variables
 load_dotenv()
@@ -2657,66 +2658,36 @@ else:
         # Tab 3: Detailed Breakdown (only for flexible mode)
         if use_flexible_extractor:
             with tab3:
-                # Clear header with purpose statement
-                st.header("🔬 Análise Micro - Custos e Despesas Detalhados")
-                st.markdown("""
-                <div style='background-color: #f0f9ff; padding: 15px; border-radius: 10px; margin-bottom: 20px;'>
-                    <p style='margin: 0; color: #0c5690;'>
-                        🔎 <strong>Investigue por que alguns anos foram melhores que outros</strong> - Analise linha por linha todos os custos e despesas para identificar onde houve aumentos ou reduções que impactaram os resultados.
-                    </p>
-                </div>
-                """, unsafe_allow_html=True)
-        
                 if hasattr(st.session_state, 'flexible_data') and st.session_state.flexible_data is not None:
-                    flexible_data = st.session_state.flexible_data
+                    # Use the new micro analysis tab implementation
+                    render_micro_analysis_tab(st.session_state.flexible_data)
+                else:
+                    st.info("👆 Carregue arquivos na aba 'Upload' primeiro.")
+
+        # Tab 3/4: AI Insights
+        tab_ai = tab4 if use_flexible_extractor else tab3
+        with tab_ai:
+            st.header("🤖 Insights com Gemini AI")
+    
+            # Load extracted data from database if not in session state
+            if not hasattr(st.session_state, 'extracted_data') or not st.session_state.extracted_data:
+                st.session_state.extracted_data = db.load_all_financial_data()
+    
+            if hasattr(st.session_state, 'processed_data') and st.session_state.processed_data is not None and gemini_api_key:
+                if st.button("🤖 Generate AI Business Insights", type="primary"):
+                    with st.spinner("Analyzing data with AI... Please wait..."):
+                        try:
+                            # Configure Gemini
+                            genai.configure(api_key=gemini_api_key)
+                            model = genai.GenerativeModel('gemini-1.5-flash')
                     
-                    # Process detailed monthly data
-                    if 'detailed_monthly_data' not in st.session_state:
-                        st.session_state.detailed_monthly_data = process_detailed_monthly_data(flexible_data)
-                    
-                    detailed_data = st.session_state.detailed_monthly_data
-                    
-                    if detailed_data and detailed_data['line_items']:
-                        # Get current year for default filter
-                        # Ensure years are strings for consistency
-                        years = sorted([str(y) for y in flexible_data.keys()])
-                        current_year = years[-1] if years else None
-                        
-                        # Initialize session state for filters if not exists
-                        if 'details_year_filter' not in st.session_state:
-                            st.session_state.details_year_filter = [current_year] if current_year else []
-                        if 'details_month_filter' not in st.session_state:
-                            st.session_state.details_month_filter = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 
-                                                                    'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ']
-                        if 'details_search_term' not in st.session_state:
-                            st.session_state.details_search_term = ""
-                        
-                        # Calculate all_items early for use in filters
-                        all_items = [item for item in detailed_data['line_items'] if item['categoria'] != 'revenue']
-                        
-                        # FILTERS SECTION - Moved to top for better UX
-                        st.markdown("### 🔍 Filtros")
-                        
-                        # Time period quick filters
-                        st.markdown("##### ⏱️ Período Rápido")
-                        time_cols = st.columns(6)
-                        
-                        # Get current year for calculations
-                        from datetime import datetime
-                        today = datetime.now()
-                        current_year_int = today.year
-                        current_month = today.month
-                        
-                        with time_cols[0]:
-                            if st.button("Este Ano", key="details_this_year", use_container_width=True):
-                                current_year_str = str(current_year_int)
-                                if current_year_str in years:
-                                    st.session_state.details_year_filter = [current_year_str]
-                                elif years:  # If current year not in data, use most recent
-                                    st.session_state.details_year_filter = [years[-1]]
-                                st.session_state.details_month_filter = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 
-                                                                       'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ']
-                                st.rerun()
+                            # Prepare data for analysis
+                            df = st.session_state.processed_data.get('consolidated', pd.DataFrame())
+                            if not isinstance(df, pd.DataFrame):
+                                df = pd.DataFrame()
+                            summary = st.session_state.processed_data.get('summary', {})
+                            
+                            # Include flexible data insights
                         
                         with time_cols[1]:
                             if st.button("Ano Passado", key="details_last_year", use_container_width=True):
