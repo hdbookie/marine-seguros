@@ -306,7 +306,15 @@ class DatabaseManager:
                         import pandas as pd
                         import numpy as np
                         
-                        if isinstance(obj, (datetime.datetime, datetime.date, pd.Timestamp)):
+                        if isinstance(obj, pd.DataFrame):
+                            # Properly serialize DataFrame
+                            return {
+                                '__dataframe__': True,
+                                'data': obj.to_dict('records'),
+                                'columns': list(obj.columns),
+                                'dtypes': {col: str(dtype) for col, dtype in obj.dtypes.items()}
+                            }
+                        elif isinstance(obj, (datetime.datetime, datetime.date, pd.Timestamp)):
                             return obj.isoformat()
                         elif hasattr(obj, 'isoformat'):
                             return obj.isoformat()
@@ -318,6 +326,12 @@ class DatabaseManager:
                             return None
                         elif isinstance(obj, (set, frozenset)):
                             return list(obj)
+                        elif isinstance(obj, list):
+                            # Properly serialize lists
+                            return [force_serialize(item) for item in obj]
+                        elif isinstance(obj, dict):
+                            # Properly serialize dicts
+                            return {k: force_serialize(v) for k, v in obj.items()}
                         else:
                             return str(obj)
                     
@@ -357,8 +371,13 @@ class DatabaseManager:
                         if isinstance(value, dict):
                             if value.get('__dataframe__') == True:
                                 # This was a DataFrame, reconstruct it
-                                df = pd.DataFrame(value['data'], columns=value['columns'])
-                                return df
+                                try:
+                                    df = pd.DataFrame(value['data'], columns=value['columns'])
+                                    return df
+                                except Exception as e:
+                                    print(f"Error reconstructing DataFrame: {e}")
+                                    # Return None or empty DataFrame instead of corrupted data
+                                    return pd.DataFrame()
                             else:
                                 # Recursively handle nested dictionaries
                                 return {k: deserialize_value(v) for k, v in value.items()}
@@ -366,6 +385,21 @@ class DatabaseManager:
                             # Handle lists
                             return [deserialize_value(item) for item in value]
                         else:
+                            # If value is a string that looks like it was a DataFrame converted to string
+                            if isinstance(value, str) and value.startswith('<') and 'DataFrame' in value:
+                                print(f"Warning: Found DataFrame that was converted to string during serialization")
+                                # Return empty DataFrame instead of the string
+                                return pd.DataFrame()
+                            # If value is a string that looks like it was a list converted to string
+                            elif isinstance(value, str) and value.startswith('[{') and value.endswith('}]'):
+                                print(f"Warning: Found list that was converted to string during serialization")
+                                try:
+                                    # Try to parse it back to a list
+                                    import ast
+                                    return ast.literal_eval(value)
+                                except:
+                                    # If parsing fails, return empty list
+                                    return []
                             return value
                     
                     reconstructed_data = deserialize_value(data)

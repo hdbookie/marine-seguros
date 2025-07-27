@@ -2593,48 +2593,6 @@ else:
                         st.plotly_chart(fig_cost_structure, use_container_width=True)
             
             
-                    # Add cost analysis metrics below the chart with clearer descriptions
-                    st.markdown("### 📊 Análise de Custos - Período Mais Recente")
-            
-                    col1, col2, col3, col4 = st.columns(4)
-            
-                    latest_year = display_df.iloc[-1]
-                    latest_period = latest_year.get('period', latest_year.get(x_col, 'Último período'))
-            
-                    with col1:
-                        st.metric(
-                            "💵 Custo Total",
-                            format_currency(latest_year['total_costs']),
-                            f"↑ {latest_year['cost_percentage']:.1f}% da receita",
-                            help=f"Soma de todos os custos (variáveis + fixos) em {latest_period}"
-                        )
-            
-                    with col2:
-                        variable_pct = (latest_year['variable_costs'] / latest_year['total_costs'] * 100) if latest_year['total_costs'] > 0 else 0
-                        st.metric(
-                            "📊 Custos Variáveis",
-                            f"{variable_pct:.1f}%",
-                            "↑ do total de custos",
-                            help=f"Proporção dos custos variáveis em relação ao custo total em {latest_period}"
-                        )
-            
-                    with col3:
-                        fixed_pct = (latest_year['fixed_costs'] / latest_year['total_costs'] * 100) if latest_year['total_costs'] > 0 else 0
-                        st.metric(
-                            "🏢 Custos Fixos",
-                            f"{fixed_pct:.1f}%",
-                            "↑ do total de custos",
-                            help=f"Proporção dos custos fixos em relação ao custo total em {latest_period}"
-                        )
-            
-                    with col4:
-                        avg_margin = display_df['profit_margin'].mean() if 'profit_margin' in display_df.columns else 0
-                        st.metric(
-                            "📈 Margem de Lucro Média",
-                            f"{avg_margin:.2f}%",
-                            "↑ período selecionado",
-                            help=f"Margem de lucro média considerando todo o período analisado"
-                        )
         
                 # Anomalies
                 if show_anomalies and data.get('anomalies'):

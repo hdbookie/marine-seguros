@@ -73,37 +73,36 @@ def process_detailed_monthly_data(flexible_data: Dict) -> Optional[Dict]:
             # Additional check: Skip if label is a known header or calculation
             label_upper = label.upper().strip()
             skip_patterns = [
-                'FATURAMENTO', 'CUSTOS VARIÁVEIS', 'CUSTOS FIXOS', 
-                'CUSTOS NÃO OPERACIONAIS', 'MARGEM DE CONTRIBUIÇÃO',
+                'MARGEM DE CONTRIBUIÇÃO', 'MARGEM DE LUCRO',
                 'RESULTADO', 'PONTO EQUILIBRIO', 'PONTO EQUILÍBRIO',
-                'LUCRO', 'LUCRO LÍQUIDO', 'MARGEM DE LUCRO', 'TOTAL DESPESAS',
-                'COMPOSIÇÃO DE SALDOS', 'APLICAÇÕES', 'RETIRADA',
-                'DESPESAS - TOTAL', 'CUSTO FIXO + VARIAVEL',
-                'CUSTOS FIXOS + VARIÁVEIS', 'CUSTOS VARIÁVEIS + FIXOS',
-                'CUSTOS FIXOS + VARIÁVEIS + NÃO OPERACIONAIS',
+                'LUCRO LÍQUIDO', 'COMPOSIÇÃO DE SALDOS', 'APLICAÇÕES', 
+                'RETIRADA EXCEDENTE', 'DESPESAS - TOTAL', 
+                'CUSTO FIXO + VARIAVEL', 'CUSTOS FIXOS + VARIÁVEIS', 
+                'CUSTOS VARIÁVEIS + FIXOS', 'CUSTOS FIXOS + VARIÁVEIS + NÃO OPERACIONAIS',
                 'TOTAL CUSTOS', 'CUSTO TOTAL', 'TOTAL GERAL',
                 'DESPESA TOTAL', 'TOTAL DE CUSTOS', 'TOTAL DE DESPESAS',
-                'SUBTOTAL', 'SUB TOTAL', 'SUB-TOTAL'
+                'SUBTOTAL', 'SUB TOTAL', 'SUB-TOTAL', 'RECEITA'
             ]
-            if any(pattern in label_upper for pattern in skip_patterns):
+            # Only skip if it's an exact match to avoid filtering items that contain these words
+            if label_upper in skip_patterns:
                 continue
             
             # Skip if label contains mathematical operators (likely a calculation)
-            if any(op in label for op in ['+', '=', ' - ', '(', ')']):
-                continue
+            # But don't skip items that start with " - " as those are sub-items
+            if not label.strip().startswith('-'):
+                if any(op in label for op in ['+', '=', '(', ')']):
+                    continue
             
             # Skip if it's ALL CAPS (likely a header) but not a known abbreviation
+            # Also check if it has a value - if it does, it's probably a legitimate expense
             exceptions = ['IRRF', 'INSS', 'FGTS', 'IPTU', 'IPVA', 'ISS', 'PIS', 'COFINS']
             if label_upper == label.strip() and len(label.strip()) > 3 and label_upper not in exceptions:
-                continue
-            
-            # Skip if annual value is suspiciously high (likely a total/sum)
-            # Most individual expense line items should be under 500k annually
-            if annual_value > 500000:
-                # Only allow high-value items if they're clearly individual expenses
-                allowed_high_value = ['salário', 'folha', 'aluguel', 'energia', 'comissão']
-                if not any(term in label.lower() for term in allowed_high_value):
+                # But keep it if it has a substantial annual value (likely a real expense category)
+                if annual_value < 1000:  # Only skip if it's a header with no/minimal value
                     continue
+            
+            # Don't skip items based on value - many legitimate expenses exceed 500k
+            # Examples: Funcionários (796k), Pro Labore (119k), etc.
             
             detailed_data['summary']['total_categories'].add(category)
             detailed_data['summary']['total_items'] += 1

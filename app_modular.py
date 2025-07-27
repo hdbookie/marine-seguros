@@ -7,6 +7,8 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import os
+import json
+import sqlite3
 from datetime import datetime
 import warnings
 warnings.filterwarnings('ignore')
@@ -213,6 +215,19 @@ def render_upload_tab():
     """Render the upload tab"""
     st.header("📁 Upload de Arquivos")
     
+    # Clear cache button
+    col1, col2 = st.columns([4, 1])
+    with col2:
+        if st.button("🗑️ Limpar Cache", help="Limpar todos os dados em cache"):
+            # Clear all session state related to data
+            keys_to_clear = ['processed_data', 'monthly_data', 'flexible_data', 
+                           'extracted_data', 'detailed_monthly_data']
+            for key in keys_to_clear:
+                if key in st.session_state:
+                    del st.session_state[key]
+            st.success("Cache limpo!")
+            st.rerun()
+    
     # File uploader
     uploaded_files = st.file_uploader(
         "Selecione os arquivos Excel com dados financeiros",
@@ -264,6 +279,10 @@ def process_uploaded_files(uploaded_files):
                 
                 st.session_state.extracted_data = extracted_data
                 
+                # Save extracted data to database using DatabaseManager
+                for year, year_data in extracted_data.items():
+                    db.save_financial_data(year, year_data)
+                
                 # Process with flexible data
                 consolidated_df, flexible_data = processor.consolidate_all_years_flexible(excel_data)
                 st.session_state.flexible_data = flexible_data
@@ -271,6 +290,10 @@ def process_uploaded_files(uploaded_files):
                 # Use standard processor
                 consolidated_df, extracted_data = processor.consolidate_all_years(excel_data)
                 st.session_state.extracted_data = extracted_data
+                
+                # Save to database
+                for year, year_data in extracted_data.items():
+                    db.save_financial_data(year, year_data)
             
             # Store processed data
             st.session_state.processed_data = {
