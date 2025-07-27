@@ -247,3 +247,131 @@ def _find_subcategory(category, description):
         return list(EXPENSE_SUBCATEGORIES[category].keys())[0]
     
     return 'general'
+
+
+def get_expense_subcategories():
+    """Define detailed expense subcategories for better organization"""
+    return {
+        'pessoal': {
+            'name': '👥 Pessoal',
+            'subcategories': {
+                'salarios': {
+                    'name': 'Salários e Ordenados',
+                    'patterns': ['salario', 'salário', 'ordenado', 'remuneracao', 'remuneração', 'folha de pagamento', 'holerite']
+                },
+                'beneficios': {
+                    'name': 'Benefícios',
+                    'patterns': ['vale transporte', 'vale-transporte', 'vt', 'vale refeicao', 'vale refeição', 'vale alimentacao', 'vale alimentação', 'va', 'vr']
+                },
+                'encargos': {
+                    'name': 'Encargos Sociais',
+                    'patterns': ['inss', 'fgts', 'encargo', 'previdencia', 'previdência', 'contribuicao social', 'contribuição social']
+                },
+                'provisoes': {
+                    'name': 'Provisões',
+                    'patterns': ['ferias', 'férias', '13o', '13º', 'decimo terceiro', 'décimo terceiro', 'provisao', 'provisão']
+                }
+            }
+        },
+        'ocupacao': {
+            'name': '🏢 Ocupação e Utilidades',
+            'subcategories': {
+                'aluguel': {
+                    'name': 'Aluguel e Condomínio',
+                    'patterns': ['aluguel', 'locacao', 'locação', 'condominio', 'condomínio', 'iptu', 'taxa condominial']
+                },
+                'energia': {
+                    'name': 'Energia Elétrica',
+                    'patterns': ['energia', 'eletrica', 'elétrica', 'luz', 'cemig', 'light', 'cpfl', 'coelba', 'celesc']
+                },
+                'agua': {
+                    'name': 'Água e Esgoto',
+                    'patterns': ['agua', 'água', 'esgoto', 'saneamento', 'sabesp', 'copasa', 'cedae', 'cagece']
+                },
+                'telecom': {
+                    'name': 'Telecomunicações',
+                    'patterns': ['telefone', 'internet', 'telefonia', 'celular', 'vivo', 'claro', 'tim', 'oi', 'net']
+                }
+            }
+        },
+        'servicos': {
+            'name': '💼 Serviços Profissionais',
+            'subcategories': {
+                'contabilidade': {
+                    'name': 'Contabilidade',
+                    'patterns': ['contabilidade', 'contador', 'contabil', 'contábil', 'escritorio contabil', 'escritório contábil']
+                },
+                'juridico': {
+                    'name': 'Jurídico',
+                    'patterns': ['advocacia', 'advogado', 'juridico', 'jurídico', 'honorario', 'honorário', 'judicial']
+                },
+                'consultoria': {
+                    'name': 'Consultoria',
+                    'patterns': ['consultoria', 'consultor', 'assessoria', 'treinamento', 'capacitacao', 'capacitação']
+                },
+                'ti': {
+                    'name': 'TI e Software',
+                    'patterns': ['software', 'sistema', 'ti', 'informatica', 'informática', 'licenca', 'licença', 'assinatura', 'cloud', 'nuvem']
+                }
+            }
+        },
+        'manutencao': {
+            'name': '🔧 Manutenção e Conservação',
+            'subcategories': {
+                'limpeza': {
+                    'name': 'Limpeza',
+                    'patterns': ['limpeza', 'higienizacao', 'higienização', 'faxina', 'jardinagem', 'conservacao', 'conservação']
+                },
+                'predial': {
+                    'name': 'Manutenção Predial',
+                    'patterns': ['manutencao predial', 'manutenção predial', 'reforma', 'pintura', 'obra', 'reparo', 'conserto']
+                },
+                'equipamentos': {
+                    'name': 'Manutenção de Equipamentos',
+                    'patterns': ['manutencao equipamento', 'manutenção equipamento', 'assistencia tecnica', 'assistência técnica', 'reparo equipamento']
+                }
+            }
+        },
+        'material': {
+            'name': '📦 Material de Consumo',
+            'subcategories': {
+                'escritorio': {
+                    'name': 'Material de Escritório',
+                    'patterns': ['material escritorio', 'material escritório', 'papelaria', 'papel', 'caneta', 'toner', 'cartucho']
+                },
+                'limpeza_material': {
+                    'name': 'Material de Limpeza',
+                    'patterns': ['material limpeza', 'produto limpeza', 'detergente', 'desinfetante', 'papel higienico', 'papel higiênico']
+                },
+                'combustivel': {
+                    'name': 'Combustíveis',
+                    'patterns': ['combustivel', 'combustível', 'gasolina', 'alcool', 'álcool', 'diesel', 'posto', 'abastecimento']
+                }
+            }
+        }
+    }
+
+
+def classify_expense_subcategory(description):
+    """Classify an expense into a subcategory based on its description"""
+    description_lower = description.lower()
+    subcategories = get_expense_subcategories()
+    
+    for main_cat, main_data in subcategories.items():
+        for sub_cat, sub_data in main_data['subcategories'].items():
+            for pattern in sub_data['patterns']:
+                if pattern in description_lower:
+                    return {
+                        'main_category': main_cat,
+                        'main_category_name': main_data['name'],
+                        'subcategory': sub_cat,
+                        'subcategory_name': sub_data['name']
+                    }
+    
+    # Default to uncategorized
+    return {
+        'main_category': 'outros',
+        'main_category_name': '📌 Outros',
+        'subcategory': 'nao_categorizado',
+        'subcategory_name': 'Não Categorizado'
+    }

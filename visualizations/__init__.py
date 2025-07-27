@@ -10,6 +10,14 @@ from .charts import (
     create_sankey_diagram
 )
 
+from .micro_charts import (
+    create_expense_pareto_chart,
+    create_expense_treemap,
+    create_expense_sankey,
+    create_growth_analysis_chart,
+    create_monthly_heatmap
+)
+
 __all__ = [
     'create_revenue_cost_chart',
     'create_margin_evolution_chart',
@@ -17,5 +25,10 @@ __all__ = [
     'create_monthly_trend_chart',
     'create_pareto_chart',
     'create_treemap',
-    'create_sankey_diagram'
+    'create_sankey_diagram',
+    'create_expense_pareto_chart',
+    'create_expense_treemap',
+    'create_expense_sankey',
+    'create_growth_analysis_chart',
+    'create_monthly_heatmap'
 ]
