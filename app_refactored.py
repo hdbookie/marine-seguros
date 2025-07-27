@@ -30,6 +30,7 @@ from ui.tabs.dashboard_legacy_tab import render_dashboard_tab
 from ui.tabs.micro_analysis_tab import render_micro_analysis_tab
 from ui.tabs.ai_insights_legacy_tab import render_ai_insights_tab
 from ui.tabs.ai_chat_legacy_tab import render_ai_chat_tab
+from ui.tabs.auth_management_tab import render_auth_management_tab
 
 # Load environment variables
 load_dotenv()
@@ -115,18 +116,9 @@ with st.sidebar:
         index=0
     )
     
-    # Feature toggles
-    use_flexible_extractor = st.checkbox(
-        "🔍 Advanced Data Extraction",
-        value=True,
-        help="Enable flexible extraction for detailed analysis"
-    )
-    
-    show_anomalies = st.checkbox(
-        "⚠️ Show Anomalies",
-        value=False,
-        help="Highlight unusual patterns in data"
-    )
+    # Feature toggles - Always enabled
+    use_flexible_extractor = True
+    show_anomalies = True
     
     # About section
     st.markdown("---")
@@ -163,25 +155,16 @@ if data_loaded and hasattr(st.session_state, 'extracted_data') and st.session_st
 initialize_session_state(db, data_loaded)
 
 # Main content - Tabs
-if use_flexible_extractor:
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-        "📁 Upload", 
-        "📊 Dashboard Macro", 
-        "🔬 Análise Micro", 
-        "🤖 AI Insights", 
-        "💬 AI Chat",
-        "📈 Previsões", 
-        "⚡ Integração"
-    ])
-else:
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-        "📁 Upload", 
-        "📊 Dashboard", 
-        "🤖 AI Insights", 
-        "💬 AI Chat",
-        "📈 Previsões", 
-        "⚡ Integração"
-    ])
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+    "📁 Upload", 
+    "📊 Dashboard Macro", 
+    "🔬 Análise Micro", 
+    "🤖 AI Insights", 
+    "💬 AI Chat",
+    "🔐 Autenticação",
+    "📈 Previsões", 
+    "⚡ Integração"
+])
 
 # Tab 1: File Upload
 with tab1:
@@ -191,27 +174,27 @@ with tab1:
 with tab2:
     render_dashboard_tab(db, use_flexible_extractor)
 
-# Tab 3: Detailed Breakdown (only for flexible mode)
-if use_flexible_extractor:
-    with tab3:
-        if hasattr(st.session_state, 'flexible_data') and st.session_state.flexible_data is not None:
-            render_micro_analysis_tab(st.session_state.flexible_data)
-        else:
-            st.info("👆 Carregue arquivos na aba 'Upload' primeiro.")
+# Tab 3: Detailed Breakdown
+with tab3:
+    if hasattr(st.session_state, 'flexible_data') and st.session_state.flexible_data is not None:
+        render_micro_analysis_tab(st.session_state.flexible_data)
+    else:
+        st.info("👆 Carregue arquivos na aba 'Upload' primeiro.")
 
-# Tab 3/4: AI Insights
-tab_ai = tab4 if use_flexible_extractor else tab3
-with tab_ai:
+# Tab 4: AI Insights
+with tab4:
     render_ai_insights_tab(db, gemini_api_key, language)
 
-# Tab 4/5: AI Chat
-tab_chat = tab5 if use_flexible_extractor else tab4
-with tab_chat:
+# Tab 5: AI Chat
+with tab5:
     render_ai_chat_tab(gemini_api_key)
 
-# Tab 5/6: Predictions (placeholder)
-tab_predictions = tab6 if use_flexible_extractor else tab5
-with tab_predictions:
+# Tab 6: Authentication Management
+with tab6:
+    render_auth_management_tab()
+
+# Tab 7: Predictions (placeholder)
+with tab7:
     st.header("📈 Previsões Financeiras")
     st.info("🚧 Esta funcionalidade está em desenvolvimento...")
     st.markdown("""
@@ -222,9 +205,8 @@ with tab_predictions:
     - Análise de tendências com ML
     """)
 
-# Tab 6/7: Integration (placeholder)
-tab_integration = tab7 if use_flexible_extractor else tab6
-with tab_integration:
+# Tab 8: Integration (placeholder)
+with tab8:
     st.header("⚡ Integração de Dados")
     st.info("🚧 Esta funcionalidade está em desenvolvimento...")
     st.markdown("""

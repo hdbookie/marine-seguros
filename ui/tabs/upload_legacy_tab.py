@@ -149,13 +149,10 @@ def render_upload_tab(db, use_flexible_extractor, show_anomalies):
                 # Always use standard extractor for macro data (Dashboard graphs)
                 consolidated_df, extracted_financial_data = processor.consolidate_all_years(excel_data)
                 
-                # Additionally use flexible extractor for detailed analysis if enabled
-                if use_flexible_extractor:
-                    # Use flexible extractor for dynamic categories in detailed analysis
-                    _, flexible_data = processor.consolidate_all_years_flexible(excel_data)
-                    st.session_state.flexible_data = flexible_data
-                else:
-                    st.session_state.flexible_data = None
+                # Always use flexible extractor for detailed analysis
+                # Use flexible extractor for dynamic categories in detailed analysis
+                _, flexible_data = processor.consolidate_all_years_flexible(excel_data)
+                st.session_state.flexible_data = flexible_data
         
                 # Check if data extraction was successful
                 if consolidated_df.empty:
@@ -203,7 +200,8 @@ def render_upload_tab(db, use_flexible_extractor, show_anomalies):
                         import traceback
                         traceback.print_exc()
             
-                    if use_flexible_extractor and flexible_data:
+                    # Always show flexible extractor results
+                    if flexible_data:
                         # Show summary of detected categories
                         all_categories = set()
                         for year_data in flexible_data.values():
@@ -221,8 +219,3 @@ def render_upload_tab(db, use_flexible_extractor, show_anomalies):
                             for idx, category in enumerate(sorted(all_categories)):
                                 col_idx = idx % 3
                                 cols[col_idx].write(f"{get_category_icon(category)} {get_category_name(category)}")
-                    else:
-                        st.success(f"✅ Dados processados com sucesso! {len(consolidated_df)} anos encontrados.")
-                        if save_success:
-                            st.success("💾 Dados salvos no banco de dados!")
-                        st.info("💡 Os dados foram atualizados com as correções mais recentes para margens de lucro.")
