@@ -12,7 +12,7 @@ from utils.legacy_helpers import (
 )
 
 
-def render_upload_tab(db, use_flexible_extractor, show_anomalies):
+def render_upload_tab(db, use_unified_extractor=True, show_anomalies=True):
     """Render the upload tab with file management and processing"""
     
     st.header("📊 Gerenciamento de Dados Financeiros")
@@ -130,7 +130,7 @@ def render_upload_tab(db, use_flexible_extractor, show_anomalies):
 
         if st.button("Analisar Dados Financeiros", type="primary", use_container_width=True):
             # Clear old data before processing
-            keys_to_clear = ['processed_data', 'extracted_data', 'monthly_data', 'financial_data', 'gemini_insights', 'flexible_data']
+            keys_to_clear = ['processed_data', 'extracted_data', 'monthly_data', 'financial_data', 'gemini_insights', 'unified_data']
             for key in keys_to_clear:
                 if key in st.session_state:
                     del st.session_state[key]
@@ -146,13 +146,11 @@ def render_upload_tab(db, use_flexible_extractor, show_anomalies):
                 # Load Excel files
                 excel_data = processor.load_excel_files(file_paths)
         
-                # Always use standard extractor for macro data (Dashboard graphs)
-                consolidated_df, extracted_financial_data = processor.consolidate_all_years(excel_data)
+                # Use unified extractor for all data
+                consolidated_df, unified_data = processor.consolidate_all_years(excel_data)
                 
-                # Always use flexible extractor for detailed analysis
-                # Use flexible extractor for dynamic categories in detailed analysis
-                _, flexible_data = processor.consolidate_all_years_flexible(excel_data)
-                st.session_state.flexible_data = flexible_data
+                # Store unified data for both dashboard and micro analysis
+                st.session_state.unified_data = unified_data
         
                 # Check if data extraction was successful
                 if consolidated_df.empty:
@@ -171,14 +169,17 @@ def render_upload_tab(db, use_flexible_extractor, show_anomalies):
                     # Get monthly data
                     monthly_df = processor.get_monthly_data(excel_data)
             
-                    # Store in session state - always use standard extracted data for macro graphs
+                    # Store in session state - use unified data
                     st.session_state.processed_data = {
-                        'raw_data': extracted_financial_data,  # Always use standard data for consistency
+                        'raw_data': unified_data,  # Unified data has both core metrics and line items
                         'consolidated': consolidated_df,
                         'summary': processor.get_financial_summary(consolidated_df),
                         'anomalies': processor.detect_anomalies(consolidated_df) if show_anomalies else []
                     }
                     st.session_state.monthly_data = monthly_df
+                    
+                    # Store extracted_data for compatibility
+                    st.session_state.extracted_data = unified_data
             
                     # Sync to extracted_data format and save to database
                     sync_processed_to_extracted()
@@ -200,18 +201,19 @@ def render_upload_tab(db, use_flexible_extractor, show_anomalies):
                         import traceback
                         traceback.print_exc()
             
-                    # Always show flexible extractor results
-                    if flexible_data:
+                    # Show unified data results
+                    if unified_data:
                         # Show summary of detected categories
                         all_categories = set()
-                        for year_data in flexible_data.values():
-                            all_categories.update(year_data['categories'].keys())
+                        for year_data in unified_data.values():
+                            if 'categories' in year_data:
+                                all_categories.update(year_data['categories'].keys())
                 
                         st.success(f"✅ Dados processados com sucesso!")
                         if save_success:
                             st.success("💾 Dados salvos no banco de dados!")
                         st.info(f"📊 {len(consolidated_df)} anos encontrados | "
-                               f"📁 {len(all_categories)} categorias detectadas automaticamente")
+                               f"📁 {len(all_categories)} categorias detectadas")
                 
                         # Show detected categories
                         with st.expander("Categorias Detectadas"):

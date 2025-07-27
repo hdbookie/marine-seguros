@@ -169,16 +169,19 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
 
 # Tab 1: File Upload
 with tab1:
-    render_upload_tab(db, use_flexible_extractor, show_anomalies)
+    render_upload_tab(db, use_unified_extractor=True, show_anomalies=show_anomalies)
 
 # Tab 2: Dashboard
 with tab2:
-    render_dashboard_tab(db, use_flexible_extractor)
+    render_dashboard_tab(db, use_unified_extractor=True)
 
 # Tab 3: Detailed Breakdown
 with tab3:
-    if hasattr(st.session_state, 'flexible_data') and st.session_state.flexible_data is not None:
-        render_micro_analysis_tab(st.session_state.flexible_data)
+    if hasattr(st.session_state, 'unified_data') and st.session_state.unified_data is not None:
+        render_micro_analysis_tab(st.session_state.unified_data)
+    elif hasattr(st.session_state, 'extracted_data') and st.session_state.extracted_data is not None:
+        # Fallback for backward compatibility
+        render_micro_analysis_tab(st.session_state.extracted_data)
     else:
         st.info("👆 Carregue arquivos na aba 'Upload' primeiro.")
 

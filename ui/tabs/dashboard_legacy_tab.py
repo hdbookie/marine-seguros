@@ -21,7 +21,7 @@ from utils.legacy_helpers import (
 from ui.tabs.micro_analysis_tab import render_micro_analysis_tab
 
 
-def render_dashboard_tab(db, use_flexible_extractor):
+def render_dashboard_tab(db, use_unified_extractor=True):
     """Render the dashboard tab with financial visualizations"""
     
     st.header("Dashboard Financeiro")
@@ -298,7 +298,7 @@ def render_dashboard_tab(db, use_flexible_extractor):
                 with col2:
                     if st.button("🔄 Atualizar Dados", help="Limpar cache e reprocessar dados", key="refresh_button"):
                         # Clear all cached data
-                        keys_to_clear = ['processed_data', 'extracted_data', 'monthly_data', 'financial_data', 'gemini_insights', 'flexible_data']
+                        keys_to_clear = ['processed_data', 'extracted_data', 'monthly_data', 'financial_data', 'gemini_insights', 'unified_data']
                         for key in keys_to_clear:
                             if key in st.session_state:
                                 del st.session_state[key]
@@ -615,11 +615,11 @@ def render_dashboard_tab(db, use_flexible_extractor):
             )
 
         with col4:
-            if hasattr(st.session_state, 'flexible_data') and st.session_state.flexible_data:
+            if hasattr(st.session_state, 'unified_data') and st.session_state.unified_data:
                 total_items = sum(
-                    len(year_data['line_items']) 
-                    for year_data in st.session_state.flexible_data.values()
-                ) / len(st.session_state.flexible_data)
+                    len(year_data.get('line_items', {})) 
+                    for year_data in st.session_state.unified_data.values()
+                ) / len(st.session_state.unified_data)
                 st.metric(
                     "Linhas de Dados",
                     f"{int(total_items)}",

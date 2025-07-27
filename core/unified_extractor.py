@@ -5,19 +5,23 @@ import re
 
 
 class UnifiedFinancialExtractor:
-    """Unified extractor that combines the best of both DirectDataExtractor and FlexibleFinancialExtractor"""
+    """
+    Unified extractor that combines DirectDataExtractor and FlexibleFinancialExtractor.
+    Extracts both core financial metrics and detailed line items in a single pass.
+    """
     
     def __init__(self):
-        # Core financial patterns for dashboard metrics
-        self.core_patterns = {
-            'revenue': ['FATURAMENTO', 'RECEITA', 'VENDAS', 'REVENUE'],
-            'variable_costs': ['CUSTOS VARIÁVEIS', 'CUSTO VARIÁVEL', 'CMV', 'CUSTO DA MERCADORIA'],
-            'fixed_costs': ['CUSTOS FIXOS', 'CUSTO FIXO'],
-            'profits': ['RESULTADO', 'LUCRO', 'PREJUÍZO'],
-            'margins': ['MARGEM DE LUCRO', 'MARGEM BRUTA']
+        # Core financial line identifiers (for dashboard metrics)
+        self.core_metrics = {
+            'revenue': 'FATURAMENTO',
+            'variable_costs': 'CUSTOS VARIÁVEIS',
+            'fixed_costs': 'CUSTOS FIXOS',
+            'resultado': 'RESULTADO',
+            'profit_margin': 'MARGEM DE LUCRO',
+            'contribution_margin': 'MARGEM DE CONTRIBUIÇÃO'
         }
         
-        # Extended category patterns for detailed analysis
+        # Category patterns for line item classification
         self.category_patterns = {
             'revenue': ['FATURAMENTO', 'RECEITA', 'VENDAS', 'REVENUE'],
             'variable_costs': ['CUSTOS VARIÁVEIS', 'CUSTO VARIÁVEL', 'CMV', 'CUSTO DA MERCADORIA'],
@@ -31,55 +35,90 @@ class UnifiedFinancialExtractor:
             'margins': ['MARGEM', 'MARGIN', '%']
         }
         
-        # Calculation/subtotal patterns to exclude from line items
+        # Patterns to exclude from line items (calculations/subtotals)
         self.calculation_patterns = [
             'TOTAL', 'SUBTOTAL', 'SOMA', 'PONTO EQUILIBRIO', 'PONTO EQUILÍBRIO',
             'APLICAÇÕES', 'RETIRADA', 'COMPOSIÇÃO', 'SALDOS',
             'EXCLUINDO', 'DESPESAS - TOTAL', 'CUSTO FIXO + VARIAVEL',
             'CUSTOS FIXOS + VARIÁVEIS', 'CUSTOS VARIÁVEIS + FIXOS',
             'TOTAL CUSTOS', 'CUSTO TOTAL', 'TOTAL GERAL',
-            'DESPESA TOTAL', 'TOTAL DE CUSTOS', 'TOTAL DE DESPESAS'
+            'DESPESA TOTAL', 'TOTAL DE CUSTOS', 'TOTAL DE DESPESAS',
+            'DEMONSTRATIVO DE RESULTADO', 'DRE'
         ]
     
-    def extract_from_excel(self, file_path: str, mode: str = 'unified') -> Dict[int, Dict]:
+    def extract_from_excel(self, file_path: str) -> Dict[int, Dict]:
         """
-        Extract financial data from Excel file
-        
-        Args:
-            file_path: Path to Excel file
-            mode: 'unified' (default), 'dashboard' (core metrics only), or 'detailed' (all line items)
-        
-        Returns:
-            Dictionary with extracted data by year
+        Extract financial data from Excel file.
+        Returns a unified data structure with both core metrics and line items.
         """
         extracted_data = {}
         
         try:
             excel_file = pd.ExcelFile(file_path)
             
+            # First pass: collect all potential year sheets
+            year_sheets = {}
+            
             for sheet_name in excel_file.sheet_names:
                 year = self._identify_year(sheet_name, file_path)
                 if not year:
                     continue
                 
-                print(f"\n{'='*50}")
-                print(f"Processing sheet: {sheet_name} (Year: {year})")
-                print(f"{'='*50}")
+                if year not in year_sheets:
+                    year_sheets[year] = []
+                year_sheets[year].append(sheet_name)
+            
+            # Second pass: process sheets with priority (Resultado > specific year > Previsão)
+            for year, sheets in year_sheets.items():
+                # Sort sheets by priority
+                def sheet_priority(sheet_name):
+                    sheet_lower = sheet_name.lower()
+                    if 'resultado' in sheet_lower and 'previsão' not in sheet_lower:
+                        return 0  # Highest priority - actual results
+                    elif sheet_name.isdigit():
+                        return 1  # Medium priority - year sheets
+                    elif 'previsão' in sheet_lower:
+                        return 2  # Lower priority - forecasts
+                    else:
+                        return 3  # Lowest priority
                 
-                df = pd.read_excel(file_path, sheet_name=sheet_name)
+                sorted_sheets = sorted(sheets, key=sheet_priority)
                 
-                # Extract data based on mode
-                if mode == 'dashboard':
-                    financial_data = self._extract_core_metrics(df, year)
-                elif mode == 'detailed':
-                    financial_data = self._extract_all_line_items(df, year)
-                else:  # unified mode
+                # Process sheets in priority order, use first successful extraction
+                for sheet_name in sorted_sheets:
+                    print(f"\n{'='*50}")
+                    print(f"Processing sheet: {sheet_name} (Year: {year})")
+                    print(f"{'='*50}")
+                    
+                    df = pd.read_excel(file_path, sheet_name=sheet_name)
+                    print(f"Sheet shape: {df.shape}")
+                    
+                    # Extract unified data
                     financial_data = self._extract_unified_data(df, year)
-                
-                if financial_data:
-                    extracted_data[year] = financial_data
-                    print(f"✓ Extracted data for {year}")
-                
+                    
+                    if financial_data:
+                        # Check if we have valid data before adding
+                        has_core_data = (
+                            ('revenue' in financial_data and financial_data['revenue']) or
+                            ('costs' in financial_data and financial_data['costs'])
+                        )
+                        has_line_items = 'line_items' in financial_data and len(financial_data['line_items']) > 0
+                        
+                        if has_core_data or has_line_items:
+                            extracted_data[year] = financial_data
+                            print(f"✓ Extracted data for {year} from sheet '{sheet_name}'")
+                            # Summary of what was extracted
+                            if 'revenue' in financial_data and financial_data['revenue']:
+                                print(f"  Revenue: R$ {financial_data['revenue'].get('ANNUAL', 0):,.2f}")
+                            if 'profits' in financial_data and financial_data['profits']:
+                                print(f"  Profit: R$ {financial_data['profits'].get('ANNUAL', 0):,.2f}")
+                            if 'line_items' in financial_data:
+                                print(f"  Line items: {len(financial_data['line_items'])}")
+                            # Use first successful extraction only
+                            break
+                        else:
+                            print(f"✗ No valid data found for {year} in sheet '{sheet_name}'")
+        
         except Exception as e:
             print(f"Error processing {file_path}: {e}")
             import traceback
@@ -96,14 +135,20 @@ class UnifiedFinancialExtractor:
         # Check for year in sheet name
         year_match = re.search(r'20\d{2}', sheet_name)
         if year_match:
-            return int(year_match.group())
+            year = int(year_match.group())
+            # Skip future years that likely don't have data
+            if year > 2024:
+                print(f"  Skipping future year sheet: {sheet_name}")
+                return None
+            return year
         
-        # Skip non-year sheets
-        skip_terms = ['comparativo', 'gráfico', 'projeç', 'dre', 'dashboard', 'resumo']
+        # Skip non-financial sheets
+        skip_terms = ['comparativo', 'gráfico', 'projeç', 'dre', 'dashboard', 'resumo', 'análise']
         if any(term in sheet_name.lower() for term in skip_terms):
+            print(f"  Skipping non-financial sheet: {sheet_name}")
             return None
         
-        # Check file path for single-year files
+        # For single-year files, check file path
         if '_' not in file_path or not re.search(r'20\d{2}_20\d{2}', file_path):
             year_match = re.search(r'20\d{2}', file_path)
             if year_match:
@@ -112,21 +157,23 @@ class UnifiedFinancialExtractor:
         return None
     
     def _extract_unified_data(self, df: pd.DataFrame, year: int) -> Dict:
-        """Extract both core metrics and detailed line items"""
+        """
+        Extract both core metrics and detailed line items in a single pass.
+        This ensures consistency between dashboard and micro analysis data.
+        """
         data = {
             'year': year,
-            # Core metrics for dashboard
+            # Core metrics (DirectDataExtractor style)
             'revenue': {},
             'costs': {},  # Variable costs
             'fixed_costs': {},
-            'operational_costs': {},  # Same as fixed_costs for compatibility
+            'operational_costs': {},  # Mirror of fixed_costs for compatibility
             'profits': {},
             'margins': {},
-            # Additional metrics
             'contribution_margin': None,
             'gross_profit': None,
             'gross_margin': None,
-            # Detailed line items for micro analysis
+            # Detailed line items (FlexibleFinancialExtractor style)
             'line_items': {},
             'categories': {},
             'monthly_data': {},
@@ -137,7 +184,12 @@ class UnifiedFinancialExtractor:
         month_cols = self._find_month_columns(df)
         annual_col = self._find_annual_column(df)
         
-        print(f"Found {len(month_cols)} month columns and annual column: {annual_col is not None}")
+        print(f"Found {len(month_cols)} month columns")
+        if annual_col is not None:
+            print(f"Found annual column at index {annual_col}: {df.columns[annual_col]}")
+        
+        # Track what we've extracted for core metrics
+        core_extracted = set()
         
         # Process each row
         for idx in range(len(df)):
@@ -145,119 +197,138 @@ class UnifiedFinancialExtractor:
             if not row_label:
                 continue
             
+            label_upper = row_label.upper().strip()
+            
             # Extract row data
             row_data = self._extract_row_data(df, idx, month_cols, annual_col)
             if not row_data['has_data']:
                 continue
             
-            # Check if this is a calculation/subtotal
-            if self._is_calculation_row(row_label):
-                print(f"  Skipping calculation row: {row_label}")
-                continue
+            # Check if this is a calculation/subtotal (skip for line items)
+            is_calculation = self._is_calculation_row(row_label)
             
-            # Normalize label for matching
-            label_upper = row_label.upper().strip()
+            # Debug logging for 2024 specifically
+            if year == 2024 and ('RESULTADO' in label_upper or 'LUCRO' in label_upper or 'MARGEM' in label_upper):
+                print(f"  [2024 DEBUG] Row {idx}: {row_label} = R$ {row_data['annual']:,.2f} (is_calculation: {is_calculation})")
             
-            # Extract core metrics
+            # === CORE METRICS EXTRACTION (Direct style) ===
+            # Extract FATURAMENTO as primary revenue
             if label_upper == 'FATURAMENTO' or (label_upper.startswith('FATURAMENTO') and len(label_upper) < 20):
-                print(f"Found primary revenue: {row_label}")
-                data['revenue'] = row_data['monthly']
+                print(f"Found primary revenue: {row_label} = R$ {row_data['annual']:,.2f}")
+                data['revenue'] = row_data['monthly'].copy()
                 data['revenue']['ANNUAL'] = row_data['annual']
                 data['revenue']['PRIMARY'] = row_data['annual']  # Mark as primary
+                core_extracted.add('revenue')
             
-            elif label_upper.startswith('CUSTOS VARIÁVEIS') or label_upper == 'CUSTOS VARIÁVEIS':
-                print(f"Found variable costs: {row_label}")
-                data['costs'] = row_data['monthly']
+            # Extract CUSTOS VARIÁVEIS
+            elif (label_upper.startswith('CUSTOS VARIÁVEIS') or label_upper == 'CUSTOS VARIÁVEIS') and 'costs' not in core_extracted:
+                print(f"Found variable costs: {row_label} = R$ {row_data['annual']:,.2f}")
+                data['costs'] = row_data['monthly'].copy()
                 data['costs']['ANNUAL'] = row_data['annual']
+                core_extracted.add('costs')
             
-            elif label_upper == 'CUSTOS FIXOS' or label_upper.startswith('CUSTOS FIXOS'):
-                print(f"Found fixed costs: {row_label}")
-                data['fixed_costs'] = row_data['monthly']
+            # Extract CUSTOS FIXOS
+            elif (label_upper == 'CUSTOS FIXOS' or label_upper.startswith('CUSTOS FIXOS')) and 'fixed_costs' not in core_extracted:
+                print(f"Found fixed costs: {row_label} = R$ {row_data['annual']:,.2f}")
+                data['fixed_costs'] = row_data['monthly'].copy()
                 data['fixed_costs']['ANNUAL'] = row_data['annual']
                 # Mirror to operational_costs for compatibility
                 data['operational_costs'] = data['fixed_costs'].copy()
+                core_extracted.add('fixed_costs')
             
-            elif label_upper == 'RESULTADO':
-                print(f"Found RESULTADO: {row_label} = {row_data['annual']:,.2f}")
-                data['profits'] = row_data['monthly']
-                data['profits']['ANNUAL'] = row_data['annual']
+            # Extract RESULTADO (most important - preserve exact Excel value)
+            elif label_upper == 'RESULTADO' and not is_calculation:
+                print(f"Found RESULTADO: {row_label} = R$ {row_data['annual']:,.2f}")
+                # Only store as profits if we haven't already found one (avoid overwriting)
+                if 'profits' not in core_extracted:
+                    data['profits'] = row_data['monthly'].copy()
+                    data['profits']['ANNUAL'] = row_data['annual']
+                    core_extracted.add('profits')
+                    print(f"  Stored as primary profit value")
+                else:
+                    print(f"  Skipping - already have profit data")
             
-            elif 'MARGEM DE LUCRO' in label_upper and 'PONTO' not in label_upper:
+            # Extract profit margin
+            elif 'MARGEM DE LUCRO' in label_upper and 'PONTO' not in label_upper and 'margins' not in core_extracted:
                 print(f"Found profit margin: {row_label}")
                 # Convert to percentage if needed
+                monthly_margins = {}
+                for month, value in row_data['monthly'].items():
+                    if -1 < value < 1:
+                        monthly_margins[month] = value * 100
+                    else:
+                        monthly_margins[month] = value
+                
                 annual_margin = row_data['annual']
                 if -1 < annual_margin < 1:
                     annual_margin *= 100
+                
+                data['margins'] = monthly_margins
                 data['margins']['ANNUAL'] = annual_margin
-                # Process monthly margins
-                for month, value in row_data['monthly'].items():
-                    if -1 < value < 1:
-                        data['margins'][month] = value * 100
-                    else:
-                        data['margins'][month] = value
+                core_extracted.add('margins')
+                print(f"  Stored profit margin: {annual_margin:.2f}%")
             
-            elif 'MARGEM DE CONTRIBUIÇÃO' in label_upper:
-                print(f"Found contribution margin: {row_label}")
+            # Extract contribution margin
+            elif 'MARGEM DE CONTRIBUIÇÃO' in label_upper and not is_calculation:
+                print(f"Found contribution margin: {row_label} = R$ {row_data['annual']:,.2f}")
                 data['contribution_margin'] = row_data['annual']
+                # Check if this value is being confused with profit for 2024
+                if year == 2024 and abs(row_data['annual'] - 893047.13) < 1:
+                    print(f"  WARNING: This contribution margin value matches the wrong profit shown for 2024!")
             
-            # Always store as line item for detailed analysis
-            category = self._classify_line_item(row_label)
-            item_key = self._normalize_key(row_label)
-            
-            data['line_items'][item_key] = {
-                'label': row_label,
-                'category': category,
-                'monthly': row_data['monthly'],
-                'annual': row_data['annual'],
-                'row_index': idx,
-                'is_line_item': True
-            }
-            
-            # Group by category
-            if category not in data['categories']:
-                data['categories'][category] = []
-            data['categories'][category].append(item_key)
-            
-            print(f"  [{category}] {row_label}: R$ {row_data['annual']:,.2f}")
+            # === LINE ITEMS EXTRACTION (Flexible style) ===
+            # Always store as line item for detailed analysis (unless it's a calculation)
+            if not is_calculation:
+                category = self._classify_line_item(row_label)
+                item_key = self._normalize_key(row_label)
+                
+                data['line_items'][item_key] = {
+                    'label': row_label,
+                    'category': category,
+                    'monthly': row_data['monthly'],
+                    'annual': row_data['annual'],
+                    'row_index': idx,
+                    'is_line_item': True
+                }
+                
+                # Group by category
+                if category not in data['categories']:
+                    data['categories'][category] = []
+                data['categories'][category].append(item_key)
+                
+                print(f"  [{category}] {row_label}: R$ {row_data['annual']:,.2f}")
         
-        # Calculate derived metrics if not found
-        if data['revenue'] and data['costs'] and not data['profits']:
-            print("Calculating profits from revenue - costs...")
-            data['profits'] = {}
-            for month in data['revenue']:
-                if month in data['costs']:
-                    data['profits'][month] = data['revenue'][month] - data['costs'][month]
+        # Calculate derived metrics ONLY if not found in Excel
+        if data['revenue'] and data['costs']:
+            # Only calculate profits if we didn't find RESULTADO in Excel
+            if 'profits' not in core_extracted:
+                print("No RESULTADO found, calculating profits from revenue - costs")
+                data['profits'] = {}
+                for month in data['revenue']:
+                    if month in data['costs']:
+                        data['profits'][month] = data['revenue'][month] - data['costs'][month]
+                
+                # Annual profit
+                annual_revenue = data['revenue'].get('ANNUAL', 0)
+                annual_costs = data['costs'].get('ANNUAL', 0)
+                if annual_revenue and annual_costs:
+                    data['profits']['ANNUAL'] = annual_revenue - annual_costs
+            
+            # Only calculate margins if not found
+            if 'margins' not in core_extracted and data['revenue'].get('ANNUAL', 0) > 0:
+                print("No margin found, calculating from profits")
+                data['margins'] = {}
+                for month in data['revenue']:
+                    if month in data['profits'] and data['revenue'][month] > 0:
+                        data['margins'][month] = (data['profits'][month] / data['revenue'][month]) * 100
+                
+                if data['profits'].get('ANNUAL') and data['revenue'].get('ANNUAL'):
+                    data['margins']['ANNUAL'] = (data['profits']['ANNUAL'] / data['revenue']['ANNUAL']) * 100
         
         # Build hierarchy
         data['hierarchy'] = self._build_hierarchy(df, data['line_items'])
         
         return data
-    
-    def _extract_core_metrics(self, df: pd.DataFrame, year: int) -> Dict:
-        """Extract only core financial metrics for dashboard"""
-        # This is a simplified version that only extracts main metrics
-        data = self._extract_unified_data(df, year)
-        
-        # Keep only core metrics
-        core_data = {
-            'year': year,
-            'revenue': data.get('revenue', {}),
-            'costs': data.get('costs', {}),
-            'fixed_costs': data.get('fixed_costs', {}),
-            'operational_costs': data.get('operational_costs', {}),
-            'profits': data.get('profits', {}),
-            'margins': data.get('margins', {}),
-            'contribution_margin': data.get('contribution_margin'),
-            'gross_profit': data.get('gross_profit'),
-            'gross_margin': data.get('gross_margin')
-        }
-        
-        return core_data
-    
-    def _extract_all_line_items(self, df: pd.DataFrame, year: int) -> Dict:
-        """Extract all line items for detailed analysis"""
-        # This uses the full extraction
-        return self._extract_unified_data(df, year)
     
     def _find_month_columns(self, df: pd.DataFrame) -> Dict[str, Any]:
         """Find columns containing month data"""
@@ -275,9 +346,10 @@ class UnifiedFinancialExtractor:
         return month_cols
     
     def _find_annual_column(self, df: pd.DataFrame) -> Optional[int]:
-        """Find column containing annual totals"""
+        """Find column containing annual totals (return index)"""
         for idx, col in enumerate(df.columns):
             col_str = str(col).upper()
+            # Case-insensitive search for annual column
             if any(term in col_str for term in ['ANUAL', 'ANNUAL', 'TOTAL', 'ANO']):
                 return idx
         return None
@@ -337,6 +409,8 @@ class UnifiedFinancialExtractor:
             val_clean = val.replace('R$', '').replace('$', '').strip()
             # Handle Brazilian number format (1.234,56)
             val_clean = val_clean.replace('.', '').replace(',', '.')
+            # Remove percentage sign if present
+            val_clean = val_clean.replace('%', '')
             # Remove any remaining non-numeric characters except . and -
             val_clean = re.sub(r'[^\d.-]', '', val_clean)
             
@@ -396,50 +470,3 @@ class UnifiedFinancialExtractor:
         hierarchy.sort(key=lambda x: x['row_index'])
         
         return hierarchy
-    
-    def consolidate_all_years(self, all_data: Dict) -> pd.DataFrame:
-        """Consolidate data from all years into a summary DataFrame"""
-        consolidated = []
-        
-        for year in sorted(all_data.keys()):
-            year_data = all_data[year]
-            row = {
-                'year': year,
-                'revenue': year_data.get('revenue', {}).get('ANNUAL', 0),
-                'variable_costs': year_data.get('costs', {}).get('ANNUAL', 0),
-                'fixed_costs': year_data.get('fixed_costs', {}).get('ANNUAL', 0),
-                'net_profit': year_data.get('profits', {}).get('ANNUAL', 0),
-                'profit_margin': year_data.get('margins', {}).get('ANNUAL', 0)
-            }
-            
-            # Calculate operational costs (fixed + variable)
-            row['operational_costs'] = row['variable_costs'] + row['fixed_costs']
-            
-            consolidated.append(row)
-        
-        return pd.DataFrame(consolidated)
-    
-    def get_category_summary(self, all_data: Dict) -> Dict:
-        """Get summary by category across all years"""
-        summary = {}
-        
-        for year, year_data in all_data.items():
-            summary[year] = {}
-            
-            # Use line items for detailed categories
-            if 'categories' in year_data:
-                for category, items in year_data['categories'].items():
-                    total = sum(
-                        year_data['line_items'][item]['annual'] 
-                        for item in items
-                    )
-                    summary[year][category] = total
-            else:
-                # Fall back to core metrics
-                summary[year] = {
-                    'revenue': year_data.get('revenue', {}).get('ANNUAL', 0),
-                    'variable_costs': year_data.get('costs', {}).get('ANNUAL', 0),
-                    'fixed_costs': year_data.get('fixed_costs', {}).get('ANNUAL', 0)
-                }
-        
-        return summary
