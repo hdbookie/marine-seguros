@@ -19,6 +19,7 @@ from core.flexible_extractor import FlexibleFinancialExtractor
 # Import modular components
 from utils import format_currency, get_category_name
 from ui.tabs.dashboard_tab import render_dashboard_tab
+from ui.tabs.micro_analysis_tab import render_micro_analysis_tab
 
 # Page configuration
 st.set_page_config(
@@ -152,36 +153,48 @@ def render_main_content():
     
     # Create main tabs
     if st.session_state.use_flexible_extractor:
-        tab1, tab2, tab3, tab4 = st.tabs([
-            "📊 Dashboard",
+        tab1, tab2, tab3, tab4, tab5 = st.tabs([
+            "📊 Dashboard Macro",
+            "🔬 Análise Micro",
             "📁 Upload",
-            "🔍 Detalhes",
-            "🤖 Insights IA"
+            "🤖 Insights IA",
+            "💬 Chat IA"
         ])
     else:
-        tab1, tab2, tab3 = st.tabs([
+        tab1, tab2, tab3, tab4 = st.tabs([
             "📊 Dashboard", 
             "📁 Upload",
-            "🤖 Insights IA"
+            "🤖 Insights IA",
+            "💬 Chat IA"
         ])
     
     # Dashboard Tab
     with tab1:
         render_dashboard_content()
     
+    # Micro Analysis Tab (only for flexible extractor)
+    if st.session_state.use_flexible_extractor:
+        with tab2:
+            render_micro_analysis_content()
+        upload_tab = tab3
+        ai_insights_tab = tab4
+        ai_chat_tab = tab5
+    else:
+        upload_tab = tab2
+        ai_insights_tab = tab3
+        ai_chat_tab = tab4
+    
     # Upload Tab
-    with tab2:
+    with upload_tab:
         render_upload_tab()
     
-    # Details Tab (only for flexible extractor)
-    if st.session_state.use_flexible_extractor:
-        with tab3:
-            render_details_tab()
-    
     # AI Insights Tab
-    ai_tab = tab4 if st.session_state.use_flexible_extractor else tab3
-    with ai_tab:
+    with ai_insights_tab:
         render_ai_insights_tab()
+    
+    # AI Chat Tab
+    with ai_chat_tab:
+        render_ai_chat_tab()
 
 
 def render_dashboard_content():
@@ -283,15 +296,24 @@ def process_uploaded_files(uploaded_files):
         st.error(f"Erro ao processar arquivos: {str(e)}")
 
 
-def render_details_tab():
-    """Render the details tab (placeholder)"""
-    st.header("🔍 Análise Detalhada")
-    st.info("🚧 Esta seção está sendo refatorada...")
+def render_micro_analysis_content():
+    """Render the micro analysis tab content"""
+    if not hasattr(st.session_state, 'flexible_data') or not st.session_state.flexible_data:
+        st.info("📊 Carregue dados usando o extrator flexível para acessar a análise micro.")
+        return
+    
+    render_micro_analysis_tab(st.session_state.flexible_data)
 
 
 def render_ai_insights_tab():
     """Render the AI insights tab (placeholder)"""
     st.header("🤖 Insights com IA")
+    st.info("🚧 Esta seção está sendo refatorada...")
+
+
+def render_ai_chat_tab():
+    """Render the AI chat tab (placeholder)"""
+    st.header("💬 Chat com IA")
     st.info("🚧 Esta seção está sendo refatorada...")
 
 
