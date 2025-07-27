@@ -120,36 +120,35 @@ def render_annual_sankey(flexible_data, selected_years):
             cat = item_data.get('category', 'unknown')
             annual_val = item_data.get('annual', 0)
             
-            if cat == 'fixed_costs':
-                year_fixed_total += annual_val
-            elif cat == 'variable_costs':
+            if cat == 'variable_costs':
                 year_variable_total += annual_val
+            elif cat in ['fixed_costs', 'admin_expenses', 'operational_expenses', 
+                        'marketing_expenses', 'financial_expenses', 'tax_expenses', 
+                        'other_expenses', 'other_costs']:
+                year_fixed_total += annual_val
             else:
                 if cat not in other_categories:
                     other_categories[cat] = 0
                 other_categories[cat] += annual_val
         
-        st.write(f"Debug {year}:")
-        st.write(f"  - Fixed costs: {format_currency(year_fixed_total)}")
-        st.write(f"  - Variable costs: {format_currency(year_variable_total)}")
-        st.write(f"  - Total (Fixed + Variable): {format_currency(year_fixed_total + year_variable_total)}")
-        if other_categories:
-            st.write(f"  - Other categories found (not included): {other_categories}")
         
         for item_key, item_data in line_items.items():
             category = item_data.get('category', '')
             label = item_data.get('label', '')
             annual_value = item_data.get('annual', 0)
             
-            # Only include variable and fixed costs
-            if category == 'fixed_costs':
-                if label not in all_fixed_items:
-                    all_fixed_items[label] = 0
-                all_fixed_items[label] += annual_value
-            elif category == 'variable_costs':
+            # Variable costs go to variable category
+            if category == 'variable_costs':
                 if label not in all_variable_items:
                     all_variable_items[label] = 0
                 all_variable_items[label] += annual_value
+            # All other cost/expense categories go to fixed costs
+            elif category in ['fixed_costs', 'admin_expenses', 'operational_expenses', 
+                            'marketing_expenses', 'financial_expenses', 'tax_expenses', 
+                            'other_expenses', 'other_costs']:
+                if label not in all_fixed_items:
+                    all_fixed_items[label] = 0
+                all_fixed_items[label] += annual_value
     
     # Calculate totals
     fixed_total = sum(all_fixed_items.values())
