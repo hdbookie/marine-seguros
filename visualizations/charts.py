@@ -25,8 +25,8 @@ def create_revenue_cost_chart(df, title="Evolução de Receitas vs Custos"):
     fig.add_trace(go.Bar(
         name='Custos',
         x=df['year'],
-        y=df['variable_costs'],
-        text=[format_currency(v) for v in df['variable_costs']],
+        y=df['variable_costs'] + df['fixed_costs'] + df['operational_costs'],
+        text=[format_currency(v) for v in df['variable_costs'] + df['fixed_costs'] + df['operational_costs']],
         textposition='outside',
         marker_color='rgba(219, 64, 82, 0.7)',
         hovertemplate='<b>Ano:</b> %{x}<br><b>Custos:</b> %{text}<extra></extra>'
@@ -299,4 +299,66 @@ def create_sankey_diagram(source, target, value, title="Fluxo de Despesas"):
         height=600
     )
     
+    return fig
+
+def create_cost_structure_chart(df, title="Estrutura de Custos vs. Receita"):
+    """Create a stacked bar chart showing cost structure against revenue"""
+    fig = go.Figure()
+
+    # Add Fixed Costs
+    fig.add_trace(go.Bar(
+        name='Custos Fixos',
+        x=df['year'],
+        y=df['fixed_costs'],
+        text=[format_currency(v) for v in df['fixed_costs']],
+        textposition='auto',
+        marker_color='rgba(255, 159, 64, 0.7)',
+        hovertemplate='<b>Ano:</b> %{x}<br><b>Custos Fixos:</b> %{text}<extra></extra>'
+    ))
+
+    # Add Variable Costs
+    fig.add_trace(go.Bar(
+        name='Custos Variáveis',
+        x=df['year'],
+        y=df['variable_costs'],
+        text=[format_currency(v) for v in df['variable_costs']],
+        textposition='auto',
+        marker_color='rgba(255, 99, 132, 0.7)',
+        hovertemplate='<b>Ano:</b> %{x}<br><b>Custos Variáveis:</b> %{text}<extra></extra>'
+    ))
+
+    # Add Operational Costs
+    fig.add_trace(go.Bar(
+        name='Outros Custos',
+        x=df['year'],
+        y=df['operational_costs'],
+        text=[format_currency(v) for v in df['operational_costs']],
+        textposition='auto',
+        marker_color='rgba(153, 102, 255, 0.7)',
+        hovertemplate='<b>Ano:</b> %{x}<br><b>Outros Custos:</b> %{text}<extra></extra>'
+    ))
+
+    # Add Revenue as a line on top
+    fig.add_trace(go.Scatter(
+        name='Receita Total',
+        x=df['year'],
+        y=df['revenue'],
+        mode='lines+markers+text',
+        text=[format_currency(v) for v in df['revenue']],
+        textposition='top center',
+        line=dict(color='rgba(54, 162, 235, 1)', width=3),
+        marker=dict(size=10),
+        hovertemplate='<b>Ano:</b> %{x}<br><b>Receita:</b> %{text}<extra></extra>'
+    ))
+
+    fig.update_layout(
+        title=title,
+        xaxis_title='Ano',
+        yaxis_title='Valores (R$)',
+        barmode='stack',
+        template='plotly_white',
+        legend=dict(x=0.01, y=0.99),
+        margin=dict(l=50, r=50, t=80, b=50)
+    )
+
     return fig

@@ -31,7 +31,7 @@ def render_dashboard_tab(db, use_unified_extractor=True):
         
         # Ensure data is a dictionary
         if not isinstance(data, dict):
-            st.error(f"Error: processed_data is not a dictionary, it's a {type(data)}")
+            st.error(f"Erro: processed_data não é um dicionário, é um {type(data)}")
             data = {}
         
         df = data.get('consolidated', pd.DataFrame())
@@ -44,10 +44,10 @@ def render_dashboard_tab(db, use_unified_extractor=True):
                     df = pd.DataFrame(df['data'], columns=df['columns'])
                     st.info("📊 Dados reconstruídos do cache")
                 except:
-                    st.error(f"Error: Could not reconstruct DataFrame from cached data")
+                    st.error(f"Erro: Não foi possível reconstruir DataFrame dos dados em cache")
                     df = pd.DataFrame()
             else:
-                st.error(f"Error: 'consolidated' data is not a DataFrame, it's a {type(df)}")
+                st.error(f"Erro: Dados 'consolidados' não são um DataFrame, é um {type(df)}")
                 # Clear the corrupted data and force reprocessing
                 st.session_state.processed_data = None
                 st.info("🔄 Por favor, clique em 'Analisar Dados' novamente para reprocessar")
@@ -96,14 +96,14 @@ def render_dashboard_tab(db, use_unified_extractor=True):
                     monthly_data = processor.get_monthly_data(excel_data)
             
                     if monthly_data.empty:
-                        st.error("❌ Failed to extract monthly data from Excel files")
+                        st.error("❌ Falha ao extrair dados mensais dos arquivos Excel")
                     else:
-                        st.success(f"✅ Monthly data extracted: {len(monthly_data)} records from {len(excel_data)} files")
-                        st.info(f"Years covered: {sorted(monthly_data['year'].unique()) if 'year' in monthly_data.columns else 'Unknown'}")
+                        st.success(f"✅ Dados mensais extraídos: {len(monthly_data)} registros de {len(excel_data)} arquivos")
+                        st.info(f"Anos cobertos: {sorted(monthly_data['year'].unique()) if 'year' in monthly_data.columns else 'Desconhecido'}")
             
                     st.session_state.monthly_data = monthly_data
                 else:
-                    st.error("❌ No Excel files found for monthly data extraction")
+                    st.error("❌ Nenhum arquivo Excel encontrado para extração de dados mensais")
                     st.session_state.monthly_data = pd.DataFrame()
             
             except Exception as e:
@@ -1349,7 +1349,11 @@ def render_dashboard_tab(db, use_unified_extractor=True):
     
             # Calculate total costs and profit margins
             display_df['total_costs'] = display_df['variable_costs'] + display_df['fixed_costs']
-            display_df['profit'] = display_df['revenue'] - display_df['total_costs']
+            # Use actual net_profit from data instead of calculating
+            if 'net_profit' in display_df.columns:
+                display_df['profit'] = display_df['net_profit']
+            else:
+                display_df['profit'] = display_df['revenue'] - display_df['total_costs']
             display_df['cost_percentage'] = (display_df['total_costs'] / display_df['revenue'] * 100).fillna(0)
     
             # Create stacked bar chart with improved styling
@@ -1627,4 +1631,4 @@ def render_dashboard_tab(db, use_unified_extractor=True):
             st.dataframe(display_df, use_container_width=True)
 
     else:
-        st.info("👆 Please upload files in the 'Upload' tab first.")
+        st.info("👆 Por favor, carregue arquivos na aba 'Upload' primeiro.")

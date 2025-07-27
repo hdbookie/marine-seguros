@@ -2,6 +2,9 @@ import pandas as pd
 import numpy as np
 from typing import Dict, List, Tuple, Any, Optional
 import re
+from core.revenue_extractor import RevenueExtractor
+from core.variable_cost_extractor import VariableCostExtractor
+from core.fixed_cost_extractor import FixedCostExtractor
 
 
 class UnifiedFinancialExtractor:
@@ -45,6 +48,9 @@ class UnifiedFinancialExtractor:
             'DESPESA TOTAL', 'TOTAL DE CUSTOS', 'TOTAL DE DESPESAS',
             'DEMONSTRATIVO DE RESULTADO', 'DRE'
         ]
+        self.revenue_extractor = RevenueExtractor()
+        self.variable_cost_extractor = VariableCostExtractor()
+        self.fixed_cost_extractor = FixedCostExtractor()
     
     def extract_from_excel(self, file_path: str) -> Dict[int, Dict]:
         """
@@ -406,7 +412,7 @@ class UnifiedFinancialExtractor:
         
         if isinstance(val, str):
             # Remove currency symbols and spaces
-            val_clean = val.replace('R$', '').replace('$', '').strip()
+            val_clean = val.replace('R, '').replace(', '').strip()
             # Handle Brazilian number format (1.234,56)
             val_clean = val_clean.replace('.', '').replace(',', '.')
             # Remove percentage sign if present
