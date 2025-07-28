@@ -70,8 +70,12 @@ class AIChatAssistant:
         
         # Show data availability
         if data:
-            years_available = sorted(data.keys())
-            st.info(f"📈 Dados disponíveis: {len(years_available)} anos ({years_available[0]} - {years_available[-1]})")
+            # Filter only numeric years and within reasonable range
+            years_available = sorted([year for year in data.keys() if isinstance(year, (int, float)) and 2015 <= year <= 2030])
+            if years_available:
+                st.info(f"📈 Dados disponíveis: {len(years_available)} anos ({years_available[0]} - {years_available[-1]})")
+            else:
+                st.info("📈 Dados financeiros carregados")
         else:
             st.warning("⚠️ Nenhum dado financeiro disponível")
         

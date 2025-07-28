@@ -220,7 +220,8 @@ def show_user_menu():
             if st.session_state.user['role'] == 'admin':
                 st.divider()
                 if st.button("⚙️ Gerenciar Usuários", use_container_width=True):
-                    st.session_state.show_admin = True
+                    st.session_state.navigate_to_auth = True
+                    st.info("👉 Clique na aba '🔐 Autenticação' acima para gerenciar usuários")
 
 def show_admin_panel():
     """Display admin panel for user management"""

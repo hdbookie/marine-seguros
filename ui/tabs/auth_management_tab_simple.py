@@ -11,6 +11,11 @@ def render_auth_management_tab():
     
     st.header("🔐 Gerenciamento de Autenticação")
     
+    # Check if user navigated here from the button
+    if st.session_state.get('navigate_to_auth', False):
+        st.info("👋 Bem-vindo ao painel de gerenciamento de usuários!")
+        st.session_state.navigate_to_auth = False
+    
     # Check if user is authenticated
     if not hasattr(st.session_state, 'user') or st.session_state.user is None:
         st.warning("Por favor, faça login para acessar esta página.")
