@@ -167,8 +167,15 @@ with st.sidebar:
 # Initialize session state
 initialize_session_state(db, False) # Initialize with data_loaded = False
 
-# Load state from database
+# Always load state from database to ensure data persistence
 data_loaded = db.auto_load_state(st.session_state)
+
+# If no data in session but database has data, force reload
+if not hasattr(st.session_state, 'extracted_data') or not st.session_state.extracted_data:
+    financial_data = db.load_shared_financial_data()
+    if financial_data:
+        st.session_state.extracted_data = financial_data
+        data_loaded = True
 
 # Check if new data is available
 if data_loaded:
@@ -187,14 +194,13 @@ if data_loaded:
 if hasattr(st.session_state, 'extracted_data') and st.session_state.extracted_data:
     st.session_state.processed_data = convert_extracted_to_processed(st.session_state.extracted_data)
 
-    # Generate monthly data from extracted data
-    if not hasattr(st.session_state, 'monthly_data') or st.session_state.monthly_data is None:
-        try:
-            st.session_state.monthly_data = generate_monthly_data_from_extracted(st.session_state.extracted_data)
-        except Exception as e:
-            print(f"Error generating monthly data: {e}")
-            import traceback
-            traceback.print_exc()
+    # Always regenerate monthly data from extracted data to ensure it's up to date
+    try:
+        st.session_state.monthly_data = generate_monthly_data_from_extracted(st.session_state.extracted_data)
+    except Exception as e:
+        print(f"Error generating monthly data: {e}")
+        import traceback
+        traceback.print_exc()
 
 # Main content - Tabs
 tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
