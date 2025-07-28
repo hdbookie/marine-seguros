@@ -109,12 +109,9 @@ def show_register_form():
                         if role == 'admin':
                             st.info("Você é o primeiro usuário e foi designado como administrador.")
                         
-                        # Send welcome email
-                        try:
-                            email_service = EmailService()
-                            email_service.send_welcome_email(email, username)
-                        except Exception as e:
-                            st.warning("Conta criada, mas não foi possível enviar email de boas-vindas. Verifique as configurações de email.")
+                        # Welcome email disabled per user request
+                        # Only password reset emails are sent
+                        pass
                     else:
                         st.error("Erro ao criar conta. Usuário ou email já existe.")
             else:
