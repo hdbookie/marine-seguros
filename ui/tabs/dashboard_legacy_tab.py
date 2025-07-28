@@ -342,7 +342,7 @@ def render_dashboard_tab(db, use_unified_extractor=True):
                 display_df = monthly_df[
                     (monthly_df['year'].isin(selected_years)) &
                     (monthly_df['month_num'].isin(selected_month_nums))
-                ]
+                ].copy()  # Explicit copy to avoid any view issues
                 
                 # Sort by date for chronological order
                 display_df = display_df.sort_values(['year', 'month_num'])
@@ -1241,26 +1241,105 @@ def render_dashboard_tab(db, use_unified_extractor=True):
                 st.plotly_chart(fig_contrib, use_container_width=True)
 
         # 4. Operational Costs - Full width  
-        if not display_df.empty and 'operational_costs' in display_df.columns:
+        if not display_df.empty and ('operational_costs' in display_df.columns or 
+                                     ('fixed_costs' in display_df.columns and 'variable_costs' in display_df.columns)):
             x_col, x_title = prepare_x_axis(display_df, view_type)
             
+            # Debug: Check what columns we have
+            print(f"\n[DEBUG OPERATIONAL COSTS CHART] View type: {view_type}")
+            print(f"[DEBUG OPERATIONAL COSTS CHART] Columns in display_df: {list(display_df.columns)}")
+            print(f"[DEBUG OPERATIONAL COSTS CHART] DataFrame shape: {display_df.shape}")
+            if not display_df.empty:
+                print(f"[DEBUG OPERATIONAL COSTS CHART] Sample row data (last row):")
+                sample = display_df.iloc[-1]
+                for col in ['revenue', 'variable_costs', 'fixed_costs', 'operational_costs', 'costs']:
+                    if col in display_df.columns:
+                        val = sample[col]
+                        if isinstance(val, dict):
+                            print(f"  {col}: {val} (dict)")
+                        else:
+                            print(f"  {col}: {val:,.0f}")
+                    else:
+                        print(f"  {col}: NOT IN DATAFRAME")
+            
             # Calculate percentage of operational costs relative to revenue
-            if 'revenue' in display_df.columns:
-                display_df['op_cost_pct'] = (display_df['operational_costs'] / display_df['revenue'] * 100).fillna(0)
+            if 'revenue' in display_df.columns and 'fixed_costs' in display_df.columns and 'variable_costs' in display_df.columns:
+                display_df['op_cost_pct'] = ((display_df['fixed_costs'] + display_df['variable_costs']) / display_df['revenue'] * 100).fillna(0)
+            elif 'revenue' in display_df.columns:
+                display_df['op_cost_pct'] = (display_df.get('operational_costs', 0) / display_df['revenue'] * 100).fillna(0)
     
+            # Calculate total operational costs as fixed + variable
+            # First ensure all numeric columns contain only numeric values (not dicts)
+            numeric_cols = ['revenue', 'variable_costs', 'fixed_costs', 'operational_costs', 'costs']
+            for col in numeric_cols:
+                if col in display_df.columns:
+                    # Convert any dict values to numbers
+                    display_df[col] = display_df[col].apply(
+                        lambda x: x.get('ANNUAL', 0) if isinstance(x, dict) else x
+                    )
+            
+            # Check for different possible column names
+            var_costs_col = None
+            if 'variable_costs' in display_df.columns:
+                var_costs_col = 'variable_costs'
+            elif 'costs' in display_df.columns:
+                var_costs_col = 'costs'
+            
+            if 'fixed_costs' in display_df.columns and var_costs_col:
+                # Ensure both columns have numeric values
+                display_df['fixed_costs'] = pd.to_numeric(display_df['fixed_costs'], errors='coerce').fillna(0)
+                display_df[var_costs_col] = pd.to_numeric(display_df[var_costs_col], errors='coerce').fillna(0)
+                
+                display_df['total_operational_costs'] = display_df['fixed_costs'] + display_df[var_costs_col]
+                
+                # Debug: Print what we're calculating
+                if not display_df.empty:
+                    sample_row = display_df.iloc[-1]  # Last row
+                    print(f"[CRITICAL DEBUG] Custos Operacionais Calculation:")
+                    print(f"  Fixed costs: {sample_row.get('fixed_costs', 0):,.0f}")
+                    print(f"  Variable costs ({var_costs_col}): {sample_row.get(var_costs_col, 0):,.0f}")
+                    print(f"  Total operational: {sample_row.get('total_operational_costs', 0):,.0f}")
+                    print(f"  First 5 total_operational_costs values: {display_df['total_operational_costs'].head().tolist()}")
+                    print(f"  Last 5 total_operational_costs values: {display_df['total_operational_costs'].tail().tolist()}")
+                    print(f"  Min: {display_df['total_operational_costs'].min():,.0f}, Max: {display_df['total_operational_costs'].max():,.0f}")
+            else:
+                # Fallback to existing operational_costs if columns not available
+                if 'operational_costs' in display_df.columns:
+                    display_df['operational_costs'] = pd.to_numeric(display_df['operational_costs'], errors='coerce').fillna(0)
+                    display_df['total_operational_costs'] = display_df['operational_costs']
+                else:
+                    display_df['total_operational_costs'] = 0
+                print(f"DEBUG: Using fallback operational_costs. Missing required columns.")
+            
+            # Final debug before chart
+            print(f"\n[CHART DEBUG] Creating operational costs chart:")
+            print(f"  Using column: total_operational_costs")
+            print(f"  Data type of column: {display_df['total_operational_costs'].dtype}")
+            print(f"  Sample values: {display_df['total_operational_costs'].head(3).tolist()}")
+            print(f"  Are values numeric? {pd.api.types.is_numeric_dtype(display_df['total_operational_costs'])}")
+            
             fig_op_costs = px.area(
                 display_df,
                 x=x_col,
-                y='operational_costs',
-                title='⚙️ Custos Operacionais',
-                color_discrete_sequence=['#d62728']
+                y='total_operational_costs',
+                title='⚙️ Custos Operacionais (Fixos + Variáveis)',
+                color_discrete_sequence=['#8B4513'],  # Brown color
+                text='total_operational_costs'
             )
             
-            # Update hover template to include percentage
+            # Format text labels
+            fig_op_costs.update_traces(
+                texttemplate='R$ %{text:,.0f}',
+                textposition='top center'
+            )
+            
+            # Update hover template to include percentage and ensure we show the total operational costs
             if 'op_cost_pct' in display_df.columns:
+                # Create custom data with both the total value and percentage
+                customdata = list(zip(display_df['total_operational_costs'], display_df['op_cost_pct']))
                 fig_op_costs.update_traces(
-                    customdata=display_df['op_cost_pct'],
-                    hovertemplate='<b>%{x}</b><br>Custos Operacionais: R$ %{y:,.0f}<br>% da Receita: %{customdata:.1f}%<extra></extra>'
+                    customdata=customdata,
+                    hovertemplate='<b>%{x}</b><br>Custos Operacionais: R$ %{customdata[0]:,.0f}<br>% da Receita: %{customdata[1]:.1f}%<extra></extra>'
                 )
     
             # Apply interactive features for monthly view
@@ -1364,6 +1443,8 @@ def render_dashboard_tab(db, use_unified_extractor=True):
             
             # Initialize non-operational costs if not present
             if 'non_operational_costs' not in display_df.columns:
+                # Debug: This shouldn't happen if monthly data is correct
+                print(f"WARNING: non_operational_costs missing from display_df. Columns: {list(display_df.columns)}")
                 display_df['non_operational_costs'] = 0
             display_df['non_op_cost_pct'] = (display_df['non_operational_costs'] / display_df['revenue'] * 100).fillna(0)
             
@@ -1409,26 +1490,25 @@ def render_dashboard_tab(db, use_unified_extractor=True):
                 customdata=list(zip(display_df['fixed_costs'], display_df['revenue']))
             ))
     
-            # Add non-operational costs bar if they exist
-            if display_df['non_op_cost_pct'].sum() > 0:
-                fig_cost_structure.add_trace(go.Bar(
-                    name='Custos Não Operacionais',
-                    x=display_df[x_col],
-                    y=display_df['non_op_cost_pct'],
-                    text=display_df['non_op_cost_pct'].apply(lambda x: f"{x:.2f}%"),
-                    textposition='inside',
-                    textfont=dict(color='white', size=11, weight='bold'),
-                    marker=dict(
-                        color='#6B7280',  # Gray for non-operational costs
-                        line=dict(color='#4B5563', width=1)
-                    ),
-                    hovertemplate='<b>Custos Não Operacionais</b><br>' +
-                                 'Percentual: %{y:.1f}%<br>' +
-                                 'Valor: R$ %{customdata[0]:,.0f}<br>' +
-                                 '<b>Receita Total: R$ %{customdata[1]:,.0f}</b><br>' +
-                                 '<extra></extra>',
-                    customdata=list(zip(display_df['non_operational_costs'], display_df['revenue']))
-                ))
+            # Add non-operational costs bar (always show, even if zero)
+            fig_cost_structure.add_trace(go.Bar(
+                name='Custos Não Operacionais',
+                x=display_df[x_col],
+                y=display_df['non_op_cost_pct'],
+                text=display_df['non_op_cost_pct'].apply(lambda x: f"{x:.2f}%"),
+                textposition='inside',
+                textfont=dict(color='white', size=11, weight='bold'),
+                marker=dict(
+                    color='#EF4444',  # Red for non-operational costs
+                    line=dict(color='#DC2626', width=1)
+                ),
+                hovertemplate='<b>Custos Não Operacionais</b><br>' +
+                             'Percentual: %{y:.1f}%<br>' +
+                             'Valor: R$ %{customdata[0]:,.0f}<br>' +
+                             '<b>Receita Total: R$ %{customdata[1]:,.0f}</b><br>' +
+                             '<extra></extra>',
+                customdata=list(zip(display_df['non_operational_costs'], display_df['revenue']))
+            ))
     
             # Add profit margin bar
             fig_cost_structure.add_trace(go.Bar(

@@ -7,6 +7,7 @@ import streamlit as st
 import pandas as pd
 from core.financial_processor import FinancialProcessor
 from gerenciador_arquivos import GerenciadorArquivos
+import os
 
 
 # Helper functions for data conversion (must be defined before use)
@@ -61,18 +62,26 @@ def convert_extracted_to_processed(extracted_data):
             if fixed_costs == 0:
                 fixed_costs = admin_expenses + operational_expenses + marketing_expenses + financial_expenses
             
-            # Calculate operational costs
+            # Get non-operational costs
+            non_operational_costs_data = year_data.get('non_operational_costs', {})
+            if isinstance(non_operational_costs_data, dict):
+                non_operational_costs = non_operational_costs_data.get('annual', non_operational_costs_data.get('ANNUAL', 0))
+            else:
+                non_operational_costs = non_operational_costs_data if non_operational_costs_data else 0
+            
+            # Calculate operational costs (should be fixed + variable)
             operational_costs_data = year_data.get('operational_costs', {})
             if isinstance(operational_costs_data, dict):
                 operational_costs = operational_costs_data.get('annual', operational_costs_data.get('ANNUAL', 0))
             else:
                 operational_costs = operational_costs_data if operational_costs_data else 0
                 
-            if operational_costs == 0:
-                operational_costs = admin_expenses + operational_expenses
+            # Always recalculate operational costs as fixed + variable for consistency
+            # This ensures the chart shows the correct sum
+            operational_costs = fixed_costs + costs
             
-            # Calculate all required fields
-            total_costs = costs + fixed_costs
+            # Calculate all required fields - INCLUDING non-operational costs
+            total_costs = costs + fixed_costs + non_operational_costs
             net_profit = revenue - total_costs
             profit_margin = (net_profit / revenue * 100) if revenue > 0 else 0
             gross_profit = revenue - costs
@@ -82,6 +91,7 @@ def convert_extracted_to_processed(extracted_data):
             consolidated_data.append({
                 'year': int(year),
                 'revenue': revenue,
+                'costs': costs,  # Keep for backward compatibility
                 'variable_costs': costs,
                 'fixed_costs': fixed_costs,
                 'admin_expenses': admin_expenses,
@@ -89,6 +99,7 @@ def convert_extracted_to_processed(extracted_data):
                 'marketing_expenses': marketing_expenses,
                 'financial_expenses': financial_expenses,
                 'operational_costs': operational_costs,
+                'non_operational_costs': non_operational_costs,
                 'total_costs': total_costs,
                 'net_profit': net_profit,
                 'profit': net_profit,
@@ -573,8 +584,11 @@ def initialize_session_state(db, data_loaded):
     """Initialize session state variables"""
     if 'file_manager' not in st.session_state:
         st.session_state.file_manager = GerenciadorArquivos()
-        # Sincronizar arquivos existentes
-        st.session_state.file_manager.sincronizar_arquivos_existentes()
+        # Sync files - from database in production, from filesystem in dev
+        if os.environ.get('RAILWAY_ENVIRONMENT') == 'production':
+            st.session_state.file_manager.sync_from_database()
+        else:
+            st.session_state.file_manager.sincronizar_arquivos_existentes()
     if 'ai_chat_assistant' not in st.session_state:
         st.session_state.ai_chat_assistant = None
 
@@ -609,6 +623,9 @@ def generate_monthly_data_from_extracted(extracted_data):
             marketing_data = year_data.get('marketing_expenses', {})
             financial_data = year_data.get('financial_expenses', {})
             fixed_costs_data = year_data.get('fixed_costs', {})
+            non_operational_costs_data = year_data.get('non_operational_costs', {})
+            taxes_data = year_data.get('taxes', {})
+            commissions_data = year_data.get('commissions', {})
             
             # Handle both flat and nested structures
             revenue_monthly = revenue_data.get('monthly', revenue_data) if isinstance(revenue_data, dict) else {}
@@ -618,6 +635,9 @@ def generate_monthly_data_from_extracted(extracted_data):
             marketing_monthly = marketing_data.get('monthly', marketing_data) if isinstance(marketing_data, dict) else {}
             financial_monthly = financial_data.get('monthly', financial_data) if isinstance(financial_data, dict) else {}
             fixed_costs_monthly = fixed_costs_data.get('monthly', fixed_costs_data) if isinstance(fixed_costs_data, dict) else {}
+            non_operational_monthly = non_operational_costs_data.get('monthly', non_operational_costs_data) if isinstance(non_operational_costs_data, dict) else {}
+            taxes_monthly = taxes_data.get('monthly', taxes_data) if isinstance(taxes_data, dict) else {}
+            commissions_monthly = commissions_data.get('monthly', commissions_data) if isinstance(commissions_data, dict) else {}
             
             for month in ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ']:
                 if month in revenue_monthly:
@@ -636,11 +656,14 @@ def generate_monthly_data_from_extracted(extracted_data):
                             financial_monthly.get(month, 0)
                         )
                     
-                    # Calculate operational costs (admin + operational)
-                    operational_costs = admin_monthly.get(month, 0) + operational_monthly.get(month, 0)
+                    # Get non-operational costs for the month
+                    non_operational_costs = non_operational_monthly.get(month, 0)
                     
-                    # Calculate profit and margins
-                    total_costs = variable_costs + fixed_costs
+                    # Calculate operational costs (fixed + variable)
+                    operational_costs = fixed_costs + variable_costs
+                    
+                    # Calculate profit and margins - INCLUDING non-operational costs
+                    total_costs = variable_costs + fixed_costs + non_operational_costs
                     net_profit = revenue - total_costs
                     profit_margin = (net_profit / revenue * 100) if revenue > 0 else 0
                     contribution_margin = revenue - variable_costs
@@ -649,12 +672,16 @@ def generate_monthly_data_from_extracted(extracted_data):
                         'year': int(year),
                         'month': month,
                         'revenue': revenue,
+                        'costs': variable_costs,  # Keep for backward compatibility
                         'variable_costs': variable_costs,
                         'fixed_costs': fixed_costs,
+                        'non_operational_costs': non_operational_costs,
                         'admin_expenses': admin_monthly.get(month, 0),
                         'operational_expenses': operational_monthly.get(month, 0),
                         'marketing_expenses': marketing_monthly.get(month, 0),
                         'financial_expenses': financial_monthly.get(month, 0),
+                        'taxes': taxes_monthly.get(month, 0),
+                        'commissions': commissions_monthly.get(month, 0),
                         'total_costs': total_costs,
                         'operational_costs': operational_costs,
                         'net_profit': net_profit,
