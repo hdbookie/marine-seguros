@@ -21,6 +21,31 @@ from utils.legacy_helpers import (
 from ui.tabs.micro_analysis_tab import render_micro_analysis_tab
 
 
+def get_monthly_xaxis_config(display_df, x_col):
+    """Get x-axis configuration for monthly charts based on data size"""
+    # Adjust tick display based on number of months
+    if len(display_df) > 36:
+        dtick = 3  # Show every 3rd month
+    elif len(display_df) > 24:
+        dtick = 2  # Show every 2nd month
+    else:
+        dtick = 1  # Show every month
+    
+    xaxis_config = dict(
+        tickangle=-45,
+        tickmode='linear',
+        dtick=dtick,
+        **get_monthly_layout_config()
+    )
+    
+    # Set default range to show last 12 months
+    default_range = get_default_monthly_range(display_df, x_col)
+    if default_range:
+        xaxis_config['range'] = default_range
+    
+    return xaxis_config
+
+
 def render_dashboard_tab(db, use_unified_extractor=True):
     """Render the dashboard tab with financial visualizations"""
     
@@ -31,7 +56,7 @@ def render_dashboard_tab(db, use_unified_extractor=True):
         
         # Ensure data is a dictionary
         if not isinstance(data, dict):
-            st.error(f"Error: processed_data is not a dictionary, it's a {type(data)}")
+            st.error(f"Erro: processed_data não é um dicionário, é um {type(data)}")
             data = {}
         
         df = data.get('consolidated', pd.DataFrame())
@@ -44,10 +69,10 @@ def render_dashboard_tab(db, use_unified_extractor=True):
                     df = pd.DataFrame(df['data'], columns=df['columns'])
                     st.info("📊 Dados reconstruídos do cache")
                 except:
-                    st.error(f"Error: Could not reconstruct DataFrame from cached data")
+                    st.error(f"Erro: Não foi possível reconstruir DataFrame dos dados em cache")
                     df = pd.DataFrame()
             else:
-                st.error(f"Error: 'consolidated' data is not a DataFrame, it's a {type(df)}")
+                st.error(f"Erro: Dados 'consolidados' não são um DataFrame, é um {type(df)}")
                 # Clear the corrupted data and force reprocessing
                 st.session_state.processed_data = None
                 st.info("🔄 Por favor, clique em 'Analisar Dados' novamente para reprocessar")
@@ -96,14 +121,14 @@ def render_dashboard_tab(db, use_unified_extractor=True):
                     monthly_data = processor.get_monthly_data(excel_data)
             
                     if monthly_data.empty:
-                        st.error("❌ Failed to extract monthly data from Excel files")
+                        st.error("❌ Falha ao extrair dados mensais dos arquivos Excel")
                     else:
-                        st.success(f"✅ Monthly data extracted: {len(monthly_data)} records from {len(excel_data)} files")
-                        st.info(f"Years covered: {sorted(monthly_data['year'].unique()) if 'year' in monthly_data.columns else 'Unknown'}")
+                        st.success(f"✅ Dados mensais extraídos: {len(monthly_data)} registros de {len(excel_data)} arquivos")
+                        st.info(f"Anos cobertos: {sorted(monthly_data['year'].unique()) if 'year' in monthly_data.columns else 'Desconhecido'}")
             
                     st.session_state.monthly_data = monthly_data
                 else:
-                    st.error("❌ No Excel files found for monthly data extraction")
+                    st.error("❌ Nenhum arquivo Excel encontrado para extração de dados mensais")
                     st.session_state.monthly_data = pd.DataFrame()
             
             except Exception as e:
@@ -127,12 +152,23 @@ def render_dashboard_tab(db, use_unified_extractor=True):
 
         with col_filter2:
             if view_type in ["Mensal", "Trimestral", "Trimestre Personalizado", "Semestral", "Personalizado"]:
-                if not df.empty and 'year' in df.columns:
+                # For monthly-based views, check if monthly data is available
+                if view_type != "Anual" and hasattr(st.session_state, 'monthly_data') and st.session_state.monthly_data is not None and not st.session_state.monthly_data.empty:
+                    available_years = sorted(st.session_state.monthly_data['year'].unique())
+                elif not df.empty and 'year' in df.columns:
                     available_years = sorted(df['year'].unique())
-                    # Use saved selected_years if available, otherwise default to last 3 years
+                else:
+                    available_years = []
+                
+                if available_years:
+                    # Use saved selected_years if available and valid, otherwise default to last 3 years
+                    saved_years = st.session_state.get('selected_years', [])
+                    # Filter saved years to only include those that are available
+                    valid_saved_years = [y for y in saved_years if y in available_years]
+                    
                     default_years = (
-                        st.session_state.get('selected_years', []) 
-                        if st.session_state.get('selected_years') 
+                        valid_saved_years 
+                        if valid_saved_years 
                         else available_years[-3:] if len(available_years) >= 3 else available_years
                     )
                     selected_years = st.multiselect(
@@ -293,6 +329,9 @@ def render_dashboard_tab(db, use_unified_extractor=True):
                     (monthly_df['month_num'].isin(selected_month_nums))
                 ]
                 
+                # Sort by date for chronological order
+                display_df = display_df.sort_values(['year', 'month_num'])
+                
                 # Add data refresh button
                 col1, col2 = st.columns([6, 1])
                 with col2:
@@ -360,6 +399,12 @@ def render_dashboard_tab(db, use_unified_extractor=True):
                     'variable_costs': 'sum',
                     'fixed_costs': 'sum',
                     'operational_costs': 'sum',
+                    'non_operational_costs': 'sum',
+                    'taxes': 'sum',
+                    'commissions': 'sum',
+                    'admin_expenses': 'sum',
+                    'marketing_expenses': 'sum',
+                    'financial_expenses': 'sum',
                     'contribution_margin': 'sum',
                     'net_profit': 'sum',
                     'profit_margin': 'mean'  # Average the profit margins
@@ -424,6 +469,12 @@ def render_dashboard_tab(db, use_unified_extractor=True):
                     'variable_costs': 'sum',
                     'fixed_costs': 'sum',
                     'operational_costs': 'sum',
+                    'non_operational_costs': 'sum',
+                    'taxes': 'sum',
+                    'commissions': 'sum',
+                    'admin_expenses': 'sum',
+                    'marketing_expenses': 'sum',
+                    'financial_expenses': 'sum',
                     'contribution_margin': 'sum',
                     'net_profit': 'sum',
                     'profit_margin': 'mean'  # Average the profit margins
@@ -473,6 +524,12 @@ def render_dashboard_tab(db, use_unified_extractor=True):
                     'variable_costs': 'sum',
                     'fixed_costs': 'sum',
                     'operational_costs': 'sum',
+                    'non_operational_costs': 'sum',
+                    'taxes': 'sum',
+                    'commissions': 'sum',
+                    'admin_expenses': 'sum',
+                    'marketing_expenses': 'sum',
+                    'financial_expenses': 'sum',
                     'contribution_margin': 'sum',
                     'net_profit': 'sum',
                     'profit_margin': 'mean'  # Average the profit margins
@@ -747,16 +804,7 @@ def render_dashboard_tab(db, use_unified_extractor=True):
     
             # Apply interactive features for monthly view
             if view_type == "Mensal":
-                xaxis_config = dict(
-                    tickangle=-45,
-                    tickmode='linear',
-                    **get_monthly_layout_config()
-                )
-                
-                # Set default range to show last 12 months
-                default_range = get_default_monthly_range(display_df, x_col)
-                if default_range:
-                    xaxis_config['range'] = default_range
+                xaxis_config = get_monthly_xaxis_config(display_df, x_col)
                     
                 fig_margin.update_layout(
                     yaxis_title="Margem de Lucro (%)",
@@ -886,16 +934,7 @@ def render_dashboard_tab(db, use_unified_extractor=True):
     
             # Apply interactive features for monthly view
             if view_type == "Mensal":
-                xaxis_config = dict(
-                    tickangle=-45,
-                    tickmode='linear',
-                    **get_monthly_layout_config()
-                )
-                
-                # Set default range to show last 12 months
-                default_range = get_default_monthly_range(display_df, x_col)
-                if default_range:
-                    xaxis_config['range'] = default_range
+                xaxis_config = get_monthly_xaxis_config(display_df, x_col)
                     
                 fig_var_costs.update_layout(
                     title='💸 Custos Variáveis e Fixos vs Receita',
@@ -1001,16 +1040,7 @@ def render_dashboard_tab(db, use_unified_extractor=True):
     
             # Apply interactive features for monthly view
             if view_type == "Mensal":
-                xaxis_config = dict(
-                    tickangle=-45,
-                    tickmode='linear',
-                    **get_monthly_layout_config()
-                )
-                
-                # Set default range to show last 12 months
-                default_range = get_default_monthly_range(display_df, x_col)
-                if default_range:
-                    xaxis_config['range'] = default_range
+                xaxis_config = get_monthly_xaxis_config(display_df, x_col)
                     
                 fig_fixed.update_layout(
                     title='🏢 Custos Fixos vs Receita',
@@ -1092,16 +1122,7 @@ def render_dashboard_tab(db, use_unified_extractor=True):
     
             # Apply interactive features for monthly view
             if view_type == "Mensal":
-                xaxis_config = dict(
-                    tickangle=-45,
-                    tickmode='linear',
-                    **get_monthly_layout_config()
-                )
-                
-                # Set default range to show last 12 months
-                default_range = get_default_monthly_range(display_df, x_col)
-                if default_range:
-                    xaxis_config['range'] = default_range
+                xaxis_config = get_monthly_xaxis_config(display_df, x_col)
                     
                 fig_variable.update_layout(
                     title='📦 Custos Variáveis vs Receita',
@@ -1168,16 +1189,7 @@ def render_dashboard_tab(db, use_unified_extractor=True):
     
             # Apply interactive features for monthly view
             if view_type == "Mensal":
-                xaxis_config = dict(
-                    tickangle=-45,
-                    tickmode='linear',
-                    **get_monthly_layout_config()
-                )
-                
-                # Set default range to show last 12 months
-                default_range = get_default_monthly_range(display_df, x_col)
-                if default_range:
-                    xaxis_config['range'] = default_range
+                xaxis_config = get_monthly_xaxis_config(display_df, x_col)
                     
                 fig_contrib.update_layout(
                     yaxis_title="Margem de Contribuição (R$)",
@@ -1249,16 +1261,7 @@ def render_dashboard_tab(db, use_unified_extractor=True):
     
             # Apply interactive features for monthly view
             if view_type == "Mensal":
-                xaxis_config = dict(
-                    tickangle=-45,
-                    tickmode='linear',
-                    **get_monthly_layout_config()
-                )
-                
-                # Set default range to show last 12 months
-                default_range = get_default_monthly_range(display_df, x_col)
-                if default_range:
-                    xaxis_config['range'] = default_range
+                xaxis_config = get_monthly_xaxis_config(display_df, x_col)
                     
                 fig_op_costs.update_layout(
                     yaxis_title="Custos Operacionais (R$)",
@@ -1310,16 +1313,7 @@ def render_dashboard_tab(db, use_unified_extractor=True):
     
             # Apply interactive features for monthly view
             if view_type == "Mensal":
-                xaxis_config = dict(
-                    tickangle=-45,
-                    tickmode='linear',
-                    **get_monthly_layout_config()
-                )
-                
-                # Set default range to show last 12 months
-                default_range = get_default_monthly_range(display_df, x_col)
-                if default_range:
-                    xaxis_config['range'] = default_range
+                xaxis_config = get_monthly_xaxis_config(display_df, x_col)
                     
                 fig_result.update_layout(
                     title=f'Resultado {view_type} (Lucro/Prejuízo)',
@@ -1347,17 +1341,28 @@ def render_dashboard_tab(db, use_unified_extractor=True):
         if not display_df.empty and all(col in display_df.columns for col in ['variable_costs', 'fixed_costs', 'revenue']):
             x_col, x_title = prepare_x_axis(display_df, view_type)
     
-            # Calculate total costs and profit margins
-            display_df['total_costs'] = display_df['variable_costs'] + display_df['fixed_costs']
-            display_df['profit'] = display_df['revenue'] - display_df['total_costs']
-            display_df['cost_percentage'] = (display_df['total_costs'] / display_df['revenue'] * 100).fillna(0)
-    
+            # Use actual net_profit from data
+            if 'net_profit' in display_df.columns:
+                display_df['profit'] = display_df['net_profit']
+            else:
+                # Simple calculation: Revenue - Variable Costs - Fixed Costs - Non-Op Costs = Profit
+                basic_costs = display_df['variable_costs'] + display_df['fixed_costs']
+                if 'non_operational_costs' in display_df.columns:
+                    basic_costs += display_df['non_operational_costs']
+                display_df['profit'] = display_df['revenue'] - basic_costs
+            
             # Create stacked bar chart with improved styling
             fig_cost_structure = go.Figure()
     
-            # Calculate percentages of revenue for better visualization
+            # Calculate percentages of revenue for the categories
             display_df['var_cost_pct'] = (display_df['variable_costs'] / display_df['revenue'] * 100).fillna(0)
             display_df['fixed_cost_pct'] = (display_df['fixed_costs'] / display_df['revenue'] * 100).fillna(0)
+            
+            # Initialize non-operational costs if not present
+            if 'non_operational_costs' not in display_df.columns:
+                display_df['non_operational_costs'] = 0
+            display_df['non_op_cost_pct'] = (display_df['non_operational_costs'] / display_df['revenue'] * 100).fillna(0)
+            
             display_df['profit_pct'] = (display_df['profit'] / display_df['revenue'] * 100).fillna(0)
     
             # Add variable costs bar (as percentage)
@@ -1399,6 +1404,27 @@ def render_dashboard_tab(db, use_unified_extractor=True):
                              '<extra></extra>',
                 customdata=list(zip(display_df['fixed_costs'], display_df['revenue']))
             ))
+    
+            # Add non-operational costs bar if they exist
+            if display_df['non_op_cost_pct'].sum() > 0:
+                fig_cost_structure.add_trace(go.Bar(
+                    name='Custos Não Operacionais',
+                    x=display_df[x_col],
+                    y=display_df['non_op_cost_pct'],
+                    text=display_df['non_op_cost_pct'].apply(lambda x: f"{x:.2f}%"),
+                    textposition='inside',
+                    textfont=dict(color='white', size=11, weight='bold'),
+                    marker=dict(
+                        color='#6B7280',  # Gray for non-operational costs
+                        line=dict(color='#4B5563', width=1)
+                    ),
+                    hovertemplate='<b>Custos Não Operacionais</b><br>' +
+                                 'Percentual: %{y:.1f}%<br>' +
+                                 'Valor: R$ %{customdata[0]:,.0f}<br>' +
+                                 '<b>Receita Total: R$ %{customdata[1]:,.0f}</b><br>' +
+                                 '<extra></extra>',
+                    customdata=list(zip(display_df['non_operational_costs'], display_df['revenue']))
+                ))
     
             # Add profit margin bar
             fig_cost_structure.add_trace(go.Bar(
@@ -1627,4 +1653,4 @@ def render_dashboard_tab(db, use_unified_extractor=True):
             st.dataframe(display_df, use_container_width=True)
 
     else:
-        st.info("👆 Please upload files in the 'Upload' tab first.")
+        st.info("👆 Por favor, carregue arquivos na aba 'Upload' primeiro.")

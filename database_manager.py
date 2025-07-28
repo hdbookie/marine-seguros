@@ -245,13 +245,17 @@ class DatabaseManager:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 
+                # Convert numpy types to Python native types for JSON serialization
+                years_list = [int(year) if hasattr(year, 'item') else year for year in selected_years]
+                months_list = [str(month) for month in selected_months]
+                
                 cursor.execute("""
                     INSERT OR REPLACE INTO filter_state 
                     (id, selected_years, selected_months, other_filters, updated_at)
                     VALUES (1, ?, ?, ?, CURRENT_TIMESTAMP)
                 """, (
-                    json.dumps(selected_years),
-                    json.dumps(selected_months),
+                    json.dumps(years_list),
+                    json.dumps(months_list),
                     json.dumps(other_filters or {})
                 ))
                 
