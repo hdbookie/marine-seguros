@@ -6,10 +6,17 @@ Refactored version using modular architecture
 import streamlit as st
 import pandas as pd
 import os
+import sys
 from dotenv import load_dotenv
 import google.generativeai as genai
 from datetime import datetime
 from typing import Dict
+
+# Add the project root to sys.path to ensure imports work
+# This helps with module imports in different deployment environments
+project_root = os.path.dirname(os.path.abspath(__file__))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
 # Import authentication
 from auth import init_auth, require_auth, show_login_page, show_user_menu, show_admin_panel
@@ -23,6 +30,7 @@ from utils.legacy_helpers import (
     generate_monthly_data_from_extracted,
     convert_extracted_to_processed
 )
+from utils.formatters import format_time_difference
 
 # Import tab modules
 from ui.tabs.upload_legacy_tab import render_upload_tab
@@ -35,19 +43,27 @@ from ui.tabs.auth_management_tab_simple import render_auth_management_tab
 # Load environment variables
 load_dotenv()
 
-# Initialize authentication
-init_auth()
-
-# Initialize database manager
-db = DatabaseManager()
-
-# Page configuration
+# Page configuration (must be first)
 st.set_page_config(
     page_title="Marine Seguros - Financial Analytics",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# Initialize authentication
+init_auth()
+
+# Check for logout in URL parameters or session flag
+if st.query_params.get('logout') == 'true' or st.session_state.get('logout_clicked', False):
+    # Clear ALL query params including token
+    for key in list(st.query_params.keys()):
+        del st.query_params[key]
+    st.session_state.clear()
+    st.rerun()
+
+# Initialize database manager
+db = DatabaseManager()
 
 # Custom CSS
 st.markdown("""
@@ -102,14 +118,6 @@ with col2:
 with st.sidebar:
     st.header("⚙️ Configuração")
     
-    # Debug: Check auth status
-    if hasattr(st.session_state, 'user'):
-        if st.session_state.user:
-            st.success(f"✅ Logado como: {st.session_state.user.get('username', 'Unknown')}")
-        else:
-            st.warning("⚠️ Não está logado")
-    else:
-        st.error("❌ Sistema de autenticação não inicializado")
     
     # User menu
     show_user_menu()
@@ -169,8 +177,9 @@ if data_loaded:
         # Check if data is fresh (uploaded in last 5 minutes)
         from datetime import datetime, timedelta
         upload_time = datetime.fromisoformat(last_upload['created_at'].replace(' ', 'T'))
-        if datetime.now() - upload_time < timedelta(minutes=5):
-            st.success(f"🔄 Novos dados disponíveis! Atualizados por {last_upload['username']} há {(datetime.now() - upload_time).seconds // 60} minutos")
+        time_diff = datetime.now() - upload_time
+        if time_diff < timedelta(minutes=5):
+            st.success(f"🔄 Novos dados disponíveis! Atualizados por {last_upload['username']} {format_time_difference(time_diff)}")
 
 # Convert extracted data to processed format if needed
 # This block should always regenerate processed_data from extracted_data

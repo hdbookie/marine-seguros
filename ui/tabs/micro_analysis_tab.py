@@ -120,7 +120,7 @@ def render_micro_analysis_tab(flexible_data):
 
 def render_pnl_evolution_tab(df):
     st.subheader("Evolução do Demonstrativo de Resultados")
-    print(df)
+    # DataFrame ready for visualization
     fig_pnl_evolution = create_pnl_evolution_chart(df)
     st.plotly_chart(fig_pnl_evolution, use_container_width=True)
 

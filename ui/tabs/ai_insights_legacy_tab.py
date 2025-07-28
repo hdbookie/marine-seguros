@@ -27,16 +27,10 @@ def render_ai_insights_tab(db, gemini_api_key, language):
         st.error(f"Erro ao inicializar o Analisador de IA: {e}")
         return
 
-    # Check all possible data sources and debug
-    print("DEBUG: AI Insights - Checking data sources:")
-    print(f"  - Has unified_data: {hasattr(st.session_state, 'unified_data') and bool(st.session_state.unified_data)}")
-    print(f"  - Has extracted_data: {hasattr(st.session_state, 'extracted_data') and bool(st.session_state.extracted_data)}")
-    print(f"  - Has processed_data: {hasattr(st.session_state, 'processed_data') and bool(st.session_state.processed_data)}")
-    
-    if hasattr(st.session_state, 'unified_data') and st.session_state.unified_data:
-        print(f"DEBUG: unified_data has {len(st.session_state.unified_data)} years")
-        for year, data in list(st.session_state.unified_data.items())[:1]:
-            print(f"  Year {year} revenue: {data.get('revenue', 'NO REVENUE KEY')}")
+    # Check all possible data sources
+    has_unified_data = hasattr(st.session_state, 'unified_data') and bool(st.session_state.unified_data)
+    has_extracted_data = hasattr(st.session_state, 'extracted_data') and bool(st.session_state.extracted_data)
+    has_processed_data = hasattr(st.session_state, 'processed_data') and bool(st.session_state.processed_data)
     
     # Don't overwrite existing data - just load from DB if truly empty
     if not any([
@@ -259,7 +253,7 @@ def render_macro_analysis(db, ai_analyzer):
                                         revenues.append(data['revenue'])
                                         profits.append(data.get('net_profit', 0))
                                         margins.append(data.get('profit_margin', 0))
-                                        print(f"DEBUG: Year {year_int} - Direct revenue: {data['revenue']}")
+                                        pass  # Direct revenue available
                                     # Check if this is the old format with dicts
                                     elif 'revenue' in data and isinstance(data['revenue'], dict):
                                         revenue_dict = data['revenue']
@@ -298,7 +292,7 @@ def render_macro_analysis(db, ai_analyzer):
                                             else:
                                                 margins.append(0)
                                             
-                                            print(f"DEBUG: Year {year_int} - Revenue from dict: {annual_revenue}")
+                                            pass  # Revenue from dict format
                             
                             if years:
                                 df = pd.DataFrame({
@@ -310,11 +304,7 @@ def render_macro_analysis(db, ai_analyzer):
                                 df = df.sort_values('year')
 
                     if not df.empty:
-                        # Debug data types
-                        print(f"DEBUG: DataFrame shape before filtering: {df.shape}")
-                        print(f"DEBUG: Revenue column dtype: {df['revenue'].dtype}")
-                        print(f"DEBUG: Revenue values: {df['revenue'].tolist()}")
-                        print(f"DEBUG: Revenue value types: {[type(v).__name__ for v in df['revenue'].tolist()]}")
+                        # DataFrame ready for filtering
                         
                         # Ensure all numeric columns are properly converted
                         numeric_columns = ['revenue', 'net_profit', 'profit_margin']

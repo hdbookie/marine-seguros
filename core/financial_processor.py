@@ -240,11 +240,11 @@ class FinancialProcessor:
         """Calculate year-over-year growth rates"""
         # Check if DataFrame is empty or missing 'year' column
         if df.empty:
-            print("Warning: Empty DataFrame provided to calculate_growth_metrics")
+            pass  # Empty DataFrame provided
             return pd.DataFrame()
         
         if 'year' not in df.columns:
-            print(f"Warning: 'year' column missing. Available columns: {df.columns.tolist()}")
+            pass  # Year column missing
             return df
         
         df = df.sort_values('year').copy()

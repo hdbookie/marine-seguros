@@ -15,25 +15,20 @@ def convert_extracted_to_processed(extracted_data):
     if not extracted_data:
         return None
     
-    print(f"DEBUG convert_extracted_to_processed: Processing {len(extracted_data)} years")
+    # Processing extracted data
     
     try:
         # Create a DataFrame from extracted_data
         consolidated_data = []
         for year, year_data in sorted(extracted_data.items()):
-            print(f"DEBUG: Processing year {year}")
-            if year == list(extracted_data.keys())[0]:  # First year only
-                print(f"  Keys in year_data: {list(year_data.keys())}")
+            # Process year data
             
             # Handle different data formats
             revenue_data = year_data.get('revenue', {})
             if isinstance(revenue_data, dict):
                 # Try lowercase 'annual' first (unified extractor format)
                 revenue = revenue_data.get('annual', revenue_data.get('ANNUAL', 0))
-                if year == list(extracted_data.keys())[0]:  # First year only
-                    print(f"  Revenue data type: {type(revenue_data)}")
-                    print(f"  Revenue keys: {list(revenue_data.keys()) if isinstance(revenue_data, dict) else 'Not a dict'}")
-                    print(f"  Revenue annual value: {revenue}")
+                # Extract revenue from data
             else:
                 revenue = revenue_data if revenue_data else 0
                 

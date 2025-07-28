@@ -128,7 +128,7 @@ class DatabaseManager:
                 """, (year, json_data))
                 
                 conn.commit()
-                print(f"✅ Saved financial data for year {year}")
+                pass  # Saved financial data
                 return True
         except Exception as e:
             st.error(f"Error saving financial data for {year}: {str(e)}")
@@ -205,40 +205,40 @@ class DatabaseManager:
     def _validate_financial_data(self, data: Dict[str, Any]) -> bool:
         """Validate financial data structure and content"""
         if not isinstance(data, dict):
-            print(f"Validation failed: data is not a dict, it's {type(data)}")
+            return False
             return False
         
-        print(f"Validation check - data keys: {list(data.keys())}")
+        # Check data structure
         
         # Check if it's flexible extractor data (has line_items)
         if 'line_items' in data:
             print(f"Detected flexible extractor data format")
             # Validate flexible extractor format
             if not isinstance(data['line_items'], dict):
-                print(f"Flexible data: line_items is not a dict, it's {type(data['line_items'])}")
+                return False
                 return False
             if len(data['line_items']) == 0:
-                print(f"Flexible data: line_items is empty")
                 return False
-            print(f"Flexible data validation passed: {len(data['line_items'])} line items found")
+                return False
+            # Flexible data validation passed
             return True
         
         # Check for standard extractor required fields
         required_fields = ['revenue', 'costs']
         for field in required_fields:
             if field not in data:
-                print(f"Missing required field: {field}")
+                pass
                 return False
             
             # Check if field has data
             if not isinstance(data[field], dict) or len(data[field]) == 0:
-                print(f"Field {field} is empty or not a dict")
+                pass
                 return False
         
         # Validate revenue data
         revenue_data = data.get('revenue', {})
         if not revenue_data:
-            print("No revenue data found")
+            pass
             return False
         
         # Check if we have at least some data (either monthly or annual)
@@ -250,13 +250,13 @@ class DatabaseManager:
         
         # Accept data if it has either monthly data OR annual totals
         if monthly_data_count < 3 and not has_annual:
-            print(f"Insufficient data: only {monthly_data_count} months and no ANNUAL total")
+            pass
             return False
         
         # Validate numeric values
         for key, value in revenue_data.items():
             if value is not None and not isinstance(value, (int, float)):
-                print(f"Invalid revenue value for {key}: {value} (type: {type(value)})")
+                pass
                 return False
         
         # Check for zero revenue - don't save years with no activity
@@ -266,7 +266,7 @@ class DatabaseManager:
         # Skip years with zero revenue
         if annual_revenue == 0 and monthly_revenue_sum == 0:
             year = data.get('year', 'Unknown')
-            print(f"Skipping year {year} - zero revenue detected (annual: {annual_revenue}, monthly sum: {monthly_revenue_sum})")
+            pass
             return False
         
         return True
@@ -513,7 +513,7 @@ class DatabaseManager:
                                     df = pd.DataFrame(value['data'], columns=value['columns'])
                                     return df
                                 except Exception as e:
-                                    print(f"Error reconstructing DataFrame: {e}")
+                                    pass  # Error reconstructing DataFrame
                                     # Return None or empty DataFrame instead of corrupted data
                                     return pd.DataFrame()
                             else:
@@ -525,12 +525,12 @@ class DatabaseManager:
                         else:
                             # If value is a string that looks like it was a DataFrame converted to string
                             if isinstance(value, str) and value.startswith('<') and 'DataFrame' in value:
-                                print(f"Warning: Found DataFrame that was converted to string during serialization")
+                                pass  # Found DataFrame converted to string
                                 # Return empty DataFrame instead of the string
                                 return pd.DataFrame()
                             # If value is a string that looks like it was a list converted to string
                             elif isinstance(value, str) and value.startswith('[{') and value.endswith('}]'):
-                                print(f"Warning: Found list that was converted to string during serialization")
+                                pass  # Found list that was converted to string
                                 try:
                                     # Try to parse it back to a list
                                     import ast
@@ -667,16 +667,16 @@ class DatabaseManager:
                     if self.save_shared_financial_data(year_str, clean_data, username):
                         saved_count += 1
                     else:
-                        print(f"❌ Failed to save data for year {year_str}")
+                        pass  # Failed to save data
                 
                 # Save upload history if we have uploaded files
                 if uploaded_files and saved_count > 0:
                     user_email = session_state.user.get('email', '') if hasattr(session_state, 'user') and session_state.user else ''
                     self.save_upload_history(username, user_email, uploaded_files)
                 
-                print(f"✅ Successfully saved {saved_count}/{len(session_state.extracted_data)} years to shared storage")
+                pass  # Saved data to shared storage
             else:
-                print("⚠️ No extracted_data found in session_state")
+                pass  # No extracted_data found
             
             # Save filter state
             if hasattr(session_state, 'selected_years') and hasattr(session_state, 'selected_months'):
@@ -684,7 +684,7 @@ class DatabaseManager:
                     session_state.selected_years,
                     session_state.selected_months
                 ):
-                    print(f"✅ Saved filter state: {len(session_state.selected_years)} years, {len(session_state.selected_months)} months")
+                    pass  # Saved filter state
             
             # Save complete analyzed data cache
             cache_data = {}
@@ -711,11 +711,11 @@ class DatabaseManager:
             
             if cache_data:
                 if self.save_analysis_cache(cache_data):
-                    print(f"✅ Saved complete analysis cache with {len(cache_data)} data types")
+                    pass  # Saved analysis cache
                     
         except Exception as e:
             # Don't show error to user for auto-save failures
-            print(f"❌ Auto-save error: {str(e)}")
+            pass  # Auto-save error
             import traceback
             traceback.print_exc()
     
@@ -730,7 +730,7 @@ class DatabaseManager:
                 # Force overwrite even if session_state has empty dict
                 session_state.extracted_data = financial_data
                 data_loaded = True
-                print(f"Loaded {len(financial_data)} years of shared financial data")
+                pass  # Loaded shared financial data
             
             # Load filter state
             filter_state = self.load_filter_state()
@@ -739,7 +739,7 @@ class DatabaseManager:
                 session_state.selected_years = filter_state.get('selected_years', [])
                 session_state.selected_months = filter_state.get('selected_months', [])
                 data_loaded = True
-                print(f"Loaded filter state: {len(session_state.selected_years)} years, {len(session_state.selected_months)} months")
+                pass  # Loaded filter state
             
             # Load complete analysis cache
             analysis_cache = self.load_analysis_cache()
@@ -747,26 +747,26 @@ class DatabaseManager:
                 # Load all cached data types
                 if 'processed_data' in analysis_cache:
                     session_state.processed_data = analysis_cache['processed_data']
-                    print("Loaded processed_data from cache")
+                    pass  # Loaded processed_data
                     
                 if 'monthly_data' in analysis_cache:
                     session_state.monthly_data = analysis_cache['monthly_data']
-                    print("Loaded monthly_data from cache")
+                    pass  # Loaded monthly_data
                     
                 if 'flexible_data' in analysis_cache:
                     session_state.flexible_data = analysis_cache['flexible_data']
-                    print("Loaded flexible_data from cache")
+                    pass  # Loaded flexible_data
                     
                 if 'comparative_analysis' in analysis_cache:
                     session_state.comparative_analysis = analysis_cache['comparative_analysis']
-                    print("Loaded comparative_analysis from cache")
+                    pass  # Loaded comparative_analysis
                     
                 if 'gemini_insights' in analysis_cache:
                     session_state.gemini_insights = analysis_cache['gemini_insights']
-                    print("Loaded gemini_insights from cache")
+                    pass  # Loaded gemini_insights
                     
                 data_loaded = True
-                print(f"Loaded complete analysis cache with {len(analysis_cache)} data types")
+                pass  # Loaded analysis cache
             
             # If we have financial data but no filters selected, select all by default
             if financial_data and not session_state.selected_years:
