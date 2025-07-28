@@ -10,8 +10,13 @@ import pandas as pd
 class DatabaseManager:
     """SQLite-based persistence for dashboard data"""
     
-    def __init__(self, db_path: str = "data/dashboard.db"):
+    def __init__(self, db_path: str = None):
+        if db_path is None:
+            # Use environment variable if available (for Railway volumes)
+            data_dir = os.environ.get('DATA_PATH', 'data')
+            db_path = os.path.join(data_dir, 'dashboard.db')
         self.db_path = db_path
+        print(f"DatabaseManager: Using database path: {self.db_path}")
         Path(os.path.dirname(db_path)).mkdir(parents=True, exist_ok=True)
         self._init_database()
     

@@ -17,7 +17,11 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class AuthManager:
-    def __init__(self, db_path: str = "data/auth.db"):
+    def __init__(self, db_path: str = None):
+        if db_path is None:
+            # Use environment variable if available (for Railway volumes)
+            data_dir = os.environ.get('DATA_PATH', 'data')
+            db_path = os.path.join(data_dir, 'auth.db')
         self.db_path = db_path
         self.secret_key = get_env_var('JWT_SECRET_KEY', secrets.token_urlsafe(32))
         # Set SQLite to handle concurrent access better

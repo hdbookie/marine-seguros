@@ -1243,18 +1243,6 @@ def render_dashboard_tab(db, use_unified_extractor=True):
         # 4. Operational Costs - Full width  
         st.subheader("⚙️ Custos Operacionais")
         
-        # Debug info in UI
-        with st.expander("🔍 Debug Info - Operational Costs", expanded=False):
-            st.write("**DataFrame Info:**")
-            st.write(f"- Shape: {display_df.shape}")
-            st.write(f"- Columns: {list(display_df.columns)}")
-            if not display_df.empty:
-                st.write("\n**Sample Data (last row):**")
-                last_row = display_df.iloc[-1]
-                for col in ['revenue', 'variable_costs', 'fixed_costs', 'operational_costs', 'costs']:
-                    if col in display_df.columns:
-                        st.write(f"- {col}: {last_row[col]:,.0f}")
-        
         if not display_df.empty and ('operational_costs' in display_df.columns or 
                                      ('fixed_costs' in display_df.columns and 'variable_costs' in display_df.columns)):
             x_col, x_title = prepare_x_axis(display_df, view_type)
@@ -1332,21 +1320,6 @@ def render_dashboard_tab(db, use_unified_extractor=True):
             print(f"  Sample values: {display_df['total_operational_costs'].head(3).tolist()}")
             print(f"  Are values numeric? {pd.api.types.is_numeric_dtype(display_df['total_operational_costs'])}")
             
-            # Show debug info in UI
-            with st.expander("🔍 Debug - Calculated Values", expanded=True):
-                st.write("**Calculated Total Operational Costs:**")
-                debug_df = pd.DataFrame({
-                    'Year/Period': display_df[x_col],
-                    'Fixed Costs': display_df['fixed_costs'],
-                    'Variable Costs': display_df.get(var_costs_col, 0),
-                    'Total Operational': display_df['total_operational_costs']
-                })
-                st.dataframe(debug_df.tail(5), use_container_width=True)
-                st.write(f"**Summary:**")
-                st.write(f"- Min Total Operational: R$ {display_df['total_operational_costs'].min():,.0f}")
-                st.write(f"- Max Total Operational: R$ {display_df['total_operational_costs'].max():,.0f}")
-                st.write(f"- Mean Total Operational: R$ {display_df['total_operational_costs'].mean():,.0f}")
-            
             fig_op_costs = px.area(
                 display_df,
                 x=x_col,
@@ -1401,6 +1374,73 @@ def render_dashboard_tab(db, use_unified_extractor=True):
                     hovermode='x unified'
                 )
                 st.plotly_chart(fig_op_costs, use_container_width=True)
+
+        # 4.5. Non-Operational Costs - Full width
+        st.subheader("💸 Custos Não Operacionais")
+        
+        if not display_df.empty and 'non_operational_costs' in display_df.columns:
+            x_col, x_title = prepare_x_axis(display_df, view_type)
+            
+            # Ensure non_operational_costs is numeric
+            display_df['non_operational_costs'] = pd.to_numeric(display_df['non_operational_costs'], errors='coerce').fillna(0)
+            
+            # Calculate percentage of non-operational costs relative to revenue
+            if 'revenue' in display_df.columns:
+                display_df['non_op_cost_pct'] = (display_df['non_operational_costs'] / display_df['revenue'] * 100).fillna(0)
+            
+            fig_non_op_costs = px.area(
+                display_df,
+                x=x_col,
+                y='non_operational_costs',
+                title='💸 Custos Não Operacionais',
+                color_discrete_sequence=['#FF6B6B'],  # Red color
+                text='non_operational_costs'
+            )
+            
+            # Format text labels
+            fig_non_op_costs.update_traces(
+                texttemplate='R$ %{text:,.0f}',
+                textposition='top center'
+            )
+            
+            # Update hover template to include percentage
+            if 'non_op_cost_pct' in display_df.columns:
+                customdata = list(zip(display_df['non_operational_costs'], display_df['non_op_cost_pct']))
+                fig_non_op_costs.update_traces(
+                    customdata=customdata,
+                    hovertemplate='<b>%{x}</b><br>Custos Não Operacionais: R$ %{customdata[0]:,.0f}<br>% da Receita: %{customdata[1]:.1f}%<extra></extra>'
+                )
+            
+            # Apply interactive features for monthly view
+            if view_type == "Mensal":
+                xaxis_config = get_monthly_xaxis_config(display_df, x_col)
+                
+                fig_non_op_costs.update_layout(
+                    yaxis_title="Custos Não Operacionais (R$)",
+                    xaxis_title=x_title,
+                    xaxis=xaxis_config,
+                    height=600,
+                    margin=dict(t=100, b=100),
+                    hovermode='x unified',
+                    dragmode='pan'
+                )
+                st.plotly_chart(fig_non_op_costs, use_container_width=True, config=get_plotly_config())
+            else:
+                fig_non_op_costs.update_layout(
+                    yaxis_title="Custos Não Operacionais (R$)",
+                    xaxis_title=x_title,
+                    xaxis=dict(
+                        tickangle=-45 if view_type == "Mensal" else 0,
+                        tickmode='linear',
+                        dtick=1 if view_type == "Anual" else (2 if view_type == "Mensal" and len(display_df) > 24 else None),
+                        type='category' if view_type == "Anual" else None,
+                        categoryorder='category ascending' if view_type == "Anual" else None
+                    ),
+                    height=450 if view_type == "Mensal" else 400,
+                    margin=dict(t=50, b=100 if view_type == "Mensal" else 100),
+                    hovermode='x unified'
+                )
+                st.plotly_chart(fig_non_op_costs, use_container_width=True)
 
         # 5. Result (Profit) - Full width
         st.subheader("💰 Resultado (Lucro Líquido)")

@@ -11,8 +11,10 @@ class GerenciadorArquivos:
     """Gerenciador de arquivos Excel com persistência local"""
     
     def __init__(self):
-        self.caminho_armazenamento = Path("data/arquivos_enviados")
-        self.caminho_registro = Path("data/registro_arquivos.json")
+        # Use environment variable if available (for Railway volumes)
+        data_dir = os.environ.get('DATA_PATH', 'data')
+        self.caminho_armazenamento = Path(data_dir) / "arquivos_enviados"
+        self.caminho_registro = Path(data_dir) / "registro_arquivos.json"
         
         # Initialize production flag and db_manager
         self.is_production = os.environ.get('RAILWAY_ENVIRONMENT') == 'production'
