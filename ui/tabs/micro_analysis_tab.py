@@ -26,11 +26,33 @@ def render_micro_analysis_tab(flexible_data):
     for year, year_data in flexible_data.items():
         if str(year) in selected_years:
             row = {'year': year}
-            for key, value in year_data.items():
-                if isinstance(value, dict) and 'annual' in value:
-                    row[key] = value['annual']
+            
+            # List of all cost fields that need to be flattened
+            cost_fields = ['revenue', 'variable_costs', 'fixed_costs', 'non_operational_costs', 
+                          'taxes', 'commissions', 'administrative_expenses', 'marketing_expenses', 
+                          'financial_expenses', 'operational_costs', 'net_profit', 'gross_profit']
+            
+            # Flatten each field
+            for field in cost_fields:
+                if field in year_data:
+                    value = year_data[field]
+                    if isinstance(value, dict):
+                        # Extract annual value from dict
+                        row[field] = value.get('annual', 0)
+                    else:
+                        row[field] = value if value is not None else 0
                 else:
-                    row[key] = value
+                    # Set to 0 if field doesn't exist
+                    row[field] = 0
+            
+            # Handle any other fields in year_data
+            for key, value in year_data.items():
+                if key not in cost_fields and key not in row:
+                    if isinstance(value, dict) and 'annual' in value:
+                        row[key] = value['annual']
+                    elif not isinstance(value, dict):
+                        row[key] = value
+            
             flat_data.append(row)
 
     df = pd.DataFrame(flat_data)

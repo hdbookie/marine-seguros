@@ -449,7 +449,20 @@ def create_pnl_evolution_chart(df, title="Evolução do Demonstrativo de Resulta
     ))
 
     # Add Total Costs line
-    df['total_costs'] = df[['variable_costs', 'fixed_costs', 'non_operational_costs', 'taxes', 'commissions', 'administrative_expenses', 'marketing_expenses', 'financial_expenses']].sum(axis=1)
+    # Ensure all cost columns exist and are numeric
+    cost_columns = ['variable_costs', 'fixed_costs', 'non_operational_costs', 'taxes', 
+                    'commissions', 'administrative_expenses', 'marketing_expenses', 'financial_expenses']
+    
+    # Create a clean dataframe for cost calculation
+    cost_df = pd.DataFrame()
+    for col in cost_columns:
+        if col in df.columns:
+            # Convert any remaining dict values to numbers
+            cost_df[col] = df[col].apply(lambda x: x.get('annual', 0) if isinstance(x, dict) else (x if pd.notna(x) else 0))
+        else:
+            cost_df[col] = 0
+    
+    df['total_costs'] = cost_df.sum(axis=1)
     fig.add_trace(go.Scatter(
         name='Custos Totais',
         x=df['year'],
@@ -521,16 +534,29 @@ def create_margin_comparison_chart(df, title="Comparativo de Margens"):
         hovertemplate='<b>Ano:</b> %{x}<br><b>Margem de Lucro:</b> %{y:.2f}%<extra></extra>'
     ))
 
-    # Add Contribution Margin line
-    df['contribution_margin_percentage'] = (df['contribution_margin'] / df['revenue']) * 100
-    fig.add_trace(go.Scatter(
-        name='Margem de Contribuição',
-        x=df['year'],
-        y=df['contribution_margin_percentage'],
-        mode='lines+markers',
-        line=dict(color='teal', width=2),
-        hovertemplate='<b>Ano:</b> %{x}<br><b>Margem de Contribuição:</b> %{y:.2f}%<extra></extra>'
-    ))
+    # Add Contribution Margin line if available
+    if 'contribution_margin' in df.columns:
+        df['contribution_margin_percentage'] = (df['contribution_margin'] / df['revenue']) * 100
+        fig.add_trace(go.Scatter(
+            name='Margem de Contribuição',
+            x=df['year'],
+            y=df['contribution_margin_percentage'],
+            mode='lines+markers',
+            line=dict(color='teal', width=2),
+            hovertemplate='<b>Ano:</b> %{x}<br><b>Margem de Contribuição:</b> %{y:.2f}%<extra></extra>'
+        ))
+    else:
+        # Calculate contribution margin as revenue - variable costs
+        df['contribution_margin'] = df['revenue'] - df.get('variable_costs', 0)
+        df['contribution_margin_percentage'] = (df['contribution_margin'] / df['revenue']) * 100
+        fig.add_trace(go.Scatter(
+            name='Margem de Contribuição',
+            x=df['year'],
+            y=df['contribution_margin_percentage'],
+            mode='lines+markers',
+            line=dict(color='teal', width=2),
+            hovertemplate='<b>Ano:</b> %{x}<br><b>Margem de Contribuição:</b> %{y:.2f}%<extra></extra>'
+        ))
 
     fig.update_layout(
         title=title,

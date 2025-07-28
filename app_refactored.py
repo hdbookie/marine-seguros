@@ -85,7 +85,18 @@ if not st.session_state.get('user'):
     st.stop()
 
 # Main app header
-st.title("📊 Marine Seguros - Financial Analytics Dashboard")
+col1, col2 = st.columns([4, 1])
+with col1:
+    st.title("📊 Marine Seguros - Financial Analytics Dashboard")
+with col2:
+    # Add refresh button
+    if st.button("🔄 Atualizar Dados", help="Carregar dados mais recentes"):
+        # Clear cache and reload
+        keys_to_clear = ['processed_data', 'extracted_data', 'monthly_data', 'financial_data', 'gemini_insights', 'unified_data']
+        for key in keys_to_clear:
+            if key in st.session_state:
+                del st.session_state[key]
+        st.rerun()
 
 # Sidebar
 with st.sidebar:
@@ -150,6 +161,16 @@ initialize_session_state(db, False) # Initialize with data_loaded = False
 
 # Load state from database
 data_loaded = db.auto_load_state(st.session_state)
+
+# Check if new data is available
+if data_loaded:
+    last_upload = db.get_last_upload_info()
+    if last_upload:
+        # Check if data is fresh (uploaded in last 5 minutes)
+        from datetime import datetime, timedelta
+        upload_time = datetime.fromisoformat(last_upload['created_at'].replace(' ', 'T'))
+        if datetime.now() - upload_time < timedelta(minutes=5):
+            st.success(f"🔄 Novos dados disponíveis! Atualizados por {last_upload['username']} há {(datetime.now() - upload_time).seconds // 60} minutos")
 
 # Convert extracted data to processed format if needed
 # This block should always regenerate processed_data from extracted_data

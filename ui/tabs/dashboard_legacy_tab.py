@@ -50,6 +50,21 @@ def render_dashboard_tab(db, use_unified_extractor=True):
     """Render the dashboard tab with financial visualizations"""
     
     st.header("Dashboard Financeiro")
+    
+    # Show data freshness indicator
+    last_upload = db.get_last_upload_info()
+    if last_upload:
+        from datetime import datetime
+        upload_time = datetime.fromisoformat(last_upload['created_at'].replace(' ', 'T'))
+        time_diff = datetime.now() - upload_time
+        
+        if time_diff.total_seconds() < 300:  # Less than 5 minutes
+            st.success(f"🟢 Dados atualizados há {int(time_diff.total_seconds() / 60)} minutos por {last_upload['username']}")
+        elif time_diff.total_seconds() < 3600:  # Less than 1 hour
+            st.info(f"🔵 Dados atualizados há {int(time_diff.total_seconds() / 60)} minutos por {last_upload['username']}")
+        else:
+            hours = int(time_diff.total_seconds() / 3600)
+            st.warning(f"🟡 Dados atualizados há {hours} hora(s) por {last_upload['username']}")
 
     if hasattr(st.session_state, 'processed_data') and st.session_state.processed_data is not None:
         data = st.session_state.processed_data

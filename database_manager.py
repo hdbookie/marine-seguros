@@ -20,7 +20,31 @@ class DatabaseManager:
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             
-            # Table for extracted financial data
+            # Table for shared financial data (all users access this)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS shared_financial_data (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    year TEXT NOT NULL UNIQUE,
+                    data TEXT NOT NULL,
+                    uploaded_by TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Table for upload history
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS upload_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT NOT NULL,
+                    email TEXT,
+                    files TEXT NOT NULL,
+                    upload_type TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Legacy table for backward compatibility
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS financial_data (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -62,6 +86,26 @@ class DatabaseManager:
             """)
             
             conn.commit()
+    
+    def save_shared_financial_data(self, year: str, data: Dict[str, Any], username: str = None) -> bool:
+        """Save financial data to shared storage accessible by all users"""
+        try:
+            # Convert numpy types to Python native types
+            clean_data = self._serialize_for_json(data)
+            data_json = json.dumps(clean_data, ensure_ascii=False)
+            
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT OR REPLACE INTO shared_financial_data 
+                    (year, data, uploaded_by, updated_at) 
+                    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                """, (str(year), data_json, username))
+                conn.commit()
+                return True
+        except Exception as e:
+            print(f"Error saving shared financial data for year {year}: {e}")
+            return False
     
     def save_financial_data(self, year: str, data: Dict[str, Any]) -> bool:
         """Save financial data for a specific year"""
@@ -215,7 +259,97 @@ class DatabaseManager:
                 print(f"Invalid revenue value for {key}: {value} (type: {type(value)})")
                 return False
         
+        # Check for zero revenue - don't save years with no activity
+        annual_revenue = revenue_data.get('ANNUAL', 0) if has_annual else 0
+        monthly_revenue_sum = sum(revenue_data.get(month, 0) for month in ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'] if isinstance(revenue_data.get(month, 0), (int, float)))
+        
+        # Skip years with zero revenue
+        if annual_revenue == 0 and monthly_revenue_sum == 0:
+            year = data.get('year', 'Unknown')
+            print(f"Skipping year {year} - zero revenue detected (annual: {annual_revenue}, monthly sum: {monthly_revenue_sum})")
+            return False
+        
         return True
+    
+    def load_shared_financial_data(self) -> Dict[str, Any]:
+        """Load all shared financial data accessible by all users"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT year, data FROM shared_financial_data 
+                    ORDER BY year
+                """)
+                
+                financial_data = {}
+                for row in cursor.fetchall():
+                    year = row[0]
+                    data = json.loads(row[1])
+                    
+                    # Ensure year is an integer if it's a valid year
+                    try:
+                        year_int = int(year)
+                        if 2000 <= year_int <= 2100:
+                            financial_data[year_int] = data
+                        else:
+                            financial_data[year] = data
+                    except ValueError:
+                        financial_data[year] = data
+                
+                return financial_data
+        except Exception as e:
+            print(f"Error loading shared financial data: {e}")
+            return {}
+    
+    def save_upload_history(self, username: str, email: str, files: List[str], upload_type: str = "financial_data") -> bool:
+        """Save upload history for tracking who uploaded what"""
+        try:
+            files_json = json.dumps(files, ensure_ascii=False)
+            
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO upload_history 
+                    (username, email, files, upload_type) 
+                    VALUES (?, ?, ?, ?)
+                """, (username, email, files_json, upload_type))
+                conn.commit()
+                return True
+        except Exception as e:
+            print(f"Error saving upload history: {e}")
+            return False
+    
+    def get_upload_history(self, limit: int = 10) -> List[Dict[str, Any]]:
+        """Get recent upload history"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT username, email, files, upload_type, created_at 
+                    FROM upload_history 
+                    ORDER BY created_at DESC 
+                    LIMIT ?
+                """, (limit,))
+                
+                history = []
+                for row in cursor.fetchall():
+                    history.append({
+                        'username': row[0],
+                        'email': row[1],
+                        'files': json.loads(row[2]),
+                        'upload_type': row[3],
+                        'created_at': row[4]
+                    })
+                
+                return history
+        except Exception as e:
+            print(f"Error loading upload history: {e}")
+            return []
+    
+    def get_last_upload_info(self) -> Optional[Dict[str, Any]]:
+        """Get information about the last upload"""
+        history = self.get_upload_history(limit=1)
+        return history[0] if history else None
     
     def load_all_financial_data(self) -> Dict[str, Any]:
         """Load all financial data"""
@@ -503,23 +637,44 @@ class DatabaseManager:
             return {}
     
     def auto_save_state(self, session_state) -> None:
-        """Automatically save all relevant session state data"""
+        """Automatically save all relevant session state data to shared storage"""
         try:
             saved_count = 0
+            username = session_state.user.get('username', 'Unknown') if hasattr(session_state, 'user') and session_state.user else 'System'
             
-            # Save financial data if available
+            # Save financial data to shared storage
             if hasattr(session_state, 'extracted_data') and session_state.extracted_data:
-                print(f"Attempting to save {len(session_state.extracted_data)} years of data...")
+                print(f"Attempting to save {len(session_state.extracted_data)} years of data to shared storage...")
+                
+                # Track uploaded files for history
+                uploaded_files = []
+                if hasattr(session_state, 'uploaded_files'):
+                    # Handle both list of strings and list of file objects
+                    if isinstance(session_state.uploaded_files, list):
+                        for f in session_state.uploaded_files:
+                            if isinstance(f, str):
+                                uploaded_files.append(f)
+                            elif hasattr(f, 'name'):
+                                uploaded_files.append(f.name)
+                            elif isinstance(f, dict) and 'nome' in f:
+                                uploaded_files.append(f['nome'])
                 
                 for year, data in session_state.extracted_data.items():
                     # Ensure year is string for consistency
                     year_str = str(year)
-                    if self.save_financial_data(year_str, data):
+                    # Clean the data before saving
+                    clean_data = self._serialize_for_json(data)
+                    if self.save_shared_financial_data(year_str, clean_data, username):
                         saved_count += 1
                     else:
                         print(f"❌ Failed to save data for year {year_str}")
                 
-                print(f"✅ Successfully saved {saved_count}/{len(session_state.extracted_data)} years")
+                # Save upload history if we have uploaded files
+                if uploaded_files and saved_count > 0:
+                    user_email = session_state.user.get('email', '') if hasattr(session_state, 'user') and session_state.user else ''
+                    self.save_upload_history(username, user_email, uploaded_files)
+                
+                print(f"✅ Successfully saved {saved_count}/{len(session_state.extracted_data)} years to shared storage")
             else:
                 print("⚠️ No extracted_data found in session_state")
             
@@ -569,13 +724,13 @@ class DatabaseManager:
         try:
             data_loaded = False
             
-            # Load financial data - ALWAYS overwrite if data exists in DB
-            financial_data = self.load_all_financial_data()
+            # Load shared financial data - ALWAYS overwrite if data exists in DB
+            financial_data = self.load_shared_financial_data()
             if financial_data:
                 # Force overwrite even if session_state has empty dict
                 session_state.extracted_data = financial_data
                 data_loaded = True
-                print(f"Loaded {len(financial_data)} years of financial data from database")
+                print(f"Loaded {len(financial_data)} years of shared financial data")
             
             # Load filter state
             filter_state = self.load_filter_state()
