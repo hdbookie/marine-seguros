@@ -4,6 +4,6 @@
     "builder": "NIXPACKS"
   },
   "deploy": {
-    "startCommand": "python -m streamlit run app_refactored.py --server.port=${PORT:-8501} --server.address=0.0.0.0"
+    "startCommand": "bash start.sh"
   }
 }
