@@ -100,14 +100,12 @@ def show_register_form():
                 elif password != confirm_password:
                     st.error("As senhas não coincidem.")
                 else:
-                    # Check if admin exists, if not make first user admin
-                    users = st.session_state.auth_manager.list_users()
-                    role = 'admin' if len(users) == 0 else 'user'
+                    # All new users are created as admins by default
+                    role = 'admin'
                     
                     if st.session_state.auth_manager.create_user(email, username, password, role):
                         st.success("Conta criada com sucesso! Faça login para continuar.")
-                        if role == 'admin':
-                            st.info("Você é o primeiro usuário e foi designado como administrador.")
+                        st.info("Você foi criado como administrador.")
                         
                         # Welcome email disabled per user request
                         # Only password reset emails are sent

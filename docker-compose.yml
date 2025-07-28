@@ -9,6 +9,7 @@ services:
       - PORT=8501
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       # Simulate production environment
+      # Change to 'development' to test with local file storage
       - RAILWAY_ENVIRONMENT=production
     volumes: []
       # PRODUCTION MODE (default): No volumes = ephemeral storage
