@@ -4,6 +4,36 @@ import os
 from datetime import datetime
 import streamlit as st
 
+# Load dotenv for local development (if available)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    # python-dotenv not installed (likely on Streamlit Cloud)
+    pass
+
+def get_env_var(key: str, default: str = None) -> str:
+    """
+    Get environment variable from either Streamlit secrets or OS environment.
+    Works seamlessly in both local development (with .env) and Streamlit Cloud.
+    
+    Args:
+        key: The environment variable key
+        default: Default value if not found
+        
+    Returns:
+        The environment variable value or default
+    """
+    # First try Streamlit secrets (for Streamlit Cloud)
+    try:
+        if hasattr(st, 'secrets') and key in st.secrets:
+            return st.secrets[key]
+    except:
+        pass
+    
+    # Then try OS environment (for local development)
+    return os.getenv(key, default)
+
 # Security settings
 REQUIRE_PASSWORD = True
 MAX_FILE_SIZE_MB = 50
