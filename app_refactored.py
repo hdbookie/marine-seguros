@@ -138,9 +138,11 @@ with st.sidebar:
     
     Recursos:
     - 📊 Dashboard Financeiro
-    - 🔬 Análise Micro
-    - 🤖 Insights IA
-    - 💬 Assistente de Chat IA
+    - 🔬 Análise Micro (🚧 Em construção)
+    - 🤖 Insights IA*
+    - 💬 Assistente de Chat IA*
+    
+    *IA será muito mais poderosa com análise micro completa
     """)
 
 # Initialize session state
