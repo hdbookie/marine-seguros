@@ -1241,6 +1241,20 @@ def render_dashboard_tab(db, use_unified_extractor=True):
                 st.plotly_chart(fig_contrib, use_container_width=True)
 
         # 4. Operational Costs - Full width  
+        st.subheader("⚙️ Custos Operacionais")
+        
+        # Debug info in UI
+        with st.expander("🔍 Debug Info - Operational Costs", expanded=False):
+            st.write("**DataFrame Info:**")
+            st.write(f"- Shape: {display_df.shape}")
+            st.write(f"- Columns: {list(display_df.columns)}")
+            if not display_df.empty:
+                st.write("\n**Sample Data (last row):**")
+                last_row = display_df.iloc[-1]
+                for col in ['revenue', 'variable_costs', 'fixed_costs', 'operational_costs', 'costs']:
+                    if col in display_df.columns:
+                        st.write(f"- {col}: {last_row[col]:,.0f}")
+        
         if not display_df.empty and ('operational_costs' in display_df.columns or 
                                      ('fixed_costs' in display_df.columns and 'variable_costs' in display_df.columns)):
             x_col, x_title = prepare_x_axis(display_df, view_type)
@@ -1317,6 +1331,21 @@ def render_dashboard_tab(db, use_unified_extractor=True):
             print(f"  Data type of column: {display_df['total_operational_costs'].dtype}")
             print(f"  Sample values: {display_df['total_operational_costs'].head(3).tolist()}")
             print(f"  Are values numeric? {pd.api.types.is_numeric_dtype(display_df['total_operational_costs'])}")
+            
+            # Show debug info in UI
+            with st.expander("🔍 Debug - Calculated Values", expanded=True):
+                st.write("**Calculated Total Operational Costs:**")
+                debug_df = pd.DataFrame({
+                    'Year/Period': display_df[x_col],
+                    'Fixed Costs': display_df['fixed_costs'],
+                    'Variable Costs': display_df.get(var_costs_col, 0),
+                    'Total Operational': display_df['total_operational_costs']
+                })
+                st.dataframe(debug_df.tail(5), use_container_width=True)
+                st.write(f"**Summary:**")
+                st.write(f"- Min Total Operational: R$ {display_df['total_operational_costs'].min():,.0f}")
+                st.write(f"- Max Total Operational: R$ {display_df['total_operational_costs'].max():,.0f}")
+                st.write(f"- Mean Total Operational: R$ {display_df['total_operational_costs'].mean():,.0f}")
             
             fig_op_costs = px.area(
                 display_df,
