@@ -21,6 +21,31 @@ from utils.legacy_helpers import (
 from ui.tabs.micro_analysis_tab import render_micro_analysis_tab
 
 
+def get_monthly_xaxis_config(display_df, x_col):
+    """Get x-axis configuration for monthly charts based on data size"""
+    # Adjust tick display based on number of months
+    if len(display_df) > 36:
+        dtick = 3  # Show every 3rd month
+    elif len(display_df) > 24:
+        dtick = 2  # Show every 2nd month
+    else:
+        dtick = 1  # Show every month
+    
+    xaxis_config = dict(
+        tickangle=-45,
+        tickmode='linear',
+        dtick=dtick,
+        **get_monthly_layout_config()
+    )
+    
+    # Set default range to show last 12 months
+    default_range = get_default_monthly_range(display_df, x_col)
+    if default_range:
+        xaxis_config['range'] = default_range
+    
+    return xaxis_config
+
+
 def render_dashboard_tab(db, use_unified_extractor=True):
     """Render the dashboard tab with financial visualizations"""
     
@@ -303,6 +328,9 @@ def render_dashboard_tab(db, use_unified_extractor=True):
                     (monthly_df['year'].isin(selected_years)) &
                     (monthly_df['month_num'].isin(selected_month_nums))
                 ]
+                
+                # Sort by date for chronological order
+                display_df = display_df.sort_values(['year', 'month_num'])
                 
                 # Add data refresh button
                 col1, col2 = st.columns([6, 1])
@@ -776,16 +804,7 @@ def render_dashboard_tab(db, use_unified_extractor=True):
     
             # Apply interactive features for monthly view
             if view_type == "Mensal":
-                xaxis_config = dict(
-                    tickangle=-45,
-                    tickmode='linear',
-                    **get_monthly_layout_config()
-                )
-                
-                # Set default range to show last 12 months
-                default_range = get_default_monthly_range(display_df, x_col)
-                if default_range:
-                    xaxis_config['range'] = default_range
+                xaxis_config = get_monthly_xaxis_config(display_df, x_col)
                     
                 fig_margin.update_layout(
                     yaxis_title="Margem de Lucro (%)",
@@ -915,16 +934,7 @@ def render_dashboard_tab(db, use_unified_extractor=True):
     
             # Apply interactive features for monthly view
             if view_type == "Mensal":
-                xaxis_config = dict(
-                    tickangle=-45,
-                    tickmode='linear',
-                    **get_monthly_layout_config()
-                )
-                
-                # Set default range to show last 12 months
-                default_range = get_default_monthly_range(display_df, x_col)
-                if default_range:
-                    xaxis_config['range'] = default_range
+                xaxis_config = get_monthly_xaxis_config(display_df, x_col)
                     
                 fig_var_costs.update_layout(
                     title='💸 Custos Variáveis e Fixos vs Receita',
@@ -1030,16 +1040,7 @@ def render_dashboard_tab(db, use_unified_extractor=True):
     
             # Apply interactive features for monthly view
             if view_type == "Mensal":
-                xaxis_config = dict(
-                    tickangle=-45,
-                    tickmode='linear',
-                    **get_monthly_layout_config()
-                )
-                
-                # Set default range to show last 12 months
-                default_range = get_default_monthly_range(display_df, x_col)
-                if default_range:
-                    xaxis_config['range'] = default_range
+                xaxis_config = get_monthly_xaxis_config(display_df, x_col)
                     
                 fig_fixed.update_layout(
                     title='🏢 Custos Fixos vs Receita',
@@ -1121,16 +1122,7 @@ def render_dashboard_tab(db, use_unified_extractor=True):
     
             # Apply interactive features for monthly view
             if view_type == "Mensal":
-                xaxis_config = dict(
-                    tickangle=-45,
-                    tickmode='linear',
-                    **get_monthly_layout_config()
-                )
-                
-                # Set default range to show last 12 months
-                default_range = get_default_monthly_range(display_df, x_col)
-                if default_range:
-                    xaxis_config['range'] = default_range
+                xaxis_config = get_monthly_xaxis_config(display_df, x_col)
                     
                 fig_variable.update_layout(
                     title='📦 Custos Variáveis vs Receita',
@@ -1197,16 +1189,7 @@ def render_dashboard_tab(db, use_unified_extractor=True):
     
             # Apply interactive features for monthly view
             if view_type == "Mensal":
-                xaxis_config = dict(
-                    tickangle=-45,
-                    tickmode='linear',
-                    **get_monthly_layout_config()
-                )
-                
-                # Set default range to show last 12 months
-                default_range = get_default_monthly_range(display_df, x_col)
-                if default_range:
-                    xaxis_config['range'] = default_range
+                xaxis_config = get_monthly_xaxis_config(display_df, x_col)
                     
                 fig_contrib.update_layout(
                     yaxis_title="Margem de Contribuição (R$)",
@@ -1278,16 +1261,7 @@ def render_dashboard_tab(db, use_unified_extractor=True):
     
             # Apply interactive features for monthly view
             if view_type == "Mensal":
-                xaxis_config = dict(
-                    tickangle=-45,
-                    tickmode='linear',
-                    **get_monthly_layout_config()
-                )
-                
-                # Set default range to show last 12 months
-                default_range = get_default_monthly_range(display_df, x_col)
-                if default_range:
-                    xaxis_config['range'] = default_range
+                xaxis_config = get_monthly_xaxis_config(display_df, x_col)
                     
                 fig_op_costs.update_layout(
                     yaxis_title="Custos Operacionais (R$)",
@@ -1339,16 +1313,7 @@ def render_dashboard_tab(db, use_unified_extractor=True):
     
             # Apply interactive features for monthly view
             if view_type == "Mensal":
-                xaxis_config = dict(
-                    tickangle=-45,
-                    tickmode='linear',
-                    **get_monthly_layout_config()
-                )
-                
-                # Set default range to show last 12 months
-                default_range = get_default_monthly_range(display_df, x_col)
-                if default_range:
-                    xaxis_config['range'] = default_range
+                xaxis_config = get_monthly_xaxis_config(display_df, x_col)
                     
                 fig_result.update_layout(
                     title=f'Resultado {view_type} (Lucro/Prejuízo)',

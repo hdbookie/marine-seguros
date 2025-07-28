@@ -378,7 +378,7 @@ def create_detailed_cost_structure_chart(df, title="Estrutura de Custos Detalhad
             text=[format_currency(v) for v in df[cost_type]],
             textposition='auto',
             marker_color=colors[i % len(colors)],
-            hovertemplate=f'<b>Ano:</b> %{{x}}<br><b>{cost_type.replace('_', ' ').title()}:</b> %{{text}}<extra></extra>'
+            hovertemplate=f"<b>Ano:</b> %{{x}}<br><b>{cost_type.replace('_', ' ').title()}:</b> %{{text}}<extra></extra>"
         ))
 
     # Add Revenue as a line on top
