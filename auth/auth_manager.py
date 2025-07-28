@@ -10,6 +10,7 @@ from email.mime.multipart import MIMEMultipart
 import os
 from typing import Optional, Dict, Tuple
 import logging
+from config import get_env_var
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -18,7 +19,7 @@ logger = logging.getLogger(__name__)
 class AuthManager:
     def __init__(self, db_path: str = "data/auth.db"):
         self.db_path = db_path
-        self.secret_key = os.environ.get('JWT_SECRET_KEY', secrets.token_urlsafe(32))
+        self.secret_key = get_env_var('JWT_SECRET_KEY', secrets.token_urlsafe(32))
         # Set SQLite to handle concurrent access better
         self.init_database()
         self._configure_sqlite()

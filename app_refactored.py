@@ -6,10 +6,12 @@ Refactored version using modular architecture
 import streamlit as st
 import pandas as pd
 import os
-from dotenv import load_dotenv
 import google.generativeai as genai
 from datetime import datetime
 from typing import Dict
+
+# Import configuration (handles env vars for both local and cloud)
+from config import get_env_var
 
 # Import authentication
 from auth import init_auth, require_auth, show_login_page, show_user_menu, show_admin_panel
@@ -32,8 +34,7 @@ from ui.tabs.ai_insights_legacy_tab import render_ai_insights_tab
 from ui.tabs.ai_chat_legacy_tab import render_ai_chat_tab
 from ui.tabs.auth_management_tab_simple import render_auth_management_tab
 
-# Load environment variables
-load_dotenv()
+# Configuration is handled in config.py
 
 # Initialize authentication
 init_auth()
@@ -111,7 +112,7 @@ with st.sidebar:
     gemini_api_key = st.text_input(
         "🔑 Chave API Gemini",
         type="password",
-        value=os.getenv("GEMINI_API_KEY", ""),
+        value=get_env_var("GEMINI_API_KEY", ""),
         help="Obtenha sua chave API no Google AI Studio"
     )
     

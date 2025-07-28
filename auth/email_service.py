@@ -3,18 +3,19 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import logging
+from config import get_env_var
 
 logger = logging.getLogger(__name__)
 
 class EmailService:
     def __init__(self):
         # Email configuration from environment variables
-        self.smtp_host = os.environ.get('SMTP_HOST', 'smtp.gmail.com')
-        self.smtp_port = int(os.environ.get('SMTP_PORT', '587'))
-        self.smtp_user = os.environ.get('SMTP_USER')
-        self.smtp_password = os.environ.get('SMTP_PASSWORD')
-        self.from_email = os.environ.get('FROM_EMAIL', self.smtp_user)
-        self.app_url = os.environ.get('APP_URL', 'http://localhost:8501')
+        self.smtp_host = get_env_var('SMTP_HOST', 'smtp.gmail.com')
+        self.smtp_port = int(get_env_var('SMTP_PORT', '587'))
+        self.smtp_user = get_env_var('SMTP_USER')
+        self.smtp_password = get_env_var('SMTP_PASSWORD')
+        self.from_email = get_env_var('FROM_EMAIL', self.smtp_user)
+        self.app_url = get_env_var('APP_URL', 'http://localhost:8501')
     
     def send_reset_email(self, to_email: str, reset_token: str) -> bool:
         """Send password reset email"""
