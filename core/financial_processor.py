@@ -144,18 +144,23 @@ class FinancialProcessor:
             all_data[year]['profit_margin'] = profit_margin
             all_data[year]['contribution_margin'] = contribution_margin
 
+            # Calculate operational costs correctly
+            operational_expenses = year_data.get('operational_expenses', {}).get('annual', 0)
+            operational_costs = admin_expenses + operational_expenses
+            
             row = {
                 'year': year,
                 'revenue': revenue,
                 'variable_costs': variable_costs,
                 'fixed_costs': fixed_costs,
-                'operational_costs': fixed_costs, # For compatibility
+                'operational_costs': operational_costs, # Calculated as admin + operational
                 'non_operational_costs': non_operational_costs,
                 'taxes': taxes,
                 'commissions': commissions,
                 'admin_expenses': admin_expenses,
                 'marketing_expenses': marketing_expenses,
                 'financial_expenses': financial_expenses,
+                'operational_expenses': operational_expenses,
                 'contribution_margin': contribution_margin,
                 'net_profit': net_profit,
                 'profit_margin': profit_margin,
@@ -209,6 +214,10 @@ class FinancialProcessor:
                     profit_margin = (net_profit / revenue) * 100 if revenue > 0 else 0
                     contribution_margin = revenue - variable_costs
 
+                    # Calculate operational costs correctly for monthly data
+                    operational_expenses = year_data.get('operational_expenses', {}).get('monthly', {}).get(month, 0)
+                    operational_costs = admin_expenses + operational_expenses
+                    
                     row = {
                         'year': year,
                         'month': month,
@@ -217,13 +226,14 @@ class FinancialProcessor:
                         'revenue': revenue,
                         'variable_costs': variable_costs,
                         'fixed_costs': fixed_costs,
-                        'operational_costs': fixed_costs, # For compatibility
+                        'operational_costs': operational_costs, # Calculated as admin + operational
                         'non_operational_costs': non_operational_costs,
                         'taxes': taxes,
                         'commissions': commissions,
                         'admin_expenses': admin_expenses,
                         'marketing_expenses': marketing_expenses,
                         'financial_expenses': financial_expenses,
+                        'operational_expenses': operational_expenses,
                         'contribution_margin': contribution_margin,
                         'net_profit': net_profit,
                         'profit_margin': profit_margin

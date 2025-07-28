@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    ports:
+      - "8501:8501"
+    environment:
+      - PORT=8501
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      # Development environment (files on filesystem)
+      - RAILWAY_ENVIRONMENT=development
+    volumes:
+      # Mount entire project for live reload
+      - .:/app
+      # Exclude Python cache
+      - /app/__pycache__
+      # Persist data directory
+      - ./data:/app/data
+    restart: unless-stopped

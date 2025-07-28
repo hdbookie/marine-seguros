@@ -185,5 +185,15 @@ def show_admin_panel():
             st.markdown("**Usuários Atuais**")
             users = st.session_state.users
             for username, user_data in users.items():
-                role_display = "admin" if user_data['role'] == 'admin' else "usuário"
-                st.text(f"• {username} ({role_display})")
+                role_display = "Administrador" if user_data['role'] == 'admin' else "Usuário"
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    st.text(f"• {username} ({role_display})")
+                with col2:
+                    if user_data['role'] != 'admin':
+                        if st.button("👑", key=f"promote_{username}", help="Promover para Admin"):
+                            users[username]['role'] = 'admin'
+                            save_users(users)
+                            st.session_state.users = users
+                            st.success(f"✅ {username} agora é Administrador!")
+                            st.rerun()

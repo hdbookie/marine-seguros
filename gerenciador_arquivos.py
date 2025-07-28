@@ -169,11 +169,40 @@ class GerenciadorArquivos:
     def obter_caminhos_arquivos(self) -> List[str]:
         """Obter caminhos de todos os arquivos para processamento"""
         caminhos = []
+        temp_files = []  # Track temp files for cleanup
+        
         for arquivo in self.registro["arquivos"]:
-            caminho = Path(arquivo["caminho"])
-            if caminho.exists():
-                caminhos.append(str(caminho))
+            if arquivo.get("is_db_stored") and self.db_manager:
+                # For DB-stored files, we need to extract them temporarily
+                file_info = self.db_manager.get_file_from_db(arquivo["id"])
+                if file_info:
+                    # Save temporarily for processing
+                    temp_path = self.caminho_armazenamento / f"temp_{arquivo['id']}_{arquivo['nome']}"
+                    with open(temp_path, 'wb') as f:
+                        f.write(file_info['file_data'])
+                    caminhos.append(str(temp_path))
+                    temp_files.append(temp_path)
+            else:
+                # For filesystem files
+                if "caminho" in arquivo:
+                    caminho = Path(arquivo["caminho"])
+                    if caminho.exists():
+                        caminhos.append(str(caminho))
+        
+        # Store temp files for later cleanup
+        self._temp_files = temp_files
         return caminhos
+    
+    def cleanup_temp_files(self):
+        """Clean up temporary files created for processing"""
+        if hasattr(self, '_temp_files'):
+            for temp_file in self._temp_files:
+                try:
+                    if temp_file.exists():
+                        os.remove(temp_file)
+                except Exception as e:
+                    print(f"Error cleaning up temp file {temp_file}: {e}")
+            self._temp_files = []
     
     def sincronizar_arquivos_existentes(self):
         """Sincronizar arquivos já existentes no diretório com o registro"""
@@ -200,3 +229,37 @@ class GerenciadorArquivos:
                 self.registro["arquivos"].append(metadata)
         
         self._salvar_registro()
+    
+    def sync_from_database(self):
+        """Sync files from database if in production mode"""
+        if self.is_production and self.db_manager:
+            # Get all files from database
+            db_files = self.db_manager.list_files_in_db()
+            
+            # Update registry with database files
+            db_file_ids = {f['id'] for f in db_files}
+            registry_ids = {f['id'] for f in self.registro['arquivos']}
+            
+            # Add files that are in database but not in registry
+            for db_file in db_files:
+                if db_file['id'] not in registry_ids:
+                    # Retrieve file to extract years
+                    file_info = self.db_manager.get_file_from_db(db_file['id'])
+                    if file_info:
+                        anos = self._extrair_anos_do_arquivo_from_bytes(
+                            file_info['file_data'], 
+                            db_file['filename']
+                        )
+                        
+                        metadata = {
+                            "id": db_file['id'],
+                            "nome": db_file['filename'],
+                            "data_envio": db_file['created_at'],
+                            "tamanho": f"{db_file['file_size'] // 1024}KB",
+                            "anos_incluidos": anos,
+                            "is_db_stored": True
+                        }
+                        
+                        self.registro["arquivos"].append(metadata)
+            
+            self._salvar_registro()

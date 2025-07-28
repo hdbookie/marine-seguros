@@ -44,6 +44,18 @@ class DatabaseManager:
                 )
             """)
             
+            # Table for file storage (for production persistence)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS uploaded_files (
+                    id TEXT PRIMARY KEY,
+                    filename TEXT NOT NULL,
+                    file_data BLOB NOT NULL,
+                    file_size INTEGER,
+                    uploaded_by TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
             # Legacy table for backward compatibility
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS financial_data (
@@ -781,7 +793,11 @@ class DatabaseManager:
                 pass  # Loaded analysis cache
             
             # If we have financial data but no filters selected, select all by default
-            if financial_data and not session_state.selected_years:
+            if financial_data and not hasattr(session_state, 'selected_years'):
+                session_state.selected_years = list(financial_data.keys())
+                session_state.selected_months = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 
+                                               'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ']
+            elif financial_data and hasattr(session_state, 'selected_years') and not session_state.selected_years:
                 session_state.selected_years = list(financial_data.keys())
                 session_state.selected_months = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 
                                                'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ']
@@ -813,4 +829,85 @@ class DatabaseManager:
                 return True
         except Exception as e:
             print(f"Error clearing session data: {str(e)}")
+            return False
+    
+    def save_file_to_db(self, file_id: str, filename: str, file_data: bytes, username: str = None) -> bool:
+        """Save uploaded file to database for persistence"""
+        try:
+            file_size = len(file_data)
+            
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT OR REPLACE INTO uploaded_files 
+                    (id, filename, file_data, file_size, uploaded_by) 
+                    VALUES (?, ?, ?, ?, ?)
+                """, (file_id, filename, file_data, file_size, username))
+                conn.commit()
+                return True
+        except Exception as e:
+            print(f"Error saving file {filename} to database: {e}")
+            return False
+    
+    def get_file_from_db(self, file_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieve uploaded file from database"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT filename, file_data, file_size, uploaded_by, created_at 
+                    FROM uploaded_files 
+                    WHERE id = ?
+                """, (file_id,))
+                
+                row = cursor.fetchone()
+                if row:
+                    return {
+                        'filename': row[0],
+                        'file_data': row[1],
+                        'file_size': row[2],
+                        'uploaded_by': row[3],
+                        'created_at': row[4]
+                    }
+                return None
+        except Exception as e:
+            print(f"Error retrieving file {file_id} from database: {e}")
+            return None
+    
+    def list_files_in_db(self) -> List[Dict[str, Any]]:
+        """List all files stored in database"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT id, filename, file_size, uploaded_by, created_at 
+                    FROM uploaded_files 
+                    ORDER BY created_at DESC
+                """)
+                
+                files = []
+                for row in cursor.fetchall():
+                    files.append({
+                        'id': row[0],
+                        'filename': row[1],
+                        'file_size': row[2],
+                        'uploaded_by': row[3],
+                        'created_at': row[4]
+                    })
+                
+                return files
+        except Exception as e:
+            print(f"Error listing files from database: {e}")
+            return []
+    
+    def delete_file_from_db(self, file_id: str) -> bool:
+        """Delete a file from database"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM uploaded_files WHERE id = ?", (file_id,))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            print(f"Error deleting file {file_id} from database: {e}")
             return False
