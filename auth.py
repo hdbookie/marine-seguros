@@ -26,12 +26,14 @@ def load_users():
         "admin": {
             "password": hash_password("admin123"),
             "role": "admin",
-            "name": "Administrator"
+            "name": "Administrator",
+            "email": "admin@marineseguros.com"
         },
         "user": {
             "password": hash_password("user123"),
             "role": "user",
-            "name": "User"
+            "name": "User",
+            "email": "user@marineseguros.com"
         }
     }
     
@@ -68,7 +70,8 @@ def authenticate(username, password):
             return {
                 "username": username,
                 "role": users[username]["role"],
-                "name": users[username]["name"]
+                "name": users[username]["name"],
+                "email": users[username].get("email", "")
             }
     
     return None
@@ -117,7 +120,7 @@ def show_user_menu():
     """Show user menu in sidebar"""
     if st.session_state.user:
         st.sidebar.markdown("---")
-        st.sidebar.markdown(f"**👤 {st.session_state.user['name']}**")
+        st.sidebar.markdown(f"**👤 {st.session_state.user.get('name', st.session_state.user['username'])}**")
         role_pt = "Administrador" if st.session_state.user['role'] == 'admin' else "Usuário"
         st.sidebar.caption(f"Função: {role_pt}")
         

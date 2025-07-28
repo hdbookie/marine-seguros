@@ -139,6 +139,11 @@ class FinancialProcessor:
 
             contribution_margin = revenue - variable_costs
 
+            # Update all_data with calculated values
+            all_data[year]['net_profit'] = net_profit
+            all_data[year]['profit_margin'] = profit_margin
+            all_data[year]['contribution_margin'] = contribution_margin
+
             row = {
                 'year': year,
                 'revenue': revenue,

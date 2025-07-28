@@ -183,20 +183,34 @@ def show_change_password_form():
 
 def show_user_menu():
     """Display user menu in sidebar"""
-    if st.session_state.user:
-        with st.sidebar:
-            st.divider()
-            st.write(f"👤 **{st.session_state.user['username']}**")
-            st.write(f"📧 {st.session_state.user['email']}")
-            st.write(f"🎭 {st.session_state.user['role'].title()}")
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button("🔑 Senha", use_container_width=True):
-                    st.session_state.show_change_password = True
-            with col2:
-                if st.button("Sair", use_container_width=True):
-                    st.session_state.user = None
+    # Debug: Check if user exists and what it contains
+    if hasattr(st.session_state, 'user') and st.session_state.user:
+        # Ensure user dict has required fields
+        user = st.session_state.user
+        if isinstance(user, dict) and all(key in user for key in ['username', 'email', 'role']):
+            with st.sidebar:
+                # User info section with better styling
+                st.markdown("---")
+                st.markdown("### 👤 Perfil do Usuário")
+                
+                # Create a container for user info
+                with st.container():
+                    st.markdown(f"**Nome:** {st.session_state.user['username']}")
+                    st.markdown(f"**Email:** {st.session_state.user['email']}")
+                    role_display = "Administrador" if st.session_state.user['role'] == 'admin' else "Usuário"
+                    st.markdown(f"**Função:** {role_display}")
+                
+                st.markdown("")  # Add some space
+                
+                # Buttons in columns
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("🔑 Alterar Senha", use_container_width=True, help="Alterar sua senha"):
+                        st.session_state.show_change_password = True
+                with col2:
+                    if st.button("🚪 Sair", use_container_width=True, type="primary", help="Fazer logout"):
+                        st.session_state.user = None
+                        st.rerun()
             
             # Show change password modal
             if getattr(st.session_state, 'show_change_password', False):
@@ -206,7 +220,8 @@ def show_user_menu():
             if st.session_state.user['role'] == 'admin':
                 st.divider()
                 if st.button("⚙️ Gerenciar Usuários", use_container_width=True):
-                    st.session_state.show_admin = True
+                    st.session_state.navigate_to_auth = True
+                    st.info("👉 Clique na aba '🔐 Autenticação' acima para gerenciar usuários")
 
 def show_admin_panel():
     """Display admin panel for user management"""

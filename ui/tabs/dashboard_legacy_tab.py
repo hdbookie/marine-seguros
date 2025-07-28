@@ -346,17 +346,6 @@ def render_dashboard_tab(db, use_unified_extractor=True):
                         st.success("✅ Cache limpo! Clique em 'Analisar Dados Financeiros' para reprocessar.")
                         st.rerun()
                 
-                # Debug info
-                if st.checkbox("🔍 Mostrar Informações de Debug"):
-                    st.info(f"Total de meses para anos selecionados: {len(monthly_df)}")
-                    st.info(f"Índice de início da janela: {st.session_state.get('monthly_window_start_idx', 'Não definido')}")
-                    st.info(f"Meses exibidos: {len(display_df)}")
-                    st.info(f"Anos selecionados: {selected_years}")
-                    if not display_df.empty:
-                        st.write("Amostra de dados mensais com margens de lucro:")
-                        debug_cols = ['year', 'month', 'revenue', 'net_profit', 'profit_margin']
-                        existing_cols = [col for col in debug_cols if col in display_df.columns]
-                        st.dataframe(display_df[existing_cols].head(12))
         
         elif view_type == "Trimestral":
             if not hasattr(st.session_state, 'monthly_data') or st.session_state.monthly_data is None or not isinstance(st.session_state.monthly_data, pd.DataFrame) or st.session_state.monthly_data.empty:

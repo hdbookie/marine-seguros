@@ -1,3 +1,4 @@
+
 """
 AI Insights Tab - Legacy version extracted from app.py
 Preserves all original functionality while organizing code
@@ -38,6 +39,58 @@ def render_ai_insights_tab(db, gemini_api_key, language):
     with tab2:
         render_micro_analysis(db, ai_analyzer)
 
+def generate_ai_prompt(df, all_data):
+    language_instruction = "Responda em Português."
+    analysis_request = "Por favor, analise os seguintes dados financeiros da Marine Seguros e forneça insights detalhados de negócios:"
+    
+    summary = {
+        'years_range': f"{df['year'].min()}-{df['year'].max()}",
+        'metrics': {
+            'revenue': {
+                'total': df['revenue'].sum(),
+                'cagr': (pow(df['revenue'].iloc[-1] / df['revenue'].iloc[0], 1 / (df['year'].iloc[-1] - df['year'].iloc[0])) - 1) * 100 if len(df) > 1 and df['revenue'].iloc[0] > 0 else 0
+            },
+            'profit_margin': {
+                'average': df['profit_margin'].mean()
+            }
+        }
+    }
+
+    flexible_summary = ""
+    if all_data:
+        all_categories = set()
+        all_items = set()
+        for year_data in all_data.values():
+            all_categories.update(year_data['categories'].keys())
+            all_items.update(item['label'] for item in year_data['line_items'].values())
+        
+        flexible_summary = f"\n\nCategorias detectadas: {len(all_categories)}\nTotal de linhas de dados: {len(all_items)}"
+
+    prompt = f"""
+    {language_instruction}
+    
+    {analysis_request}
+    
+    Dados Resumidos:
+    - Período: {summary.get('years_range', 'N/A')}
+    - Receita Total: R$ {summary.get('metrics', {}).get('revenue', {}).get('total', 0):,.2f}
+    - CAGR da Receita: {summary.get('metrics', {}).get('revenue', {}).get('cagr', 0):.1f}%
+    - Margem de Lucro Média: {summary.get('metrics', {}).get('profit_margin', {}).get('average', 0):.1f}%
+    {flexible_summary}
+    
+    Dados Anuais:
+    {df.to_string() if not df.empty else 'Nenhum dado disponível'}
+    
+    Por favor, forneça uma análise abrangente cobrindo:
+    1. **Análise das Principais Tendências Financeiras**
+    2. **Pontos Fortes de Performance & Vantagens Competitivas**
+    3. **Áreas de Preocupação & Gestão de Riscos**
+    4. **Recomendações Acionáveis para Crescimento**
+    5. **Análise Competitiva do Setor**
+    
+    Estruture sua resposta em um formato de relatório profissional com seções claras, bullet points e recomendações específicas.
+    """
+    return prompt
 
 def render_macro_analysis(db, ai_analyzer):
     """Render the macro analysis section"""
@@ -55,49 +108,10 @@ def render_macro_analysis(db, ai_analyzer):
                 try:
                     # Prepare data for analysis
                     df = st.session_state.processed_data.get('consolidated', pd.DataFrame())
-                    if not isinstance(df, pd.DataFrame):
-                        df = pd.DataFrame()
-                    summary = st.session_state.processed_data.get('summary', {})
-                    
-                    # Include flexible data insights
-                    flexible_summary = ""
-                    if hasattr(st.session_state, 'flexible_data') and st.session_state.flexible_data:
-                        all_categories = set()
-                        all_items = set()
-                        for year_data in st.session_state.flexible_data.values():
-                            all_categories.update(year_data['categories'].keys())
-                            all_items.update(item['label'] for item in year_data['line_items'].values())
-                        
-                        flexible_summary = f"\n\nCategorias detectadas: {len(all_categories)}\nTotal de linhas de dados: {len(all_items)}"
-                    
-                    # Create prompt with language instruction based on user selection
-                    language_instruction = ai_analyzer._get_prompt_language()
-                    analysis_request = "Por favor, analise os seguintes dados financeiros da Marine Seguros e forneça insights detalhados de negócios:"
-                    
-                    prompt = f"""
-                    {language_instruction}
-                    
-                    {analysis_request}
-                    
-                    Dados Resumidos:
-                    - Período: {summary.get('years_range', 'N/A')}
-                    - Receita Total: R$ {summary.get('metrics', {}).get('revenue', {}).get('total', 0):,.2f}
-                    - CAGR da Receita: {summary.get('metrics', {}).get('revenue', {}).get('cagr', 0):.1f}%
-                    - Margem de Lucro Média: {summary.get('metrics', {}).get('profit_margin', {}).get('average', 0):.1f}%
-                    {flexible_summary}
-                    
-                    Dados Anuais:
-                    {df.to_string() if not df.empty else 'Nenhum dado disponível'}
-                    
-                    Por favor, forneça uma análise abrangente cobrindo:
-                    1. **Análise das Principais Tendências Financeiras**
-                    2. **Pontos Fortes de Performance & Vantagens Competitivas**
-                    3. **Áreas de Preocupação & Gestão de Riscos**
-                    4. **Recomendações Acionáveis para Crescimento**
-                    5. **Análise Competitiva do Setor**
-                    
-                    Estruture sua resposta em um formato de relatório profissional com seções claras, bullet points e recomendações específicas.
-                    """
+                    all_data = st.session_state.processed_data.get('all_data', {})
+
+                    prompt = generate_ai_prompt(df, all_data)
+                    print(prompt)
                     
                     # Generate insights
                     response = ai_analyzer.model.generate_content(prompt)

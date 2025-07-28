@@ -187,15 +187,15 @@ def create_monthly_trend_chart(monthly_data, title="Tendência Mensal"):
 def create_pareto_chart(items, title="Análise de Pareto"):
     """Create a Pareto chart (80/20 analysis)"""
     # Sort items by value
-    sorted_items = sorted(items, key=lambda x: x['value'], reverse=True)[:20]
+    sorted_items = sorted(items, key=lambda x: x['annual'], reverse=True)[:20]
     
     # Calculate cumulative percentage
-    total = sum(item['value'] for item in sorted_items)
+    total = sum(item['annual'] for item in sorted_items)
     cumulative_pct = []
     cumulative_sum = 0
     
     for item in sorted_items:
-        cumulative_sum += item['value']
+        cumulative_sum += item['annual']
         cumulative_pct.append((cumulative_sum / total) * 100)
     
     # Create figure
@@ -205,7 +205,7 @@ def create_pareto_chart(items, title="Análise de Pareto"):
     fig.add_trace(go.Bar(
         name='Valor',
         x=list(range(1, len(sorted_items) + 1)),
-        y=[item['value'] for item in sorted_items],
+        y=[item['annual'] for item in sorted_items],
         text=[item['label'][:30] + '...' if len(item['label']) > 30 else item['label'] 
               for item in sorted_items],
         textposition='none',
@@ -254,7 +254,7 @@ def create_treemap(data, title="Visualização Hierárquica"):
     """Create a treemap visualization"""
     fig = px.treemap(
         data,
-        path=['category', 'subcategory', 'item'],
+        path=['category', 'item'],
         values='value',
         title=title,
         color='value',
@@ -399,6 +399,143 @@ def create_detailed_cost_structure_chart(df, title="Estrutura de Custos Detalhad
         xaxis_title='Ano',
         yaxis_title='Valores (R$)',
         barmode='stack',
+        template='plotly_white',
+        legend=dict(x=0.01, y=0.99),
+        margin=dict(l=50, r=50, t=80, b=50)
+    )
+
+    return fig
+
+def create_pnl_waterfall_chart(df, title="Demonstrativo de Resultados (Cascata)"):
+    """Create a P&L waterfall chart"""
+    
+    last_year_data = df.iloc[-1]
+    cost_categories = ['variable_costs', 'fixed_costs', 'non_operational_costs', 'taxes', 'commissions', 'administrative_expenses', 'marketing_expenses', 'financial_expenses']
+    
+    measures = ["absolute"] * (len(cost_categories) + 2)
+    x_labels = ["Receita"] + [cat.replace('_', ' ').title() for cat in cost_categories] + ["Lucro Líquido"]
+    y_values = [last_year_data['revenue']] + [-last_year_data[cat] for cat in cost_categories] + [last_year_data['net_profit']]
+    
+    fig = go.Figure(go.Waterfall(
+        name = "2025",
+        orientation = "v",
+        measure = measures,
+        x = x_labels,
+        textposition = "outside",
+        text = [format_currency(v) for v in y_values],
+        y = y_values,
+        connector = {"line":{"color":"rgb(63, 63, 63)"}},
+    ))
+
+    fig.update_layout(
+            title = title,
+            showlegend = True
+    )
+
+    return fig
+
+def create_pnl_evolution_chart(df, title="Evolução do Demonstrativo de Resultados"):
+    """Create a P&L evolution line chart"""
+    fig = go.Figure()
+
+    # Add Revenue line
+    fig.add_trace(go.Scatter(
+        name='Receita',
+        x=df['year'],
+        y=df['revenue'],
+        mode='lines+markers',
+        line=dict(color='green', width=2),
+        hovertemplate='<b>Ano:</b> %{x}<br><b>Receita:</b> %{y:,.2f}<extra></extra>'
+    ))
+
+    # Add Total Costs line
+    df['total_costs'] = df[['variable_costs', 'fixed_costs', 'non_operational_costs', 'taxes', 'commissions', 'administrative_expenses', 'marketing_expenses', 'financial_expenses']].sum(axis=1)
+    fig.add_trace(go.Scatter(
+        name='Custos Totais',
+        x=df['year'],
+        y=df['total_costs'],
+        mode='lines+markers',
+        line=dict(color='red', width=2),
+        hovertemplate='<b>Ano:</b> %{x}<br><b>Custos Totais:</b> %{y:,.2f}<extra></extra>'
+    ))
+
+    # Add Net Profit line
+    fig.add_trace(go.Scatter(
+        name='Lucro Líquido',
+        x=df['year'],
+        y=df['net_profit'],
+        mode='lines+markers',
+        line=dict(color='blue', width=2),
+        hovertemplate='<b>Ano:</b> %{x}<br><b>Lucro Líquido:</b> %{y:,.2f}<extra></extra>'
+    ))
+
+    fig.update_layout(
+        title=title,
+        xaxis_title='Ano',
+        yaxis_title='Valores (R$)',
+        template='plotly_white',
+        legend=dict(x=0.01, y=0.99),
+        margin=dict(l=50, r=50, t=80, b=50)
+    )
+
+    return fig
+
+def create_cost_as_percentage_of_revenue_chart(df, title="Custos como % da Receita"):
+    """Create a chart showing costs as a percentage of revenue"""
+    fig = go.Figure()
+
+    df['total_costs'] = df[['variable_costs', 'fixed_costs', 'non_operational_costs', 'taxes', 'commissions', 'administrative_expenses', 'marketing_expenses', 'financial_expenses']].sum(axis=1)
+    df['cost_as_percentage_of_revenue'] = (df['total_costs'] / df['revenue']) * 100
+
+    fig.add_trace(go.Scatter(
+        name='Custo como % da Receita',
+        x=df['year'],
+        y=df['cost_as_percentage_of_revenue'],
+        mode='lines+markers',
+        line=dict(color='orange', width=2),
+        hovertemplate='<b>Ano:</b> %{x}<br><b>Custo:</b> %{y:.2f}%<extra></extra>'
+    ))
+
+    fig.update_layout(
+        title=title,
+        xaxis_title='Ano',
+        yaxis_title='Percentual (%)',
+        template='plotly_white',
+        legend=dict(x=0.01, y=0.99),
+        margin=dict(l=50, r=50, t=80, b=50)
+    )
+
+    return fig
+
+def create_margin_comparison_chart(df, title="Comparativo de Margens"):
+    """Create a chart comparing profit margin and contribution margin"""
+    fig = go.Figure()
+
+    # Add Profit Margin line
+    fig.add_trace(go.Scatter(
+        name='Margem de Lucro',
+        x=df['year'],
+        y=df['profit_margin'],
+        mode='lines+markers',
+        line=dict(color='purple', width=2),
+        hovertemplate='<b>Ano:</b> %{x}<br><b>Margem de Lucro:</b> %{y:.2f}%<extra></extra>'
+    ))
+
+    # Add Contribution Margin line
+    df['contribution_margin_percentage'] = (df['contribution_margin'] / df['revenue']) * 100
+    fig.add_trace(go.Scatter(
+        name='Margem de Contribuição',
+        x=df['year'],
+        y=df['contribution_margin_percentage'],
+        mode='lines+markers',
+        line=dict(color='teal', width=2),
+        hovertemplate='<b>Ano:</b> %{x}<br><b>Margem de Contribuição:</b> %{y:.2f}%<extra></extra>'
+    ))
+
+    fig.update_layout(
+        title=title,
+        xaxis_title='Ano',
+        yaxis_title='Percentual (%)',
         template='plotly_white',
         legend=dict(x=0.01, y=0.99),
         margin=dict(l=50, r=50, t=80, b=50)

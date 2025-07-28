@@ -30,7 +30,7 @@ from ui.tabs.dashboard_legacy_tab import render_dashboard_tab
 from ui.tabs.micro_analysis_tab import render_micro_analysis_tab
 from ui.tabs.ai_insights_legacy_tab import render_ai_insights_tab
 from ui.tabs.ai_chat_legacy_tab import render_ai_chat_tab
-from ui.tabs.auth_management_tab import render_auth_management_tab
+from ui.tabs.auth_management_tab_simple import render_auth_management_tab
 
 # Load environment variables
 load_dotenv()
@@ -80,7 +80,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Check authentication
-if not require_auth():
+if not st.session_state.get('user'):
     show_login_page()
     st.stop()
 
@@ -90,6 +90,15 @@ st.title("📊 Marine Seguros - Financial Analytics Dashboard")
 # Sidebar
 with st.sidebar:
     st.header("⚙️ Configuração")
+    
+    # Debug: Check auth status
+    if hasattr(st.session_state, 'user'):
+        if st.session_state.user:
+            st.success(f"✅ Logado como: {st.session_state.user.get('username', 'Unknown')}")
+        else:
+            st.warning("⚠️ Não está logado")
+    else:
+        st.error("❌ Sistema de autenticação não inicializado")
     
     # User menu
     show_user_menu()
@@ -129,9 +138,11 @@ with st.sidebar:
     
     Recursos:
     - 📊 Dashboard Financeiro
-    - 🔬 Análise Micro
-    - 🤖 Insights IA
-    - 💬 Assistente de Chat IA
+    - 🔬 Análise Micro (🚧 Em construção)
+    - 🤖 Insights IA*
+    - 💬 Assistente de Chat IA*
+    
+    *IA será muito mais poderosa com análise micro completa
     """)
 
 # Initialize session state
