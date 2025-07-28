@@ -439,6 +439,10 @@ def create_pnl_evolution_chart(df, title="Evolução do Demonstrativo de Resulta
     fig = go.Figure()
 
     # Add Revenue line
+    # Convert revenue dict to numeric if needed
+    if 'revenue' in df.columns:
+        df['revenue'] = df['revenue'].apply(lambda x: sum(x.values()) if isinstance(x, dict) else (x if pd.notna(x) else 0))
+    
     fig.add_trace(go.Scatter(
         name='Receita',
         x=df['year'],
@@ -449,7 +453,16 @@ def create_pnl_evolution_chart(df, title="Evolução do Demonstrativo de Resulta
     ))
 
     # Add Total Costs line
-    df['total_costs'] = df[['variable_costs', 'fixed_costs', 'non_operational_costs', 'taxes', 'commissions', 'administrative_expenses', 'marketing_expenses', 'financial_expenses']].sum(axis=1)
+    cost_columns = ['variable_costs', 'fixed_costs', 'non_operational_costs', 'taxes', 'commissions', 'administrative_expenses', 'marketing_expenses', 'financial_expenses']
+    
+    # Convert dict columns to numeric values (sum of dict values if dict, else use as is)
+    for col in cost_columns:
+        if col in df.columns:
+            df[col] = df[col].apply(lambda x: sum(x.values()) if isinstance(x, dict) else (x if pd.notna(x) else 0))
+    
+    # Now safely sum the numeric columns
+    available_cost_columns = [col for col in cost_columns if col in df.columns]
+    df['total_costs'] = df[available_cost_columns].fillna(0).sum(axis=1)
     fig.add_trace(go.Scatter(
         name='Custos Totais',
         x=df['year'],
