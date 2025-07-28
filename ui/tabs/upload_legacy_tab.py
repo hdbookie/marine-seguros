@@ -130,6 +130,20 @@ def render_upload_tab(db, use_unified_extractor=True, show_anomalies=True):
                         st.session_state.file_manager.excluir_arquivo(arquivo['id'])
                 st.success("Todos os arquivos foram removidos!")
                 st.rerun()
+    
+    # Add database clear button for admin
+    if st.session_state.user and st.session_state.user.get('role') == 'admin':
+        if st.button("🔄 Limpar Banco de Dados Completo", type="secondary", help="Remove todos os dados históricos do banco"):
+            with st.spinner("Limpando banco de dados..."):
+                if db.clear_all_data():
+                    st.success("✅ Banco de dados completamente limpo!")
+                    # Clear session state too
+                    for key in list(st.session_state.keys()):
+                        if key not in ['user', 'users', 'file_manager']:
+                            del st.session_state[key]
+                    st.rerun()
+                else:
+                    st.error("❌ Erro ao limpar banco de dados")
 
     if arquivos:
         for arquivo in arquivos:

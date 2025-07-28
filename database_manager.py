@@ -604,6 +604,8 @@ class DatabaseManager:
                 cursor.execute("DELETE FROM filter_state")
                 cursor.execute("DELETE FROM analysis_cache")
                 cursor.execute("DELETE FROM user_preferences")
+                cursor.execute("DELETE FROM shared_financial_data")
+                cursor.execute("DELETE FROM upload_history")
                 
                 conn.commit()
                 return True
