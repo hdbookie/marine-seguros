@@ -603,32 +603,41 @@ def generate_monthly_data_from_extracted(extracted_data):
         monthly_data = []
         for year, year_data in extracted_data.items():
             revenue_data = year_data.get('revenue', {})
-            costs_data = year_data.get('costs', {})
-            admin_data = year_data.get('admin_expenses', {})
+            costs_data = year_data.get('costs', year_data.get('variable_costs', {}))
+            admin_data = year_data.get('admin_expenses', year_data.get('administrative_expenses', {}))
             operational_data = year_data.get('operational_expenses', {})
             marketing_data = year_data.get('marketing_expenses', {})
             financial_data = year_data.get('financial_expenses', {})
             fixed_costs_data = year_data.get('fixed_costs', {})
             
+            # Handle both flat and nested structures
+            revenue_monthly = revenue_data.get('monthly', revenue_data) if isinstance(revenue_data, dict) else {}
+            costs_monthly = costs_data.get('monthly', costs_data) if isinstance(costs_data, dict) else {}
+            admin_monthly = admin_data.get('monthly', admin_data) if isinstance(admin_data, dict) else {}
+            operational_monthly = operational_data.get('monthly', operational_data) if isinstance(operational_data, dict) else {}
+            marketing_monthly = marketing_data.get('monthly', marketing_data) if isinstance(marketing_data, dict) else {}
+            financial_monthly = financial_data.get('monthly', financial_data) if isinstance(financial_data, dict) else {}
+            fixed_costs_monthly = fixed_costs_data.get('monthly', fixed_costs_data) if isinstance(fixed_costs_data, dict) else {}
+            
             for month in ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ']:
-                if month in revenue_data:
-                    revenue = revenue_data.get(month, 0)
-                    variable_costs = costs_data.get(month, 0)
+                if month in revenue_monthly:
+                    revenue = revenue_monthly.get(month, 0)
+                    variable_costs = costs_monthly.get(month, 0)
                     
                     # Get fixed costs directly from Excel data
-                    fixed_costs = fixed_costs_data.get(month, 0)
+                    fixed_costs = fixed_costs_monthly.get(month, 0)
                     
                     # If no direct fixed costs data, calculate as sum of expenses (fallback)
                     if fixed_costs == 0:
                         fixed_costs = (
-                            admin_data.get(month, 0) + 
-                            operational_data.get(month, 0) + 
-                            marketing_data.get(month, 0) + 
-                            financial_data.get(month, 0)
+                            admin_monthly.get(month, 0) + 
+                            operational_monthly.get(month, 0) + 
+                            marketing_monthly.get(month, 0) + 
+                            financial_monthly.get(month, 0)
                         )
                     
                     # Calculate operational costs (admin + operational)
-                    operational_costs = admin_data.get(month, 0) + operational_data.get(month, 0)
+                    operational_costs = admin_monthly.get(month, 0) + operational_monthly.get(month, 0)
                     
                     # Calculate profit and margins
                     total_costs = variable_costs + fixed_costs
@@ -642,10 +651,10 @@ def generate_monthly_data_from_extracted(extracted_data):
                         'revenue': revenue,
                         'variable_costs': variable_costs,
                         'fixed_costs': fixed_costs,
-                        'admin_expenses': admin_data.get(month, 0),
-                        'operational_expenses': operational_data.get(month, 0),
-                        'marketing_expenses': marketing_data.get(month, 0),
-                        'financial_expenses': financial_data.get(month, 0),
+                        'admin_expenses': admin_monthly.get(month, 0),
+                        'operational_expenses': operational_monthly.get(month, 0),
+                        'marketing_expenses': marketing_monthly.get(month, 0),
+                        'financial_expenses': financial_monthly.get(month, 0),
                         'total_costs': total_costs,
                         'operational_costs': operational_costs,
                         'net_profit': net_profit,
