@@ -116,17 +116,35 @@ def show_login_page():
             """)
 
 
+def logout_user():
+    """Logout callback function"""
+    # Clear the user from session state
+    if 'user' in st.session_state:
+        del st.session_state.user
+    # Clear other session data
+    keys_to_delete = [key for key in st.session_state.keys() if key != 'logout_clicked']
+    for key in keys_to_delete:
+        del st.session_state[key]
+
 def show_user_menu():
     """Show user menu in sidebar"""
-    if st.session_state.user:
+    if st.session_state.get('user'):
         st.sidebar.markdown("---")
-        st.sidebar.markdown(f"**👤 {st.session_state.user.get('name', st.session_state.user['username'])}**")
+        st.sidebar.markdown("### 👤 Perfil do Usuário")
+        st.sidebar.markdown(f"**Nome:** {st.session_state.user.get('name', st.session_state.user['username'])}")
+        st.sidebar.markdown(f"**Email:** {st.session_state.user.get('email', 'N/A')}")
         role_pt = "Administrador" if st.session_state.user['role'] == 'admin' else "Usuário"
-        st.sidebar.caption(f"Função: {role_pt}")
+        st.sidebar.markdown(f"**Função:** {role_pt}")
         
-        if st.sidebar.button("🚪 Sair", use_container_width=True):
-            st.session_state.user = None
+        # Add logout button in sidebar
+        if st.sidebar.button("🚪 Sair", key="sidebar_logout_btn", help="Fazer logout", use_container_width=True):
+            # Clear any existing token first
+            if 'token' in st.query_params:
+                del st.query_params['token']
+            st.query_params['logout'] = 'true'
             st.rerun()
+        
+        st.sidebar.markdown("---")
 
 
 def show_admin_panel():
@@ -140,7 +158,10 @@ def show_admin_panel():
             new_username = st.text_input("Nome de usuário", key="new_username")
             new_password = st.text_input("Senha", key="new_password", type="password")
             new_name = st.text_input("Nome completo", key="new_name")
-            new_role = st.selectbox("Função", ["user", "admin"], key="new_role", format_func=lambda x: "Usuário" if x == "user" else "Administrador")
+            new_email = st.text_input("Email", key="new_email")
+            # Always set new users as admin
+            new_role = "admin"
+            st.info("💡 Todos os novos usuários são criados como Administradores")
             
             if st.button("➕ Adicionar Usuário"):
                 if new_username and new_password and new_name:
@@ -149,7 +170,8 @@ def show_admin_panel():
                         users[new_username] = {
                             "password": hash_password(new_password),
                             "role": new_role,
-                            "name": new_name
+                            "name": new_name,
+                            "email": new_email
                         }
                         save_users(users)
                         st.session_state.users = users

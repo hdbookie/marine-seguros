@@ -15,23 +15,45 @@ def convert_extracted_to_processed(extracted_data):
     if not extracted_data:
         return None
     
+    # Processing extracted data
+    
     try:
         # Create a DataFrame from extracted_data
         consolidated_data = []
         for year, year_data in sorted(extracted_data.items()):
-            revenue = year_data.get('revenue', {}).get('ANNUAL', 0)
-            costs = year_data.get('costs', {}).get('ANNUAL', 0)
+            # Process year data
             
-            # Get expenses
-            admin_expenses = year_data.get('admin_expenses', {}).get('ANNUAL', 0)
-            operational_expenses = year_data.get('operational_expenses', {}).get('ANNUAL', 0)
-            marketing_expenses = year_data.get('marketing_expenses', {}).get('ANNUAL', 0)
-            financial_expenses = year_data.get('financial_expenses', {}).get('ANNUAL', 0)
+            # Handle different data formats
+            revenue_data = year_data.get('revenue', {})
+            if isinstance(revenue_data, dict):
+                # Try lowercase 'annual' first (unified extractor format)
+                revenue = revenue_data.get('annual', revenue_data.get('ANNUAL', 0))
+                # Extract revenue from data
+            else:
+                revenue = revenue_data if revenue_data else 0
+                
+            costs_data = year_data.get('costs', year_data.get('variable_costs', {}))
+            if isinstance(costs_data, dict):
+                costs = costs_data.get('annual', costs_data.get('ANNUAL', 0))
+            else:
+                costs = costs_data if costs_data else 0
+            
+            # Get expenses - handle both formats
+            def get_expense_value(expense_key):
+                expense_data = year_data.get(expense_key, {})
+                if isinstance(expense_data, dict):
+                    return expense_data.get('annual', expense_data.get('ANNUAL', 0))
+                return expense_data if expense_data else 0
+            
+            admin_expenses = get_expense_value('admin_expenses') or get_expense_value('administrative_expenses')
+            operational_expenses = get_expense_value('operational_expenses')
+            marketing_expenses = get_expense_value('marketing_expenses')
+            financial_expenses = get_expense_value('financial_expenses')
             
             # Get fixed costs directly from Excel (CUSTOS FIXOS line)
             fixed_costs_data = year_data.get('fixed_costs', {})
             if isinstance(fixed_costs_data, dict):
-                fixed_costs = fixed_costs_data.get('ANNUAL', 0)
+                fixed_costs = fixed_costs_data.get('annual', fixed_costs_data.get('ANNUAL', 0))
             else:
                 fixed_costs = fixed_costs_data if fixed_costs_data else 0
             
@@ -42,9 +64,9 @@ def convert_extracted_to_processed(extracted_data):
             # Calculate operational costs
             operational_costs_data = year_data.get('operational_costs', {})
             if isinstance(operational_costs_data, dict):
-                operational_costs = operational_costs_data.get('ANNUAL', 0)
+                operational_costs = operational_costs_data.get('annual', operational_costs_data.get('ANNUAL', 0))
             else:
-                operational_costs = operational_costs_data
+                operational_costs = operational_costs_data if operational_costs_data else 0
                 
             if operational_costs == 0:
                 operational_costs = admin_expenses + operational_expenses

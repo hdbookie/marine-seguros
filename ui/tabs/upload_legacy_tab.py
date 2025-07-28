@@ -16,6 +16,41 @@ def render_upload_tab(db, use_unified_extractor=True, show_anomalies=True):
     """Render the upload tab with file management and processing"""
     
     st.header("📊 Gerenciamento de Dados Financeiros")
+    
+    # Show last upload info
+    last_upload = db.get_last_upload_info()
+    if last_upload:
+        upload_time = last_upload['created_at']
+        username = last_upload['username']
+        files = last_upload['files']
+        
+        st.info(f"""
+        📊 **Dados Compartilhados**  
+        Última atualização: {upload_time}  
+        Por: {username}  
+        Arquivos: {len(files)} arquivo(s)
+        """)
+    else:
+        st.info("📊 **Dados Compartilhados** - Nenhum dado carregado ainda")
+    
+    # Show upload history
+    with st.expander("📜 Histórico de Uploads", expanded=False):
+        upload_history = db.get_upload_history(limit=10)
+        if upload_history:
+            for upload in upload_history:
+                col1, col2, col3 = st.columns([2, 2, 1])
+                with col1:
+                    st.write(f"**{upload['username']}**")
+                    st.caption(upload['email'])
+                with col2:
+                    st.write(f"📅 {upload['created_at']}")
+                    files_str = ", ".join(upload['files']) if isinstance(upload['files'], list) else str(upload['files'])
+                    st.caption(f"Arquivos: {files_str}")
+                with col3:
+                    st.write(f"Tipo: {upload['upload_type']}")
+                st.markdown("---")
+        else:
+            st.info("Nenhum histórico de upload disponível")
 
     # File management bar
     col1, col2, col3 = st.columns([3, 1, 1])
@@ -127,6 +162,9 @@ def render_upload_tab(db, use_unified_extractor=True, show_anomalies=True):
     # Process data button
     if arquivos:
         st.markdown("### 🚀 Processar Dados")
+        
+        # Show warning about shared data update
+        st.warning("⚠️ **Atenção**: Processar novos dados atualizará os dados para todos os usuários do sistema.")
 
         if st.button("Analisar Dados Financeiros", type="primary", use_container_width=True):
             # Clear old data before processing
@@ -137,7 +175,16 @@ def render_upload_tab(db, use_unified_extractor=True, show_anomalies=True):
             # Also clear database cache
             db.clear_session_data()
             
-            with st.spinner("Processando arquivos..."):
+            # Track uploaded files for history - extract file names from arquivos
+            uploaded_file_names = []
+            for arquivo in arquivos:
+                if isinstance(arquivo, dict) and 'nome' in arquivo:
+                    uploaded_file_names.append(arquivo['nome'])
+                elif hasattr(arquivo, 'name'):
+                    uploaded_file_names.append(arquivo.name)
+            st.session_state.uploaded_files = uploaded_file_names
+            
+            with st.spinner("Processando arquivos para todos os usuários..."):
                 processor = FinancialProcessor()
         
                 # Get file paths
@@ -209,11 +256,12 @@ def render_upload_tab(db, use_unified_extractor=True, show_anomalies=True):
                             if 'categories' in year_data:
                                 all_categories.update(year_data['categories'].keys())
                 
-                        st.success(f"✅ Dados processados com sucesso!")
+                        st.success(f"✅ Dados processados e compartilhados com sucesso!")
                         if save_success:
-                            st.success("💾 Dados salvos no banco de dados!")
+                            st.success("💾 Dados salvos e disponíveis para todos os usuários!")
                         st.info(f"📊 {len(consolidated_df)} anos encontrados | "
-                               f"📁 {len(all_categories)} categorias detectadas")
+                               f"📁 {len(all_categories)} categorias detectadas | "
+                               f"👥 Disponível para todos os usuários")
                 
                         # Show detected categories
                         with st.expander("Categorias Detectadas"):
