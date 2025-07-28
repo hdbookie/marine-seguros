@@ -584,6 +584,9 @@ def initialize_session_state(db, data_loaded):
     """Initialize session state variables"""
     if 'file_manager' not in st.session_state:
         st.session_state.file_manager = GerenciadorArquivos()
+        # Set database manager if available
+        if db and hasattr(st.session_state.file_manager, 'set_database_manager'):
+            st.session_state.file_manager.set_database_manager(db)
         # Sync files - from database in production, from filesystem in dev
         if os.environ.get('RAILWAY_ENVIRONMENT') == 'production':
             st.session_state.file_manager.sync_from_database()

@@ -14,6 +14,10 @@ class GerenciadorArquivos:
         self.caminho_armazenamento = Path("data/arquivos_enviados")
         self.caminho_registro = Path("data/registro_arquivos.json")
         
+        # Initialize production flag and db_manager
+        self.is_production = os.environ.get('RAILWAY_ENVIRONMENT') == 'production'
+        self.db_manager = None
+        
         # Criar diretórios se não existirem
         self.caminho_armazenamento.mkdir(parents=True, exist_ok=True)
         self.caminho_registro.parent.mkdir(parents=True, exist_ok=True)
@@ -229,6 +233,10 @@ class GerenciadorArquivos:
                 self.registro["arquivos"].append(metadata)
         
         self._salvar_registro()
+    
+    def set_database_manager(self, db_manager):
+        """Set the database manager for production environment"""
+        self.db_manager = db_manager
     
     def sync_from_database(self):
         """Sync files from database if in production mode"""
