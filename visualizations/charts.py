@@ -441,7 +441,15 @@ def create_pnl_evolution_chart(df, title="Evolução do Demonstrativo de Resulta
     # Add Revenue line
     # Convert revenue dict to numeric if needed
     if 'revenue' in df.columns:
-        df['revenue'] = df['revenue'].apply(lambda x: sum(x.values()) if isinstance(x, dict) else (x if pd.notna(x) else 0))
+        def convert_to_numeric(x):
+            if isinstance(x, dict):
+                # Sum all numeric values in the dict
+                return sum(v for v in x.values() if isinstance(v, (int, float)))
+            elif pd.notna(x) and isinstance(x, (int, float)):
+                return x
+            else:
+                return 0
+        df['revenue'] = df['revenue'].apply(convert_to_numeric)
     
     fig.add_trace(go.Scatter(
         name='Receita',
@@ -458,7 +466,15 @@ def create_pnl_evolution_chart(df, title="Evolução do Demonstrativo de Resulta
     # Convert dict columns to numeric values (sum of dict values if dict, else use as is)
     for col in cost_columns:
         if col in df.columns:
-            df[col] = df[col].apply(lambda x: sum(x.values()) if isinstance(x, dict) else (x if pd.notna(x) else 0))
+            def convert_to_numeric(x):
+                if isinstance(x, dict):
+                    # Sum all numeric values in the dict
+                    return sum(v for v in x.values() if isinstance(v, (int, float)))
+                elif pd.notna(x) and isinstance(x, (int, float)):
+                    return x
+                else:
+                    return 0
+            df[col] = df[col].apply(convert_to_numeric)
     
     # Now safely sum the numeric columns
     available_cost_columns = [col for col in cost_columns if col in df.columns]
