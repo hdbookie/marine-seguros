@@ -149,31 +149,39 @@ class DatabaseManager:
             if pd.isna(obj):
                 return None
             
+            # Handle numpy arrays BEFORE checking for other types
+            if isinstance(obj, np.ndarray):
+                return obj.tolist()
+            
+            # Handle numpy scalar types
+            if isinstance(obj, (np.integer, np.int64, np.int32)):
+                return int(obj)
+            elif isinstance(obj, (np.floating, np.float64, np.float32)):
+                return float(obj)
+            elif isinstance(obj, np.bool_):
+                return bool(obj)
+            
             # Handle DataFrame
-            if hasattr(obj, 'to_dict'):  # DataFrame
+            if hasattr(obj, 'to_dict') and hasattr(obj, 'columns'):  # DataFrame
                 # Convert DataFrame to a serializable format
-                df_dict = obj.to_dict('records')
-                serialized_records = [self._serialize_for_json(record) for record in df_dict]
-                return {
-                    '__dataframe__': True,
-                    'data': serialized_records,
-                    'columns': list(obj.columns),
-                    'dtypes': {col: str(dtype) for col, dtype in obj.dtypes.items()}
-                }
+                try:
+                    df_dict = obj.to_dict('records')
+                    serialized_records = [self._serialize_for_json(record) for record in df_dict]
+                    return {
+                        '__dataframe__': True,
+                        'data': serialized_records,
+                        'columns': list(obj.columns),
+                        'dtypes': {col: str(dtype) for col, dtype in obj.dtypes.items()}
+                    }
+                except:
+                    # If DataFrame serialization fails, convert to dict
+                    return self._serialize_for_json(obj.to_dict())
             
             # Handle datetime objects (including Timestamp)
             elif isinstance(obj, (datetime.datetime, datetime.date, pd.Timestamp)):
                 return obj.isoformat()
             elif hasattr(obj, 'isoformat'):
                 return obj.isoformat()
-            
-            # Handle numpy types
-            elif isinstance(obj, (np.integer, np.int64, np.int32)):
-                return int(obj)
-            elif isinstance(obj, (np.floating, np.float64, np.float32)):
-                return float(obj)
-            elif isinstance(obj, np.ndarray):
-                return obj.tolist()
             
             # Handle collections
             elif isinstance(obj, dict):
@@ -183,9 +191,7 @@ class DatabaseManager:
                     key_str = str(k) if not isinstance(k, str) else k
                     result[key_str] = self._serialize_for_json(v)
                 return result
-            elif isinstance(obj, list):
-                return [self._serialize_for_json(item) for item in obj]
-            elif isinstance(obj, tuple):
+            elif isinstance(obj, (list, tuple)):
                 return [self._serialize_for_json(item) for item in obj]
             elif isinstance(obj, (set, frozenset)):
                 return [self._serialize_for_json(item) for item in obj]
@@ -199,8 +205,12 @@ class DatabaseManager:
                 return str(obj)
                 
         except Exception as e:
-            print(f"Serialization error for object {type(obj)}: {str(e)}")
-            return str(obj)
+            # Don't print in production - just handle silently
+            # Return a safe fallback value
+            try:
+                return str(obj)
+            except:
+                return None
     
     def _validate_financial_data(self, data: Dict[str, Any]) -> bool:
         """Validate financial data structure and content"""
