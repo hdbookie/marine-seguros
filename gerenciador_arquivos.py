@@ -16,8 +16,10 @@ class GerenciadorArquivos:
         self.caminho_armazenamento = Path(data_dir) / "arquivos_enviados"
         self.caminho_registro = Path(data_dir) / "registro_arquivos.json"
         
-        # Initialize production flag and db_manager
-        self.is_production = os.environ.get('RAILWAY_ENVIRONMENT') == 'production'
+        # Initialize environment flags and db_manager
+        self.environment = os.environ.get('RAILWAY_ENVIRONMENT', 'development')
+        self.is_production = self.environment == 'production'
+        self.is_staging = self.environment == 'staging'
         self.db_manager = None
         
         # Criar diretórios se não existirem
