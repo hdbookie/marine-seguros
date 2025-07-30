@@ -9,22 +9,51 @@ class CommissionExtractor:
 
     def extract(self, df: pd.DataFrame) -> Dict:
         data = {"line_items": {}, "annual": 0, "monthly": {}}
+        found_commission_row = False
+        commission_row_idx = -1
+        
         for idx, row in df.iterrows():
             label = self._get_row_label(df, idx)
             if not label:
                 continue
 
+            # Check if this is the main commission row
             if any(re.search(pattern, label, re.IGNORECASE) for pattern in self.patterns):
+                found_commission_row = True
+                commission_row_idx = idx
                 row_data = self._extract_row_data(df, idx)
                 item_key = self._normalize_key(label)
+                
+                # Create main commission entry with sub_items
                 data["line_items"][item_key] = {
                     "label": label,
                     "annual": row_data["annual"],
-                    "monthly": row_data["monthly"]
+                    "monthly": row_data["monthly"],
+                    "sub_items": {}  # Will hold individual providers
                 }
                 data["annual"] += row_data["annual"]
                 for month, value in row_data["monthly"].items():
                     data["monthly"][month] = data["monthly"].get(month, 0) + value
+            
+            # Check if this is a sub-item (starts with "- " or "- - " and follows commission row)
+            elif found_commission_row and (label.strip().startswith("- ") or label.strip().startswith("- - ")):
+                # This is a provider sub-item
+                provider_name = label.replace("- - ", "").replace("- ", "").strip()
+                row_data = self._extract_row_data(df, idx)
+                
+                # Add to the commission sub_items
+                commission_key = self._normalize_key(list(self.patterns)[0])
+                if commission_key in data["line_items"]:
+                    provider_key = self._normalize_key(provider_name)
+                    data["line_items"][commission_key]["sub_items"][provider_key] = {
+                        "label": provider_name,
+                        "annual": row_data["annual"],
+                        "monthly": row_data["monthly"]
+                    }
+            # If we hit a non-sub-item row, stop looking for sub-items
+            elif found_commission_row and not (label.strip().startswith("- ") or label.strip().startswith("- - ")):
+                found_commission_row = False
+                
         return data
 
     def _get_row_label(self, df: pd.DataFrame, row_idx: int) -> str:
@@ -58,6 +87,10 @@ class CommissionExtractor:
             if isinstance(col, str) and any(term in col.upper() for term in ['ANUAL', 'TOTAL']):
                 return col
         return None
+    
+    def _normalize_key(self, text: str) -> str:
+        """Normalize text to create a consistent key"""
+        return text.lower().strip().replace(' ', '_').replace('-', '_')
 
     def _parse_value(self, val: Any) -> float:
         if pd.isna(val) or not isinstance(val, (int, float, str)):

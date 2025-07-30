@@ -4,6 +4,8 @@ import plotly.graph_objects as go
 import plotly.express as px
 import pandas as pd
 from utils.formatters import format_currency, format_percentage
+from typing import Dict, List
+import numpy as np
 
 
 def create_revenue_cost_chart(df, title="Evolução de Receitas vs Custos"):
@@ -74,6 +76,241 @@ def create_revenue_cost_chart(df, title="Evolução de Receitas vs Custos"):
     return fig
 
 
+def create_group_evolution_chart(group_df: pd.DataFrame, title: str = "Evolução dos Grupos de Despesas") -> go.Figure:
+    """
+    Create a line chart showing evolution of expense groups over time
+    
+    Args:
+        group_df: DataFrame with columns ['Grupo', 'Ano', 'Valor', 'Categoria']
+        title: Chart title
+    """
+    fig = px.line(
+        group_df,
+        x='Ano',
+        y='Valor',
+        color='Grupo',
+        markers=True,
+        title=title,
+        labels={'Valor': 'Valor (R$)', 'Ano': 'Ano'},
+        hover_data={'Categoria': True, 'Itens': True}
+    )
+    
+    # Customize layout
+    fig.update_traces(
+        mode='lines+markers',
+        hovertemplate='<b>%{fullData.name}</b><br>' +
+                     'Ano: %{x}<br>' +
+                     'Valor: R$ %{y:,.2f}<br>' +
+                     'Categoria: %{customdata[0]}<br>' +
+                     '<extra></extra>'
+    )
+    
+    fig.update_layout(
+        hovermode='x unified',
+        xaxis=dict(title='Ano', tickmode='linear'),
+        yaxis=dict(title='Valor (R$)', tickformat=',.0f'),
+        legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02),
+        margin=dict(r=150),
+        height=500
+    )
+    
+    return fig
+
+
+def create_group_comparison_chart(group_df: pd.DataFrame, revenue_df: pd.DataFrame, 
+                                 title: str = "Grupos de Despesas como % da Receita") -> go.Figure:
+    """
+    Create a stacked bar chart showing expense groups as percentage of revenue
+    
+    Args:
+        group_df: DataFrame with expense groups
+        revenue_df: DataFrame with revenue data by year
+    """
+    # Merge with revenue data
+    merged_df = group_df.merge(
+        revenue_df[['year', 'revenue']], 
+        left_on='Ano', 
+        right_on='year', 
+        how='left'
+    )
+    
+    # Calculate percentage
+    merged_df['Percentual'] = (merged_df['Valor'] / merged_df['revenue']) * 100
+    
+    # Pivot for stacked bars
+    pivot_df = merged_df.pivot(index='Ano', columns='Grupo', values='Percentual').fillna(0)
+    
+    fig = go.Figure()
+    
+    # Add traces for each group
+    for grupo in pivot_df.columns:
+        fig.add_trace(go.Bar(
+            name=grupo,
+            x=pivot_df.index,
+            y=pivot_df[grupo],
+            text=[f'{v:.1f}%' for v in pivot_df[grupo]],
+            textposition='inside',
+            hovertemplate=f'<b>{grupo}</b><br>Ano: %{{x}}<br>% da Receita: %{{y:.1f}}%<extra></extra>'
+        ))
+    
+    fig.update_layout(
+        barmode='stack',
+        title=title,
+        xaxis_title='Ano',
+        yaxis_title='% da Receita',
+        yaxis=dict(tickformat='.1f', ticksuffix='%'),
+        hovermode='x unified',
+        height=500,
+        showlegend=True,
+        legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02),
+        margin=dict(r=150)
+    )
+    
+    return fig
+
+
+def create_margin_impact_by_group_chart(group_df: pd.DataFrame, financial_df: pd.DataFrame,
+                                       title: str = "Impacto dos Grupos na Margem de Lucro") -> go.Figure:
+    """
+    Create a waterfall chart showing how each group impacts profit margin
+    """
+    # Get the latest year data
+    latest_year = group_df['Ano'].max()
+    year_data = group_df[group_df['Ano'] == latest_year]
+    
+    # Get financial data for the year
+    fin_data = financial_df[financial_df['year'] == latest_year].iloc[0]
+    revenue = fin_data['revenue']
+    gross_margin = (revenue - fin_data.get('variable_costs', 0)) / revenue * 100
+    
+    # Calculate impact of each group
+    impacts = []
+    groups = year_data['Grupo'].unique()
+    
+    # Start with gross margin
+    impacts.append({
+        'x': 'Margem Bruta',
+        'y': gross_margin,
+        'measure': 'absolute',
+        'text': f'{gross_margin:.1f}%'
+    })
+    
+    # Add each group's impact
+    running_margin = gross_margin
+    for grupo in groups:
+        grupo_data = year_data[year_data['Grupo'] == grupo]
+        if not grupo_data.empty:
+            impact = -(grupo_data['Valor'].iloc[0] / revenue * 100)
+            running_margin += impact
+            
+            impacts.append({
+                'x': grupo,
+                'y': impact,
+                'measure': 'relative',
+                'text': f'{impact:.1f}%'
+            })
+    
+    # Add final margin
+    impacts.append({
+        'x': 'Margem Líquida',
+        'y': running_margin,
+        'measure': 'total',
+        'text': f'{running_margin:.1f}%'
+    })
+    
+    # Create waterfall chart
+    fig = go.Figure(go.Waterfall(
+        orientation = "v",
+        x = [d['x'] for d in impacts],
+        y = [d['y'] for d in impacts],
+        measure = [d['measure'] for d in impacts],
+        text = [d['text'] for d in impacts],
+        textposition = "outside",
+        connector = {"line": {"color": "rgb(63, 63, 63)"}},
+    ))
+    
+    fig.update_layout(
+        title = f"{title} - {latest_year}",
+        xaxis_title = "Componentes",
+        yaxis_title = "Margem (%)",
+        yaxis = dict(tickformat='.1f', ticksuffix='%'),
+        showlegend = False,
+        height = 500,
+        margin = dict(b=100)
+    )
+    
+    # Rotate x-axis labels
+    fig.update_xaxes(tickangle=-45)
+    
+    return fig
+
+
+def create_group_treemap(groups_data: Dict[str, Dict], year: int, 
+                        title: str = "Composição dos Grupos de Despesas") -> go.Figure:
+    """
+    Create a treemap showing the composition of expense groups
+    """
+    labels = []
+    parents = []
+    values = []
+    colors = []
+    
+    # Color palette
+    color_map = {
+        'Repasse de Comissão': '#FF6B6B',
+        'Funcionários': '#4ECDC4',
+        'Telefones': '#45B7D1',
+        'Marketing': '#FFA07A',
+        'Impostos e Taxas': '#98D8C8',
+        'Administrativo': '#F7DC6F',
+        'Financeiro': '#BB8FCE'
+    }
+    
+    # Root
+    labels.append("Total de Despesas")
+    parents.append("")
+    values.append(0)  # Will be calculated
+    colors.append("#E0E0E0")
+    
+    total_value = 0
+    
+    # Add groups and their items
+    for group_name, group_data in groups_data.items():
+        if year in group_data['years']:
+            year_values = group_data['years'][year]
+            group_value = year_values['annual']
+            
+            # Add group
+            labels.append(group_name)
+            parents.append("Total de Despesas")
+            values.append(group_value)
+            colors.append(color_map.get(group_name, '#95A5A6'))
+            
+            total_value += group_value
+    
+    # Update root value
+    values[0] = total_value
+    
+    # Create treemap
+    fig = go.Figure(go.Treemap(
+        labels=labels,
+        parents=parents,
+        values=values,
+        marker=dict(colors=colors),
+        textinfo="label+value+percent parent",
+        texttemplate='<b>%{label}</b><br>%{value:,.0f}<br>%{percentParent}',
+        hovertemplate='<b>%{label}</b><br>Valor: R$ %{value:,.0f}<br>Percentual: %{percentParent}<extra></extra>'
+    ))
+    
+    fig.update_layout(
+        title=f"{title} - {year}",
+        height=600,
+        margin=dict(t=50, l=25, r=25, b=25)
+    )
+    
+    return fig
+
+
 def create_margin_evolution_chart(df, title="Evolução da Margem de Lucro"):
     """Create a profit margin evolution chart"""
     fig = go.Figure()
@@ -110,6 +347,241 @@ def create_margin_evolution_chart(df, title="Evolução da Margem de Lucro"):
     return fig
 
 
+def create_group_evolution_chart(group_df: pd.DataFrame, title: str = "Evolução dos Grupos de Despesas") -> go.Figure:
+    """
+    Create a line chart showing evolution of expense groups over time
+    
+    Args:
+        group_df: DataFrame with columns ['Grupo', 'Ano', 'Valor', 'Categoria']
+        title: Chart title
+    """
+    fig = px.line(
+        group_df,
+        x='Ano',
+        y='Valor',
+        color='Grupo',
+        markers=True,
+        title=title,
+        labels={'Valor': 'Valor (R$)', 'Ano': 'Ano'},
+        hover_data={'Categoria': True, 'Itens': True}
+    )
+    
+    # Customize layout
+    fig.update_traces(
+        mode='lines+markers',
+        hovertemplate='<b>%{fullData.name}</b><br>' +
+                     'Ano: %{x}<br>' +
+                     'Valor: R$ %{y:,.2f}<br>' +
+                     'Categoria: %{customdata[0]}<br>' +
+                     '<extra></extra>'
+    )
+    
+    fig.update_layout(
+        hovermode='x unified',
+        xaxis=dict(title='Ano', tickmode='linear'),
+        yaxis=dict(title='Valor (R$)', tickformat=',.0f'),
+        legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02),
+        margin=dict(r=150),
+        height=500
+    )
+    
+    return fig
+
+
+def create_group_comparison_chart(group_df: pd.DataFrame, revenue_df: pd.DataFrame, 
+                                 title: str = "Grupos de Despesas como % da Receita") -> go.Figure:
+    """
+    Create a stacked bar chart showing expense groups as percentage of revenue
+    
+    Args:
+        group_df: DataFrame with expense groups
+        revenue_df: DataFrame with revenue data by year
+    """
+    # Merge with revenue data
+    merged_df = group_df.merge(
+        revenue_df[['year', 'revenue']], 
+        left_on='Ano', 
+        right_on='year', 
+        how='left'
+    )
+    
+    # Calculate percentage
+    merged_df['Percentual'] = (merged_df['Valor'] / merged_df['revenue']) * 100
+    
+    # Pivot for stacked bars
+    pivot_df = merged_df.pivot(index='Ano', columns='Grupo', values='Percentual').fillna(0)
+    
+    fig = go.Figure()
+    
+    # Add traces for each group
+    for grupo in pivot_df.columns:
+        fig.add_trace(go.Bar(
+            name=grupo,
+            x=pivot_df.index,
+            y=pivot_df[grupo],
+            text=[f'{v:.1f}%' for v in pivot_df[grupo]],
+            textposition='inside',
+            hovertemplate=f'<b>{grupo}</b><br>Ano: %{{x}}<br>% da Receita: %{{y:.1f}}%<extra></extra>'
+        ))
+    
+    fig.update_layout(
+        barmode='stack',
+        title=title,
+        xaxis_title='Ano',
+        yaxis_title='% da Receita',
+        yaxis=dict(tickformat='.1f', ticksuffix='%'),
+        hovermode='x unified',
+        height=500,
+        showlegend=True,
+        legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02),
+        margin=dict(r=150)
+    )
+    
+    return fig
+
+
+def create_margin_impact_by_group_chart(group_df: pd.DataFrame, financial_df: pd.DataFrame,
+                                       title: str = "Impacto dos Grupos na Margem de Lucro") -> go.Figure:
+    """
+    Create a waterfall chart showing how each group impacts profit margin
+    """
+    # Get the latest year data
+    latest_year = group_df['Ano'].max()
+    year_data = group_df[group_df['Ano'] == latest_year]
+    
+    # Get financial data for the year
+    fin_data = financial_df[financial_df['year'] == latest_year].iloc[0]
+    revenue = fin_data['revenue']
+    gross_margin = (revenue - fin_data.get('variable_costs', 0)) / revenue * 100
+    
+    # Calculate impact of each group
+    impacts = []
+    groups = year_data['Grupo'].unique()
+    
+    # Start with gross margin
+    impacts.append({
+        'x': 'Margem Bruta',
+        'y': gross_margin,
+        'measure': 'absolute',
+        'text': f'{gross_margin:.1f}%'
+    })
+    
+    # Add each group's impact
+    running_margin = gross_margin
+    for grupo in groups:
+        grupo_data = year_data[year_data['Grupo'] == grupo]
+        if not grupo_data.empty:
+            impact = -(grupo_data['Valor'].iloc[0] / revenue * 100)
+            running_margin += impact
+            
+            impacts.append({
+                'x': grupo,
+                'y': impact,
+                'measure': 'relative',
+                'text': f'{impact:.1f}%'
+            })
+    
+    # Add final margin
+    impacts.append({
+        'x': 'Margem Líquida',
+        'y': running_margin,
+        'measure': 'total',
+        'text': f'{running_margin:.1f}%'
+    })
+    
+    # Create waterfall chart
+    fig = go.Figure(go.Waterfall(
+        orientation = "v",
+        x = [d['x'] for d in impacts],
+        y = [d['y'] for d in impacts],
+        measure = [d['measure'] for d in impacts],
+        text = [d['text'] for d in impacts],
+        textposition = "outside",
+        connector = {"line": {"color": "rgb(63, 63, 63)"}},
+    ))
+    
+    fig.update_layout(
+        title = f"{title} - {latest_year}",
+        xaxis_title = "Componentes",
+        yaxis_title = "Margem (%)",
+        yaxis = dict(tickformat='.1f', ticksuffix='%'),
+        showlegend = False,
+        height = 500,
+        margin = dict(b=100)
+    )
+    
+    # Rotate x-axis labels
+    fig.update_xaxes(tickangle=-45)
+    
+    return fig
+
+
+def create_group_treemap(groups_data: Dict[str, Dict], year: int, 
+                        title: str = "Composição dos Grupos de Despesas") -> go.Figure:
+    """
+    Create a treemap showing the composition of expense groups
+    """
+    labels = []
+    parents = []
+    values = []
+    colors = []
+    
+    # Color palette
+    color_map = {
+        'Repasse de Comissão': '#FF6B6B',
+        'Funcionários': '#4ECDC4',
+        'Telefones': '#45B7D1',
+        'Marketing': '#FFA07A',
+        'Impostos e Taxas': '#98D8C8',
+        'Administrativo': '#F7DC6F',
+        'Financeiro': '#BB8FCE'
+    }
+    
+    # Root
+    labels.append("Total de Despesas")
+    parents.append("")
+    values.append(0)  # Will be calculated
+    colors.append("#E0E0E0")
+    
+    total_value = 0
+    
+    # Add groups and their items
+    for group_name, group_data in groups_data.items():
+        if year in group_data['years']:
+            year_values = group_data['years'][year]
+            group_value = year_values['annual']
+            
+            # Add group
+            labels.append(group_name)
+            parents.append("Total de Despesas")
+            values.append(group_value)
+            colors.append(color_map.get(group_name, '#95A5A6'))
+            
+            total_value += group_value
+    
+    # Update root value
+    values[0] = total_value
+    
+    # Create treemap
+    fig = go.Figure(go.Treemap(
+        labels=labels,
+        parents=parents,
+        values=values,
+        marker=dict(colors=colors),
+        textinfo="label+value+percent parent",
+        texttemplate='<b>%{label}</b><br>%{value:,.0f}<br>%{percentParent}',
+        hovertemplate='<b>%{label}</b><br>Valor: R$ %{value:,.0f}<br>Percentual: %{percentParent}<extra></extra>'
+    ))
+    
+    fig.update_layout(
+        title=f"{title} - {year}",
+        height=600,
+        margin=dict(t=50, l=25, r=25, b=25)
+    )
+    
+    return fig
+
+
 def create_cost_breakdown_chart(data, title="Composição de Custos"):
     """Create a cost breakdown pie/donut chart"""
     # Prepare data
@@ -139,6 +611,241 @@ def create_cost_breakdown_chart(data, title="Composição de Custos"):
         title=title,
         showlegend=True,
         margin=dict(l=20, r=20, t=80, b=20)
+    )
+    
+    return fig
+
+
+def create_group_evolution_chart(group_df: pd.DataFrame, title: str = "Evolução dos Grupos de Despesas") -> go.Figure:
+    """
+    Create a line chart showing evolution of expense groups over time
+    
+    Args:
+        group_df: DataFrame with columns ['Grupo', 'Ano', 'Valor', 'Categoria']
+        title: Chart title
+    """
+    fig = px.line(
+        group_df,
+        x='Ano',
+        y='Valor',
+        color='Grupo',
+        markers=True,
+        title=title,
+        labels={'Valor': 'Valor (R$)', 'Ano': 'Ano'},
+        hover_data={'Categoria': True, 'Itens': True}
+    )
+    
+    # Customize layout
+    fig.update_traces(
+        mode='lines+markers',
+        hovertemplate='<b>%{fullData.name}</b><br>' +
+                     'Ano: %{x}<br>' +
+                     'Valor: R$ %{y:,.2f}<br>' +
+                     'Categoria: %{customdata[0]}<br>' +
+                     '<extra></extra>'
+    )
+    
+    fig.update_layout(
+        hovermode='x unified',
+        xaxis=dict(title='Ano', tickmode='linear'),
+        yaxis=dict(title='Valor (R$)', tickformat=',.0f'),
+        legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02),
+        margin=dict(r=150),
+        height=500
+    )
+    
+    return fig
+
+
+def create_group_comparison_chart(group_df: pd.DataFrame, revenue_df: pd.DataFrame, 
+                                 title: str = "Grupos de Despesas como % da Receita") -> go.Figure:
+    """
+    Create a stacked bar chart showing expense groups as percentage of revenue
+    
+    Args:
+        group_df: DataFrame with expense groups
+        revenue_df: DataFrame with revenue data by year
+    """
+    # Merge with revenue data
+    merged_df = group_df.merge(
+        revenue_df[['year', 'revenue']], 
+        left_on='Ano', 
+        right_on='year', 
+        how='left'
+    )
+    
+    # Calculate percentage
+    merged_df['Percentual'] = (merged_df['Valor'] / merged_df['revenue']) * 100
+    
+    # Pivot for stacked bars
+    pivot_df = merged_df.pivot(index='Ano', columns='Grupo', values='Percentual').fillna(0)
+    
+    fig = go.Figure()
+    
+    # Add traces for each group
+    for grupo in pivot_df.columns:
+        fig.add_trace(go.Bar(
+            name=grupo,
+            x=pivot_df.index,
+            y=pivot_df[grupo],
+            text=[f'{v:.1f}%' for v in pivot_df[grupo]],
+            textposition='inside',
+            hovertemplate=f'<b>{grupo}</b><br>Ano: %{{x}}<br>% da Receita: %{{y:.1f}}%<extra></extra>'
+        ))
+    
+    fig.update_layout(
+        barmode='stack',
+        title=title,
+        xaxis_title='Ano',
+        yaxis_title='% da Receita',
+        yaxis=dict(tickformat='.1f', ticksuffix='%'),
+        hovermode='x unified',
+        height=500,
+        showlegend=True,
+        legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02),
+        margin=dict(r=150)
+    )
+    
+    return fig
+
+
+def create_margin_impact_by_group_chart(group_df: pd.DataFrame, financial_df: pd.DataFrame,
+                                       title: str = "Impacto dos Grupos na Margem de Lucro") -> go.Figure:
+    """
+    Create a waterfall chart showing how each group impacts profit margin
+    """
+    # Get the latest year data
+    latest_year = group_df['Ano'].max()
+    year_data = group_df[group_df['Ano'] == latest_year]
+    
+    # Get financial data for the year
+    fin_data = financial_df[financial_df['year'] == latest_year].iloc[0]
+    revenue = fin_data['revenue']
+    gross_margin = (revenue - fin_data.get('variable_costs', 0)) / revenue * 100
+    
+    # Calculate impact of each group
+    impacts = []
+    groups = year_data['Grupo'].unique()
+    
+    # Start with gross margin
+    impacts.append({
+        'x': 'Margem Bruta',
+        'y': gross_margin,
+        'measure': 'absolute',
+        'text': f'{gross_margin:.1f}%'
+    })
+    
+    # Add each group's impact
+    running_margin = gross_margin
+    for grupo in groups:
+        grupo_data = year_data[year_data['Grupo'] == grupo]
+        if not grupo_data.empty:
+            impact = -(grupo_data['Valor'].iloc[0] / revenue * 100)
+            running_margin += impact
+            
+            impacts.append({
+                'x': grupo,
+                'y': impact,
+                'measure': 'relative',
+                'text': f'{impact:.1f}%'
+            })
+    
+    # Add final margin
+    impacts.append({
+        'x': 'Margem Líquida',
+        'y': running_margin,
+        'measure': 'total',
+        'text': f'{running_margin:.1f}%'
+    })
+    
+    # Create waterfall chart
+    fig = go.Figure(go.Waterfall(
+        orientation = "v",
+        x = [d['x'] for d in impacts],
+        y = [d['y'] for d in impacts],
+        measure = [d['measure'] for d in impacts],
+        text = [d['text'] for d in impacts],
+        textposition = "outside",
+        connector = {"line": {"color": "rgb(63, 63, 63)"}},
+    ))
+    
+    fig.update_layout(
+        title = f"{title} - {latest_year}",
+        xaxis_title = "Componentes",
+        yaxis_title = "Margem (%)",
+        yaxis = dict(tickformat='.1f', ticksuffix='%'),
+        showlegend = False,
+        height = 500,
+        margin = dict(b=100)
+    )
+    
+    # Rotate x-axis labels
+    fig.update_xaxes(tickangle=-45)
+    
+    return fig
+
+
+def create_group_treemap(groups_data: Dict[str, Dict], year: int, 
+                        title: str = "Composição dos Grupos de Despesas") -> go.Figure:
+    """
+    Create a treemap showing the composition of expense groups
+    """
+    labels = []
+    parents = []
+    values = []
+    colors = []
+    
+    # Color palette
+    color_map = {
+        'Repasse de Comissão': '#FF6B6B',
+        'Funcionários': '#4ECDC4',
+        'Telefones': '#45B7D1',
+        'Marketing': '#FFA07A',
+        'Impostos e Taxas': '#98D8C8',
+        'Administrativo': '#F7DC6F',
+        'Financeiro': '#BB8FCE'
+    }
+    
+    # Root
+    labels.append("Total de Despesas")
+    parents.append("")
+    values.append(0)  # Will be calculated
+    colors.append("#E0E0E0")
+    
+    total_value = 0
+    
+    # Add groups and their items
+    for group_name, group_data in groups_data.items():
+        if year in group_data['years']:
+            year_values = group_data['years'][year]
+            group_value = year_values['annual']
+            
+            # Add group
+            labels.append(group_name)
+            parents.append("Total de Despesas")
+            values.append(group_value)
+            colors.append(color_map.get(group_name, '#95A5A6'))
+            
+            total_value += group_value
+    
+    # Update root value
+    values[0] = total_value
+    
+    # Create treemap
+    fig = go.Figure(go.Treemap(
+        labels=labels,
+        parents=parents,
+        values=values,
+        marker=dict(colors=colors),
+        textinfo="label+value+percent parent",
+        texttemplate='<b>%{label}</b><br>%{value:,.0f}<br>%{percentParent}',
+        hovertemplate='<b>%{label}</b><br>Valor: R$ %{value:,.0f}<br>Percentual: %{percentParent}<extra></extra>'
+    ))
+    
+    fig.update_layout(
+        title=f"{title} - {year}",
+        height=600,
+        margin=dict(t=50, l=25, r=25, b=25)
     )
     
     return fig
@@ -179,6 +886,241 @@ def create_monthly_trend_chart(monthly_data, title="Tendência Mensal"):
         hovermode='x unified',
         template='plotly_white',
         legend=dict(x=0.01, y=0.99)
+    )
+    
+    return fig
+
+
+def create_group_evolution_chart(group_df: pd.DataFrame, title: str = "Evolução dos Grupos de Despesas") -> go.Figure:
+    """
+    Create a line chart showing evolution of expense groups over time
+    
+    Args:
+        group_df: DataFrame with columns ['Grupo', 'Ano', 'Valor', 'Categoria']
+        title: Chart title
+    """
+    fig = px.line(
+        group_df,
+        x='Ano',
+        y='Valor',
+        color='Grupo',
+        markers=True,
+        title=title,
+        labels={'Valor': 'Valor (R$)', 'Ano': 'Ano'},
+        hover_data={'Categoria': True, 'Itens': True}
+    )
+    
+    # Customize layout
+    fig.update_traces(
+        mode='lines+markers',
+        hovertemplate='<b>%{fullData.name}</b><br>' +
+                     'Ano: %{x}<br>' +
+                     'Valor: R$ %{y:,.2f}<br>' +
+                     'Categoria: %{customdata[0]}<br>' +
+                     '<extra></extra>'
+    )
+    
+    fig.update_layout(
+        hovermode='x unified',
+        xaxis=dict(title='Ano', tickmode='linear'),
+        yaxis=dict(title='Valor (R$)', tickformat=',.0f'),
+        legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02),
+        margin=dict(r=150),
+        height=500
+    )
+    
+    return fig
+
+
+def create_group_comparison_chart(group_df: pd.DataFrame, revenue_df: pd.DataFrame, 
+                                 title: str = "Grupos de Despesas como % da Receita") -> go.Figure:
+    """
+    Create a stacked bar chart showing expense groups as percentage of revenue
+    
+    Args:
+        group_df: DataFrame with expense groups
+        revenue_df: DataFrame with revenue data by year
+    """
+    # Merge with revenue data
+    merged_df = group_df.merge(
+        revenue_df[['year', 'revenue']], 
+        left_on='Ano', 
+        right_on='year', 
+        how='left'
+    )
+    
+    # Calculate percentage
+    merged_df['Percentual'] = (merged_df['Valor'] / merged_df['revenue']) * 100
+    
+    # Pivot for stacked bars
+    pivot_df = merged_df.pivot(index='Ano', columns='Grupo', values='Percentual').fillna(0)
+    
+    fig = go.Figure()
+    
+    # Add traces for each group
+    for grupo in pivot_df.columns:
+        fig.add_trace(go.Bar(
+            name=grupo,
+            x=pivot_df.index,
+            y=pivot_df[grupo],
+            text=[f'{v:.1f}%' for v in pivot_df[grupo]],
+            textposition='inside',
+            hovertemplate=f'<b>{grupo}</b><br>Ano: %{{x}}<br>% da Receita: %{{y:.1f}}%<extra></extra>'
+        ))
+    
+    fig.update_layout(
+        barmode='stack',
+        title=title,
+        xaxis_title='Ano',
+        yaxis_title='% da Receita',
+        yaxis=dict(tickformat='.1f', ticksuffix='%'),
+        hovermode='x unified',
+        height=500,
+        showlegend=True,
+        legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02),
+        margin=dict(r=150)
+    )
+    
+    return fig
+
+
+def create_margin_impact_by_group_chart(group_df: pd.DataFrame, financial_df: pd.DataFrame,
+                                       title: str = "Impacto dos Grupos na Margem de Lucro") -> go.Figure:
+    """
+    Create a waterfall chart showing how each group impacts profit margin
+    """
+    # Get the latest year data
+    latest_year = group_df['Ano'].max()
+    year_data = group_df[group_df['Ano'] == latest_year]
+    
+    # Get financial data for the year
+    fin_data = financial_df[financial_df['year'] == latest_year].iloc[0]
+    revenue = fin_data['revenue']
+    gross_margin = (revenue - fin_data.get('variable_costs', 0)) / revenue * 100
+    
+    # Calculate impact of each group
+    impacts = []
+    groups = year_data['Grupo'].unique()
+    
+    # Start with gross margin
+    impacts.append({
+        'x': 'Margem Bruta',
+        'y': gross_margin,
+        'measure': 'absolute',
+        'text': f'{gross_margin:.1f}%'
+    })
+    
+    # Add each group's impact
+    running_margin = gross_margin
+    for grupo in groups:
+        grupo_data = year_data[year_data['Grupo'] == grupo]
+        if not grupo_data.empty:
+            impact = -(grupo_data['Valor'].iloc[0] / revenue * 100)
+            running_margin += impact
+            
+            impacts.append({
+                'x': grupo,
+                'y': impact,
+                'measure': 'relative',
+                'text': f'{impact:.1f}%'
+            })
+    
+    # Add final margin
+    impacts.append({
+        'x': 'Margem Líquida',
+        'y': running_margin,
+        'measure': 'total',
+        'text': f'{running_margin:.1f}%'
+    })
+    
+    # Create waterfall chart
+    fig = go.Figure(go.Waterfall(
+        orientation = "v",
+        x = [d['x'] for d in impacts],
+        y = [d['y'] for d in impacts],
+        measure = [d['measure'] for d in impacts],
+        text = [d['text'] for d in impacts],
+        textposition = "outside",
+        connector = {"line": {"color": "rgb(63, 63, 63)"}},
+    ))
+    
+    fig.update_layout(
+        title = f"{title} - {latest_year}",
+        xaxis_title = "Componentes",
+        yaxis_title = "Margem (%)",
+        yaxis = dict(tickformat='.1f', ticksuffix='%'),
+        showlegend = False,
+        height = 500,
+        margin = dict(b=100)
+    )
+    
+    # Rotate x-axis labels
+    fig.update_xaxes(tickangle=-45)
+    
+    return fig
+
+
+def create_group_treemap(groups_data: Dict[str, Dict], year: int, 
+                        title: str = "Composição dos Grupos de Despesas") -> go.Figure:
+    """
+    Create a treemap showing the composition of expense groups
+    """
+    labels = []
+    parents = []
+    values = []
+    colors = []
+    
+    # Color palette
+    color_map = {
+        'Repasse de Comissão': '#FF6B6B',
+        'Funcionários': '#4ECDC4',
+        'Telefones': '#45B7D1',
+        'Marketing': '#FFA07A',
+        'Impostos e Taxas': '#98D8C8',
+        'Administrativo': '#F7DC6F',
+        'Financeiro': '#BB8FCE'
+    }
+    
+    # Root
+    labels.append("Total de Despesas")
+    parents.append("")
+    values.append(0)  # Will be calculated
+    colors.append("#E0E0E0")
+    
+    total_value = 0
+    
+    # Add groups and their items
+    for group_name, group_data in groups_data.items():
+        if year in group_data['years']:
+            year_values = group_data['years'][year]
+            group_value = year_values['annual']
+            
+            # Add group
+            labels.append(group_name)
+            parents.append("Total de Despesas")
+            values.append(group_value)
+            colors.append(color_map.get(group_name, '#95A5A6'))
+            
+            total_value += group_value
+    
+    # Update root value
+    values[0] = total_value
+    
+    # Create treemap
+    fig = go.Figure(go.Treemap(
+        labels=labels,
+        parents=parents,
+        values=values,
+        marker=dict(colors=colors),
+        textinfo="label+value+percent parent",
+        texttemplate='<b>%{label}</b><br>%{value:,.0f}<br>%{percentParent}',
+        hovertemplate='<b>%{label}</b><br>Valor: R$ %{value:,.0f}<br>Percentual: %{percentParent}<extra></extra>'
+    ))
+    
+    fig.update_layout(
+        title=f"{title} - {year}",
+        height=600,
+        margin=dict(t=50, l=25, r=25, b=25)
     )
     
     return fig
@@ -250,6 +1192,241 @@ def create_pareto_chart(items, title="Análise de Pareto"):
     return fig
 
 
+def create_group_evolution_chart(group_df: pd.DataFrame, title: str = "Evolução dos Grupos de Despesas") -> go.Figure:
+    """
+    Create a line chart showing evolution of expense groups over time
+    
+    Args:
+        group_df: DataFrame with columns ['Grupo', 'Ano', 'Valor', 'Categoria']
+        title: Chart title
+    """
+    fig = px.line(
+        group_df,
+        x='Ano',
+        y='Valor',
+        color='Grupo',
+        markers=True,
+        title=title,
+        labels={'Valor': 'Valor (R$)', 'Ano': 'Ano'},
+        hover_data={'Categoria': True, 'Itens': True}
+    )
+    
+    # Customize layout
+    fig.update_traces(
+        mode='lines+markers',
+        hovertemplate='<b>%{fullData.name}</b><br>' +
+                     'Ano: %{x}<br>' +
+                     'Valor: R$ %{y:,.2f}<br>' +
+                     'Categoria: %{customdata[0]}<br>' +
+                     '<extra></extra>'
+    )
+    
+    fig.update_layout(
+        hovermode='x unified',
+        xaxis=dict(title='Ano', tickmode='linear'),
+        yaxis=dict(title='Valor (R$)', tickformat=',.0f'),
+        legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02),
+        margin=dict(r=150),
+        height=500
+    )
+    
+    return fig
+
+
+def create_group_comparison_chart(group_df: pd.DataFrame, revenue_df: pd.DataFrame, 
+                                 title: str = "Grupos de Despesas como % da Receita") -> go.Figure:
+    """
+    Create a stacked bar chart showing expense groups as percentage of revenue
+    
+    Args:
+        group_df: DataFrame with expense groups
+        revenue_df: DataFrame with revenue data by year
+    """
+    # Merge with revenue data
+    merged_df = group_df.merge(
+        revenue_df[['year', 'revenue']], 
+        left_on='Ano', 
+        right_on='year', 
+        how='left'
+    )
+    
+    # Calculate percentage
+    merged_df['Percentual'] = (merged_df['Valor'] / merged_df['revenue']) * 100
+    
+    # Pivot for stacked bars
+    pivot_df = merged_df.pivot(index='Ano', columns='Grupo', values='Percentual').fillna(0)
+    
+    fig = go.Figure()
+    
+    # Add traces for each group
+    for grupo in pivot_df.columns:
+        fig.add_trace(go.Bar(
+            name=grupo,
+            x=pivot_df.index,
+            y=pivot_df[grupo],
+            text=[f'{v:.1f}%' for v in pivot_df[grupo]],
+            textposition='inside',
+            hovertemplate=f'<b>{grupo}</b><br>Ano: %{{x}}<br>% da Receita: %{{y:.1f}}%<extra></extra>'
+        ))
+    
+    fig.update_layout(
+        barmode='stack',
+        title=title,
+        xaxis_title='Ano',
+        yaxis_title='% da Receita',
+        yaxis=dict(tickformat='.1f', ticksuffix='%'),
+        hovermode='x unified',
+        height=500,
+        showlegend=True,
+        legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02),
+        margin=dict(r=150)
+    )
+    
+    return fig
+
+
+def create_margin_impact_by_group_chart(group_df: pd.DataFrame, financial_df: pd.DataFrame,
+                                       title: str = "Impacto dos Grupos na Margem de Lucro") -> go.Figure:
+    """
+    Create a waterfall chart showing how each group impacts profit margin
+    """
+    # Get the latest year data
+    latest_year = group_df['Ano'].max()
+    year_data = group_df[group_df['Ano'] == latest_year]
+    
+    # Get financial data for the year
+    fin_data = financial_df[financial_df['year'] == latest_year].iloc[0]
+    revenue = fin_data['revenue']
+    gross_margin = (revenue - fin_data.get('variable_costs', 0)) / revenue * 100
+    
+    # Calculate impact of each group
+    impacts = []
+    groups = year_data['Grupo'].unique()
+    
+    # Start with gross margin
+    impacts.append({
+        'x': 'Margem Bruta',
+        'y': gross_margin,
+        'measure': 'absolute',
+        'text': f'{gross_margin:.1f}%'
+    })
+    
+    # Add each group's impact
+    running_margin = gross_margin
+    for grupo in groups:
+        grupo_data = year_data[year_data['Grupo'] == grupo]
+        if not grupo_data.empty:
+            impact = -(grupo_data['Valor'].iloc[0] / revenue * 100)
+            running_margin += impact
+            
+            impacts.append({
+                'x': grupo,
+                'y': impact,
+                'measure': 'relative',
+                'text': f'{impact:.1f}%'
+            })
+    
+    # Add final margin
+    impacts.append({
+        'x': 'Margem Líquida',
+        'y': running_margin,
+        'measure': 'total',
+        'text': f'{running_margin:.1f}%'
+    })
+    
+    # Create waterfall chart
+    fig = go.Figure(go.Waterfall(
+        orientation = "v",
+        x = [d['x'] for d in impacts],
+        y = [d['y'] for d in impacts],
+        measure = [d['measure'] for d in impacts],
+        text = [d['text'] for d in impacts],
+        textposition = "outside",
+        connector = {"line": {"color": "rgb(63, 63, 63)"}},
+    ))
+    
+    fig.update_layout(
+        title = f"{title} - {latest_year}",
+        xaxis_title = "Componentes",
+        yaxis_title = "Margem (%)",
+        yaxis = dict(tickformat='.1f', ticksuffix='%'),
+        showlegend = False,
+        height = 500,
+        margin = dict(b=100)
+    )
+    
+    # Rotate x-axis labels
+    fig.update_xaxes(tickangle=-45)
+    
+    return fig
+
+
+def create_group_treemap(groups_data: Dict[str, Dict], year: int, 
+                        title: str = "Composição dos Grupos de Despesas") -> go.Figure:
+    """
+    Create a treemap showing the composition of expense groups
+    """
+    labels = []
+    parents = []
+    values = []
+    colors = []
+    
+    # Color palette
+    color_map = {
+        'Repasse de Comissão': '#FF6B6B',
+        'Funcionários': '#4ECDC4',
+        'Telefones': '#45B7D1',
+        'Marketing': '#FFA07A',
+        'Impostos e Taxas': '#98D8C8',
+        'Administrativo': '#F7DC6F',
+        'Financeiro': '#BB8FCE'
+    }
+    
+    # Root
+    labels.append("Total de Despesas")
+    parents.append("")
+    values.append(0)  # Will be calculated
+    colors.append("#E0E0E0")
+    
+    total_value = 0
+    
+    # Add groups and their items
+    for group_name, group_data in groups_data.items():
+        if year in group_data['years']:
+            year_values = group_data['years'][year]
+            group_value = year_values['annual']
+            
+            # Add group
+            labels.append(group_name)
+            parents.append("Total de Despesas")
+            values.append(group_value)
+            colors.append(color_map.get(group_name, '#95A5A6'))
+            
+            total_value += group_value
+    
+    # Update root value
+    values[0] = total_value
+    
+    # Create treemap
+    fig = go.Figure(go.Treemap(
+        labels=labels,
+        parents=parents,
+        values=values,
+        marker=dict(colors=colors),
+        textinfo="label+value+percent parent",
+        texttemplate='<b>%{label}</b><br>%{value:,.0f}<br>%{percentParent}',
+        hovertemplate='<b>%{label}</b><br>Valor: R$ %{value:,.0f}<br>Percentual: %{percentParent}<extra></extra>'
+    ))
+    
+    fig.update_layout(
+        title=f"{title} - {year}",
+        height=600,
+        margin=dict(t=50, l=25, r=25, b=25)
+    )
+    
+    return fig
+
+
 def create_treemap(data, title="Visualização Hierárquica"):
     """Create a treemap visualization"""
     fig = px.treemap(
@@ -269,6 +1446,241 @@ def create_treemap(data, title="Visualização Hierárquica"):
     )
     
     fig.update_layout(
+        margin=dict(t=50, l=25, r=25, b=25)
+    )
+    
+    return fig
+
+
+def create_group_evolution_chart(group_df: pd.DataFrame, title: str = "Evolução dos Grupos de Despesas") -> go.Figure:
+    """
+    Create a line chart showing evolution of expense groups over time
+    
+    Args:
+        group_df: DataFrame with columns ['Grupo', 'Ano', 'Valor', 'Categoria']
+        title: Chart title
+    """
+    fig = px.line(
+        group_df,
+        x='Ano',
+        y='Valor',
+        color='Grupo',
+        markers=True,
+        title=title,
+        labels={'Valor': 'Valor (R$)', 'Ano': 'Ano'},
+        hover_data={'Categoria': True, 'Itens': True}
+    )
+    
+    # Customize layout
+    fig.update_traces(
+        mode='lines+markers',
+        hovertemplate='<b>%{fullData.name}</b><br>' +
+                     'Ano: %{x}<br>' +
+                     'Valor: R$ %{y:,.2f}<br>' +
+                     'Categoria: %{customdata[0]}<br>' +
+                     '<extra></extra>'
+    )
+    
+    fig.update_layout(
+        hovermode='x unified',
+        xaxis=dict(title='Ano', tickmode='linear'),
+        yaxis=dict(title='Valor (R$)', tickformat=',.0f'),
+        legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02),
+        margin=dict(r=150),
+        height=500
+    )
+    
+    return fig
+
+
+def create_group_comparison_chart(group_df: pd.DataFrame, revenue_df: pd.DataFrame, 
+                                 title: str = "Grupos de Despesas como % da Receita") -> go.Figure:
+    """
+    Create a stacked bar chart showing expense groups as percentage of revenue
+    
+    Args:
+        group_df: DataFrame with expense groups
+        revenue_df: DataFrame with revenue data by year
+    """
+    # Merge with revenue data
+    merged_df = group_df.merge(
+        revenue_df[['year', 'revenue']], 
+        left_on='Ano', 
+        right_on='year', 
+        how='left'
+    )
+    
+    # Calculate percentage
+    merged_df['Percentual'] = (merged_df['Valor'] / merged_df['revenue']) * 100
+    
+    # Pivot for stacked bars
+    pivot_df = merged_df.pivot(index='Ano', columns='Grupo', values='Percentual').fillna(0)
+    
+    fig = go.Figure()
+    
+    # Add traces for each group
+    for grupo in pivot_df.columns:
+        fig.add_trace(go.Bar(
+            name=grupo,
+            x=pivot_df.index,
+            y=pivot_df[grupo],
+            text=[f'{v:.1f}%' for v in pivot_df[grupo]],
+            textposition='inside',
+            hovertemplate=f'<b>{grupo}</b><br>Ano: %{{x}}<br>% da Receita: %{{y:.1f}}%<extra></extra>'
+        ))
+    
+    fig.update_layout(
+        barmode='stack',
+        title=title,
+        xaxis_title='Ano',
+        yaxis_title='% da Receita',
+        yaxis=dict(tickformat='.1f', ticksuffix='%'),
+        hovermode='x unified',
+        height=500,
+        showlegend=True,
+        legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02),
+        margin=dict(r=150)
+    )
+    
+    return fig
+
+
+def create_margin_impact_by_group_chart(group_df: pd.DataFrame, financial_df: pd.DataFrame,
+                                       title: str = "Impacto dos Grupos na Margem de Lucro") -> go.Figure:
+    """
+    Create a waterfall chart showing how each group impacts profit margin
+    """
+    # Get the latest year data
+    latest_year = group_df['Ano'].max()
+    year_data = group_df[group_df['Ano'] == latest_year]
+    
+    # Get financial data for the year
+    fin_data = financial_df[financial_df['year'] == latest_year].iloc[0]
+    revenue = fin_data['revenue']
+    gross_margin = (revenue - fin_data.get('variable_costs', 0)) / revenue * 100
+    
+    # Calculate impact of each group
+    impacts = []
+    groups = year_data['Grupo'].unique()
+    
+    # Start with gross margin
+    impacts.append({
+        'x': 'Margem Bruta',
+        'y': gross_margin,
+        'measure': 'absolute',
+        'text': f'{gross_margin:.1f}%'
+    })
+    
+    # Add each group's impact
+    running_margin = gross_margin
+    for grupo in groups:
+        grupo_data = year_data[year_data['Grupo'] == grupo]
+        if not grupo_data.empty:
+            impact = -(grupo_data['Valor'].iloc[0] / revenue * 100)
+            running_margin += impact
+            
+            impacts.append({
+                'x': grupo,
+                'y': impact,
+                'measure': 'relative',
+                'text': f'{impact:.1f}%'
+            })
+    
+    # Add final margin
+    impacts.append({
+        'x': 'Margem Líquida',
+        'y': running_margin,
+        'measure': 'total',
+        'text': f'{running_margin:.1f}%'
+    })
+    
+    # Create waterfall chart
+    fig = go.Figure(go.Waterfall(
+        orientation = "v",
+        x = [d['x'] for d in impacts],
+        y = [d['y'] for d in impacts],
+        measure = [d['measure'] for d in impacts],
+        text = [d['text'] for d in impacts],
+        textposition = "outside",
+        connector = {"line": {"color": "rgb(63, 63, 63)"}},
+    ))
+    
+    fig.update_layout(
+        title = f"{title} - {latest_year}",
+        xaxis_title = "Componentes",
+        yaxis_title = "Margem (%)",
+        yaxis = dict(tickformat='.1f', ticksuffix='%'),
+        showlegend = False,
+        height = 500,
+        margin = dict(b=100)
+    )
+    
+    # Rotate x-axis labels
+    fig.update_xaxes(tickangle=-45)
+    
+    return fig
+
+
+def create_group_treemap(groups_data: Dict[str, Dict], year: int, 
+                        title: str = "Composição dos Grupos de Despesas") -> go.Figure:
+    """
+    Create a treemap showing the composition of expense groups
+    """
+    labels = []
+    parents = []
+    values = []
+    colors = []
+    
+    # Color palette
+    color_map = {
+        'Repasse de Comissão': '#FF6B6B',
+        'Funcionários': '#4ECDC4',
+        'Telefones': '#45B7D1',
+        'Marketing': '#FFA07A',
+        'Impostos e Taxas': '#98D8C8',
+        'Administrativo': '#F7DC6F',
+        'Financeiro': '#BB8FCE'
+    }
+    
+    # Root
+    labels.append("Total de Despesas")
+    parents.append("")
+    values.append(0)  # Will be calculated
+    colors.append("#E0E0E0")
+    
+    total_value = 0
+    
+    # Add groups and their items
+    for group_name, group_data in groups_data.items():
+        if year in group_data['years']:
+            year_values = group_data['years'][year]
+            group_value = year_values['annual']
+            
+            # Add group
+            labels.append(group_name)
+            parents.append("Total de Despesas")
+            values.append(group_value)
+            colors.append(color_map.get(group_name, '#95A5A6'))
+            
+            total_value += group_value
+    
+    # Update root value
+    values[0] = total_value
+    
+    # Create treemap
+    fig = go.Figure(go.Treemap(
+        labels=labels,
+        parents=parents,
+        values=values,
+        marker=dict(colors=colors),
+        textinfo="label+value+percent parent",
+        texttemplate='<b>%{label}</b><br>%{value:,.0f}<br>%{percentParent}',
+        hovertemplate='<b>%{label}</b><br>Valor: R$ %{value:,.0f}<br>Percentual: %{percentParent}<extra></extra>'
+    ))
+    
+    fig.update_layout(
+        title=f"{title} - {year}",
+        height=600,
         margin=dict(t=50, l=25, r=25, b=25)
     )
     
@@ -297,6 +1709,241 @@ def create_sankey_diagram(source, target, value, title="Fluxo de Despesas"):
         title=title,
         font_size=10,
         height=600
+    )
+    
+    return fig
+
+
+def create_group_evolution_chart(group_df: pd.DataFrame, title: str = "Evolução dos Grupos de Despesas") -> go.Figure:
+    """
+    Create a line chart showing evolution of expense groups over time
+    
+    Args:
+        group_df: DataFrame with columns ['Grupo', 'Ano', 'Valor', 'Categoria']
+        title: Chart title
+    """
+    fig = px.line(
+        group_df,
+        x='Ano',
+        y='Valor',
+        color='Grupo',
+        markers=True,
+        title=title,
+        labels={'Valor': 'Valor (R$)', 'Ano': 'Ano'},
+        hover_data={'Categoria': True, 'Itens': True}
+    )
+    
+    # Customize layout
+    fig.update_traces(
+        mode='lines+markers',
+        hovertemplate='<b>%{fullData.name}</b><br>' +
+                     'Ano: %{x}<br>' +
+                     'Valor: R$ %{y:,.2f}<br>' +
+                     'Categoria: %{customdata[0]}<br>' +
+                     '<extra></extra>'
+    )
+    
+    fig.update_layout(
+        hovermode='x unified',
+        xaxis=dict(title='Ano', tickmode='linear'),
+        yaxis=dict(title='Valor (R$)', tickformat=',.0f'),
+        legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02),
+        margin=dict(r=150),
+        height=500
+    )
+    
+    return fig
+
+
+def create_group_comparison_chart(group_df: pd.DataFrame, revenue_df: pd.DataFrame, 
+                                 title: str = "Grupos de Despesas como % da Receita") -> go.Figure:
+    """
+    Create a stacked bar chart showing expense groups as percentage of revenue
+    
+    Args:
+        group_df: DataFrame with expense groups
+        revenue_df: DataFrame with revenue data by year
+    """
+    # Merge with revenue data
+    merged_df = group_df.merge(
+        revenue_df[['year', 'revenue']], 
+        left_on='Ano', 
+        right_on='year', 
+        how='left'
+    )
+    
+    # Calculate percentage
+    merged_df['Percentual'] = (merged_df['Valor'] / merged_df['revenue']) * 100
+    
+    # Pivot for stacked bars
+    pivot_df = merged_df.pivot(index='Ano', columns='Grupo', values='Percentual').fillna(0)
+    
+    fig = go.Figure()
+    
+    # Add traces for each group
+    for grupo in pivot_df.columns:
+        fig.add_trace(go.Bar(
+            name=grupo,
+            x=pivot_df.index,
+            y=pivot_df[grupo],
+            text=[f'{v:.1f}%' for v in pivot_df[grupo]],
+            textposition='inside',
+            hovertemplate=f'<b>{grupo}</b><br>Ano: %{{x}}<br>% da Receita: %{{y:.1f}}%<extra></extra>'
+        ))
+    
+    fig.update_layout(
+        barmode='stack',
+        title=title,
+        xaxis_title='Ano',
+        yaxis_title='% da Receita',
+        yaxis=dict(tickformat='.1f', ticksuffix='%'),
+        hovermode='x unified',
+        height=500,
+        showlegend=True,
+        legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02),
+        margin=dict(r=150)
+    )
+    
+    return fig
+
+
+def create_margin_impact_by_group_chart(group_df: pd.DataFrame, financial_df: pd.DataFrame,
+                                       title: str = "Impacto dos Grupos na Margem de Lucro") -> go.Figure:
+    """
+    Create a waterfall chart showing how each group impacts profit margin
+    """
+    # Get the latest year data
+    latest_year = group_df['Ano'].max()
+    year_data = group_df[group_df['Ano'] == latest_year]
+    
+    # Get financial data for the year
+    fin_data = financial_df[financial_df['year'] == latest_year].iloc[0]
+    revenue = fin_data['revenue']
+    gross_margin = (revenue - fin_data.get('variable_costs', 0)) / revenue * 100
+    
+    # Calculate impact of each group
+    impacts = []
+    groups = year_data['Grupo'].unique()
+    
+    # Start with gross margin
+    impacts.append({
+        'x': 'Margem Bruta',
+        'y': gross_margin,
+        'measure': 'absolute',
+        'text': f'{gross_margin:.1f}%'
+    })
+    
+    # Add each group's impact
+    running_margin = gross_margin
+    for grupo in groups:
+        grupo_data = year_data[year_data['Grupo'] == grupo]
+        if not grupo_data.empty:
+            impact = -(grupo_data['Valor'].iloc[0] / revenue * 100)
+            running_margin += impact
+            
+            impacts.append({
+                'x': grupo,
+                'y': impact,
+                'measure': 'relative',
+                'text': f'{impact:.1f}%'
+            })
+    
+    # Add final margin
+    impacts.append({
+        'x': 'Margem Líquida',
+        'y': running_margin,
+        'measure': 'total',
+        'text': f'{running_margin:.1f}%'
+    })
+    
+    # Create waterfall chart
+    fig = go.Figure(go.Waterfall(
+        orientation = "v",
+        x = [d['x'] for d in impacts],
+        y = [d['y'] for d in impacts],
+        measure = [d['measure'] for d in impacts],
+        text = [d['text'] for d in impacts],
+        textposition = "outside",
+        connector = {"line": {"color": "rgb(63, 63, 63)"}},
+    ))
+    
+    fig.update_layout(
+        title = f"{title} - {latest_year}",
+        xaxis_title = "Componentes",
+        yaxis_title = "Margem (%)",
+        yaxis = dict(tickformat='.1f', ticksuffix='%'),
+        showlegend = False,
+        height = 500,
+        margin = dict(b=100)
+    )
+    
+    # Rotate x-axis labels
+    fig.update_xaxes(tickangle=-45)
+    
+    return fig
+
+
+def create_group_treemap(groups_data: Dict[str, Dict], year: int, 
+                        title: str = "Composição dos Grupos de Despesas") -> go.Figure:
+    """
+    Create a treemap showing the composition of expense groups
+    """
+    labels = []
+    parents = []
+    values = []
+    colors = []
+    
+    # Color palette
+    color_map = {
+        'Repasse de Comissão': '#FF6B6B',
+        'Funcionários': '#4ECDC4',
+        'Telefones': '#45B7D1',
+        'Marketing': '#FFA07A',
+        'Impostos e Taxas': '#98D8C8',
+        'Administrativo': '#F7DC6F',
+        'Financeiro': '#BB8FCE'
+    }
+    
+    # Root
+    labels.append("Total de Despesas")
+    parents.append("")
+    values.append(0)  # Will be calculated
+    colors.append("#E0E0E0")
+    
+    total_value = 0
+    
+    # Add groups and their items
+    for group_name, group_data in groups_data.items():
+        if year in group_data['years']:
+            year_values = group_data['years'][year]
+            group_value = year_values['annual']
+            
+            # Add group
+            labels.append(group_name)
+            parents.append("Total de Despesas")
+            values.append(group_value)
+            colors.append(color_map.get(group_name, '#95A5A6'))
+            
+            total_value += group_value
+    
+    # Update root value
+    values[0] = total_value
+    
+    # Create treemap
+    fig = go.Figure(go.Treemap(
+        labels=labels,
+        parents=parents,
+        values=values,
+        marker=dict(colors=colors),
+        textinfo="label+value+percent parent",
+        texttemplate='<b>%{label}</b><br>%{value:,.0f}<br>%{percentParent}',
+        hovertemplate='<b>%{label}</b><br>Valor: R$ %{value:,.0f}<br>Percentual: %{percentParent}<extra></extra>'
+    ))
+    
+    fig.update_layout(
+        title=f"{title} - {year}",
+        height=600,
+        margin=dict(t=50, l=25, r=25, b=25)
     )
     
     return fig
@@ -363,6 +2010,293 @@ def create_cost_structure_chart(df, title="Estrutura de Custos vs. Receita"):
 
     return fig
 
+
+def create_group_evolution_chart(group_df: pd.DataFrame, title: str = "Evolução dos Grupos de Despesas") -> go.Figure:
+    """
+    Create a line chart showing evolution of expense groups over time
+    
+    Args:
+        group_df: DataFrame with columns ['Grupo', 'Ano', 'Valor', 'Categoria']
+        title: Chart title
+    """
+    fig = px.line(
+        group_df,
+        x='Ano',
+        y='Valor',
+        color='Grupo',
+        markers=True,
+        title=title,
+        labels={'Valor': 'Valor (R$)', 'Ano': 'Ano'},
+        hover_data={'Categoria': True, 'Itens': True}
+    )
+    
+    # Customize layout
+    fig.update_traces(
+        mode='lines+markers',
+        hovertemplate='<b>%{fullData.name}</b><br>' +
+                     'Ano: %{x}<br>' +
+                     'Valor: R$ %{y:,.2f}<br>' +
+                     'Categoria: %{customdata[0]}<br>' +
+                     '<extra></extra>'
+    )
+    
+    fig.update_layout(
+        hovermode='x unified',
+        xaxis=dict(title='Ano', tickmode='linear'),
+        yaxis=dict(title='Valor (R$)', tickformat=',.0f'),
+        legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02),
+        margin=dict(r=150),
+        height=500
+    )
+    
+    return fig
+
+
+def create_group_comparison_chart(group_df: pd.DataFrame, revenue_df: pd.DataFrame, 
+                                 title: str = "Grupos de Despesas como % da Receita") -> go.Figure:
+    """
+    Create a stacked bar chart showing expense groups as percentage of revenue
+    
+    Args:
+        group_df: DataFrame with expense groups
+        revenue_df: DataFrame with revenue data by year
+    """
+    # Merge with revenue data
+    merged_df = group_df.merge(
+        revenue_df[['year', 'revenue']], 
+        left_on='Ano', 
+        right_on='year', 
+        how='left'
+    )
+    
+    # Calculate percentage
+    merged_df['Percentual'] = (merged_df['Valor'] / merged_df['revenue']) * 100
+    
+    # Pivot for stacked bars
+    pivot_df = merged_df.pivot(index='Ano', columns='Grupo', values='Percentual').fillna(0)
+    
+    fig = go.Figure()
+    
+    # Add traces for each group
+    for grupo in pivot_df.columns:
+        fig.add_trace(go.Bar(
+            name=grupo,
+            x=pivot_df.index,
+            y=pivot_df[grupo],
+            text=[f'{v:.1f}%' for v in pivot_df[grupo]],
+            textposition='inside',
+            hovertemplate=f'<b>{grupo}</b><br>Ano: %{{x}}<br>% da Receita: %{{y:.1f}}%<extra></extra>'
+        ))
+    
+    fig.update_layout(
+        barmode='stack',
+        title=title,
+        xaxis_title='Ano',
+        yaxis_title='% da Receita',
+        yaxis=dict(tickformat='.1f', ticksuffix='%'),
+        hovermode='x unified',
+        height=500,
+        showlegend=True,
+        legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02),
+        margin=dict(r=150)
+    )
+    
+    return fig
+
+
+def create_margin_impact_by_group_chart(group_df: pd.DataFrame, financial_df: pd.DataFrame,
+                                       title: str = "Impacto dos Grupos na Margem de Lucro") -> go.Figure:
+    """
+    Create a waterfall chart showing how each group impacts profit margin
+    """
+    # Get the latest year data
+    latest_year = group_df['Ano'].max()
+    year_data = group_df[group_df['Ano'] == latest_year]
+    
+    # Get financial data for the year
+    fin_data = financial_df[financial_df['year'] == latest_year].iloc[0]
+    revenue = fin_data['revenue']
+    gross_margin = (revenue - fin_data.get('variable_costs', 0)) / revenue * 100
+    
+    # Calculate impact of each group
+    impacts = []
+    groups = year_data['Grupo'].unique()
+    
+    # Start with gross margin
+    impacts.append({
+        'x': 'Margem Bruta',
+        'y': gross_margin,
+        'measure': 'absolute',
+        'text': f'{gross_margin:.1f}%'
+    })
+    
+    # Add each group's impact
+    running_margin = gross_margin
+    for grupo in groups:
+        grupo_data = year_data[year_data['Grupo'] == grupo]
+        if not grupo_data.empty:
+            impact = -(grupo_data['Valor'].iloc[0] / revenue * 100)
+            running_margin += impact
+            
+            impacts.append({
+                'x': grupo,
+                'y': impact,
+                'measure': 'relative',
+                'text': f'{impact:.1f}%'
+            })
+    
+    # Add final margin
+    impacts.append({
+        'x': 'Margem Líquida',
+        'y': running_margin,
+        'measure': 'total',
+        'text': f'{running_margin:.1f}%'
+    })
+    
+    # Create waterfall chart
+    fig = go.Figure(go.Waterfall(
+        orientation = "v",
+        x = [d['x'] for d in impacts],
+        y = [d['y'] for d in impacts],
+        measure = [d['measure'] for d in impacts],
+        text = [d['text'] for d in impacts],
+        textposition = "outside",
+        connector = {"line": {"color": "rgb(63, 63, 63)"}},
+    ))
+    
+    fig.update_layout(
+        title = f"{title} - {latest_year}",
+        xaxis_title = "Componentes",
+        yaxis_title = "Margem (%)",
+        yaxis = dict(tickformat='.1f', ticksuffix='%'),
+        showlegend = False,
+        height = 500,
+        margin = dict(b=100)
+    )
+    
+    # Rotate x-axis labels
+    fig.update_xaxes(tickangle=-45)
+    
+    return fig
+
+
+def create_group_treemap(groups_data: Dict[str, Dict], year: int, 
+                        title: str = "Composição dos Grupos de Despesas") -> go.Figure:
+    """
+    Create a treemap showing the composition of expense groups
+    """
+    labels = []
+    parents = []
+    values = []
+    colors = []
+    
+    # Color palette
+    color_map = {
+        'Repasse de Comissão': '#FF6B6B',
+        'Funcionários': '#4ECDC4',
+        'Telefones': '#45B7D1',
+        'Marketing': '#FFA07A',
+        'Impostos e Taxas': '#98D8C8',
+        'Administrativo': '#F7DC6F',
+        'Financeiro': '#BB8FCE'
+    }
+    
+    # Root
+    labels.append("Total de Despesas")
+    parents.append("")
+    values.append(0)  # Will be calculated
+    colors.append("#E0E0E0")
+    
+    total_value = 0
+    
+    # Add groups and their items
+    for group_name, group_data in groups_data.items():
+        if year in group_data['years']:
+            year_values = group_data['years'][year]
+            group_value = year_values['annual']
+            
+            # Add group
+            labels.append(group_name)
+            parents.append("Total de Despesas")
+            values.append(group_value)
+            colors.append(color_map.get(group_name, '#95A5A6'))
+            
+            total_value += group_value
+    
+    # Update root value
+    values[0] = total_value
+    
+    # Create treemap
+    fig = go.Figure(go.Treemap(
+        labels=labels,
+        parents=parents,
+        values=values,
+        marker=dict(colors=colors),
+        textinfo="label+value+percent parent",
+        texttemplate='<b>%{label}</b><br>%{value:,.0f}<br>%{percentParent}',
+        hovertemplate='<b>%{label}</b><br>Valor: R$ %{value:,.0f}<br>Percentual: %{percentParent}<extra></extra>'
+    ))
+    
+    fig.update_layout(
+        title=f"{title} - {year}",
+        height=600,
+        margin=dict(t=50, l=25, r=25, b=25)
+    )
+    
+    return fig
+
+
+def create_fixed_costs_evolution_chart(df, title="Evolução dos Custos Fixos"):
+    """Create a line chart showing the evolution of fixed costs over time"""
+    fig = go.Figure()
+    
+    # Determine x-axis based on data structure
+    if 'period' in df.columns:
+        x_col = 'period'
+        x_title = 'Período'
+    else:
+        x_col = 'year'
+        x_title = 'Ano'
+    
+    # Add fixed costs line
+    fig.add_trace(go.Scatter(
+        name='Custos Fixos',
+        x=df[x_col],
+        y=df['fixed_costs'],
+        mode='lines+markers+text',
+        text=[format_currency(v) for v in df['fixed_costs']],
+        textposition='top center',
+        line=dict(color='#2E86C1', width=3),
+        marker=dict(size=10, color='#2E86C1'),
+        hovertemplate=f'<b>{x_title}:</b> %{{x}}<br><b>Custos Fixos:</b> %{{text}}<extra></extra>'
+    ))
+    
+    # Add average line
+    avg_fixed_costs = df['fixed_costs'].mean()
+    fig.add_hline(
+        y=avg_fixed_costs,
+        line_dash="dash",
+        line_color="gray",
+        annotation_text=f"Média: {format_currency(avg_fixed_costs)}",
+        annotation_position="right"
+    )
+    
+    fig.update_layout(
+        title=title,
+        xaxis_title=x_title,
+        yaxis_title='Custos Fixos (R$)',
+        template='plotly_white',
+        showlegend=False,
+        margin=dict(l=50, r=50, t=80, b=50),
+        hovermode='x unified'
+    )
+    
+    # Format y-axis
+    fig.update_yaxis(tickformat=',.')
+    
+    return fig
+
+
 def create_detailed_cost_structure_chart(df, title="Estrutura de Custos Detalhada"):
     """Create a detailed stacked bar chart showing cost structure against revenue"""
     fig = go.Figure()
@@ -406,6 +2340,241 @@ def create_detailed_cost_structure_chart(df, title="Estrutura de Custos Detalhad
 
     return fig
 
+
+def create_group_evolution_chart(group_df: pd.DataFrame, title: str = "Evolução dos Grupos de Despesas") -> go.Figure:
+    """
+    Create a line chart showing evolution of expense groups over time
+    
+    Args:
+        group_df: DataFrame with columns ['Grupo', 'Ano', 'Valor', 'Categoria']
+        title: Chart title
+    """
+    fig = px.line(
+        group_df,
+        x='Ano',
+        y='Valor',
+        color='Grupo',
+        markers=True,
+        title=title,
+        labels={'Valor': 'Valor (R$)', 'Ano': 'Ano'},
+        hover_data={'Categoria': True, 'Itens': True}
+    )
+    
+    # Customize layout
+    fig.update_traces(
+        mode='lines+markers',
+        hovertemplate='<b>%{fullData.name}</b><br>' +
+                     'Ano: %{x}<br>' +
+                     'Valor: R$ %{y:,.2f}<br>' +
+                     'Categoria: %{customdata[0]}<br>' +
+                     '<extra></extra>'
+    )
+    
+    fig.update_layout(
+        hovermode='x unified',
+        xaxis=dict(title='Ano', tickmode='linear'),
+        yaxis=dict(title='Valor (R$)', tickformat=',.0f'),
+        legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02),
+        margin=dict(r=150),
+        height=500
+    )
+    
+    return fig
+
+
+def create_group_comparison_chart(group_df: pd.DataFrame, revenue_df: pd.DataFrame, 
+                                 title: str = "Grupos de Despesas como % da Receita") -> go.Figure:
+    """
+    Create a stacked bar chart showing expense groups as percentage of revenue
+    
+    Args:
+        group_df: DataFrame with expense groups
+        revenue_df: DataFrame with revenue data by year
+    """
+    # Merge with revenue data
+    merged_df = group_df.merge(
+        revenue_df[['year', 'revenue']], 
+        left_on='Ano', 
+        right_on='year', 
+        how='left'
+    )
+    
+    # Calculate percentage
+    merged_df['Percentual'] = (merged_df['Valor'] / merged_df['revenue']) * 100
+    
+    # Pivot for stacked bars
+    pivot_df = merged_df.pivot(index='Ano', columns='Grupo', values='Percentual').fillna(0)
+    
+    fig = go.Figure()
+    
+    # Add traces for each group
+    for grupo in pivot_df.columns:
+        fig.add_trace(go.Bar(
+            name=grupo,
+            x=pivot_df.index,
+            y=pivot_df[grupo],
+            text=[f'{v:.1f}%' for v in pivot_df[grupo]],
+            textposition='inside',
+            hovertemplate=f'<b>{grupo}</b><br>Ano: %{{x}}<br>% da Receita: %{{y:.1f}}%<extra></extra>'
+        ))
+    
+    fig.update_layout(
+        barmode='stack',
+        title=title,
+        xaxis_title='Ano',
+        yaxis_title='% da Receita',
+        yaxis=dict(tickformat='.1f', ticksuffix='%'),
+        hovermode='x unified',
+        height=500,
+        showlegend=True,
+        legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02),
+        margin=dict(r=150)
+    )
+    
+    return fig
+
+
+def create_margin_impact_by_group_chart(group_df: pd.DataFrame, financial_df: pd.DataFrame,
+                                       title: str = "Impacto dos Grupos na Margem de Lucro") -> go.Figure:
+    """
+    Create a waterfall chart showing how each group impacts profit margin
+    """
+    # Get the latest year data
+    latest_year = group_df['Ano'].max()
+    year_data = group_df[group_df['Ano'] == latest_year]
+    
+    # Get financial data for the year
+    fin_data = financial_df[financial_df['year'] == latest_year].iloc[0]
+    revenue = fin_data['revenue']
+    gross_margin = (revenue - fin_data.get('variable_costs', 0)) / revenue * 100
+    
+    # Calculate impact of each group
+    impacts = []
+    groups = year_data['Grupo'].unique()
+    
+    # Start with gross margin
+    impacts.append({
+        'x': 'Margem Bruta',
+        'y': gross_margin,
+        'measure': 'absolute',
+        'text': f'{gross_margin:.1f}%'
+    })
+    
+    # Add each group's impact
+    running_margin = gross_margin
+    for grupo in groups:
+        grupo_data = year_data[year_data['Grupo'] == grupo]
+        if not grupo_data.empty:
+            impact = -(grupo_data['Valor'].iloc[0] / revenue * 100)
+            running_margin += impact
+            
+            impacts.append({
+                'x': grupo,
+                'y': impact,
+                'measure': 'relative',
+                'text': f'{impact:.1f}%'
+            })
+    
+    # Add final margin
+    impacts.append({
+        'x': 'Margem Líquida',
+        'y': running_margin,
+        'measure': 'total',
+        'text': f'{running_margin:.1f}%'
+    })
+    
+    # Create waterfall chart
+    fig = go.Figure(go.Waterfall(
+        orientation = "v",
+        x = [d['x'] for d in impacts],
+        y = [d['y'] for d in impacts],
+        measure = [d['measure'] for d in impacts],
+        text = [d['text'] for d in impacts],
+        textposition = "outside",
+        connector = {"line": {"color": "rgb(63, 63, 63)"}},
+    ))
+    
+    fig.update_layout(
+        title = f"{title} - {latest_year}",
+        xaxis_title = "Componentes",
+        yaxis_title = "Margem (%)",
+        yaxis = dict(tickformat='.1f', ticksuffix='%'),
+        showlegend = False,
+        height = 500,
+        margin = dict(b=100)
+    )
+    
+    # Rotate x-axis labels
+    fig.update_xaxes(tickangle=-45)
+    
+    return fig
+
+
+def create_group_treemap(groups_data: Dict[str, Dict], year: int, 
+                        title: str = "Composição dos Grupos de Despesas") -> go.Figure:
+    """
+    Create a treemap showing the composition of expense groups
+    """
+    labels = []
+    parents = []
+    values = []
+    colors = []
+    
+    # Color palette
+    color_map = {
+        'Repasse de Comissão': '#FF6B6B',
+        'Funcionários': '#4ECDC4',
+        'Telefones': '#45B7D1',
+        'Marketing': '#FFA07A',
+        'Impostos e Taxas': '#98D8C8',
+        'Administrativo': '#F7DC6F',
+        'Financeiro': '#BB8FCE'
+    }
+    
+    # Root
+    labels.append("Total de Despesas")
+    parents.append("")
+    values.append(0)  # Will be calculated
+    colors.append("#E0E0E0")
+    
+    total_value = 0
+    
+    # Add groups and their items
+    for group_name, group_data in groups_data.items():
+        if year in group_data['years']:
+            year_values = group_data['years'][year]
+            group_value = year_values['annual']
+            
+            # Add group
+            labels.append(group_name)
+            parents.append("Total de Despesas")
+            values.append(group_value)
+            colors.append(color_map.get(group_name, '#95A5A6'))
+            
+            total_value += group_value
+    
+    # Update root value
+    values[0] = total_value
+    
+    # Create treemap
+    fig = go.Figure(go.Treemap(
+        labels=labels,
+        parents=parents,
+        values=values,
+        marker=dict(colors=colors),
+        textinfo="label+value+percent parent",
+        texttemplate='<b>%{label}</b><br>%{value:,.0f}<br>%{percentParent}',
+        hovertemplate='<b>%{label}</b><br>Valor: R$ %{value:,.0f}<br>Percentual: %{percentParent}<extra></extra>'
+    ))
+    
+    fig.update_layout(
+        title=f"{title} - {year}",
+        height=600,
+        margin=dict(t=50, l=25, r=25, b=25)
+    )
+    
+    return fig
+
 def create_pnl_waterfall_chart(df, title="Demonstrativo de Resultados (Cascata)"):
     """Create a P&L waterfall chart"""
     
@@ -432,6 +2601,241 @@ def create_pnl_waterfall_chart(df, title="Demonstrativo de Resultados (Cascata)"
             showlegend = True
     )
 
+    return fig
+
+
+def create_group_evolution_chart(group_df: pd.DataFrame, title: str = "Evolução dos Grupos de Despesas") -> go.Figure:
+    """
+    Create a line chart showing evolution of expense groups over time
+    
+    Args:
+        group_df: DataFrame with columns ['Grupo', 'Ano', 'Valor', 'Categoria']
+        title: Chart title
+    """
+    fig = px.line(
+        group_df,
+        x='Ano',
+        y='Valor',
+        color='Grupo',
+        markers=True,
+        title=title,
+        labels={'Valor': 'Valor (R$)', 'Ano': 'Ano'},
+        hover_data={'Categoria': True, 'Itens': True}
+    )
+    
+    # Customize layout
+    fig.update_traces(
+        mode='lines+markers',
+        hovertemplate='<b>%{fullData.name}</b><br>' +
+                     'Ano: %{x}<br>' +
+                     'Valor: R$ %{y:,.2f}<br>' +
+                     'Categoria: %{customdata[0]}<br>' +
+                     '<extra></extra>'
+    )
+    
+    fig.update_layout(
+        hovermode='x unified',
+        xaxis=dict(title='Ano', tickmode='linear'),
+        yaxis=dict(title='Valor (R$)', tickformat=',.0f'),
+        legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02),
+        margin=dict(r=150),
+        height=500
+    )
+    
+    return fig
+
+
+def create_group_comparison_chart(group_df: pd.DataFrame, revenue_df: pd.DataFrame, 
+                                 title: str = "Grupos de Despesas como % da Receita") -> go.Figure:
+    """
+    Create a stacked bar chart showing expense groups as percentage of revenue
+    
+    Args:
+        group_df: DataFrame with expense groups
+        revenue_df: DataFrame with revenue data by year
+    """
+    # Merge with revenue data
+    merged_df = group_df.merge(
+        revenue_df[['year', 'revenue']], 
+        left_on='Ano', 
+        right_on='year', 
+        how='left'
+    )
+    
+    # Calculate percentage
+    merged_df['Percentual'] = (merged_df['Valor'] / merged_df['revenue']) * 100
+    
+    # Pivot for stacked bars
+    pivot_df = merged_df.pivot(index='Ano', columns='Grupo', values='Percentual').fillna(0)
+    
+    fig = go.Figure()
+    
+    # Add traces for each group
+    for grupo in pivot_df.columns:
+        fig.add_trace(go.Bar(
+            name=grupo,
+            x=pivot_df.index,
+            y=pivot_df[grupo],
+            text=[f'{v:.1f}%' for v in pivot_df[grupo]],
+            textposition='inside',
+            hovertemplate=f'<b>{grupo}</b><br>Ano: %{{x}}<br>% da Receita: %{{y:.1f}}%<extra></extra>'
+        ))
+    
+    fig.update_layout(
+        barmode='stack',
+        title=title,
+        xaxis_title='Ano',
+        yaxis_title='% da Receita',
+        yaxis=dict(tickformat='.1f', ticksuffix='%'),
+        hovermode='x unified',
+        height=500,
+        showlegend=True,
+        legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02),
+        margin=dict(r=150)
+    )
+    
+    return fig
+
+
+def create_margin_impact_by_group_chart(group_df: pd.DataFrame, financial_df: pd.DataFrame,
+                                       title: str = "Impacto dos Grupos na Margem de Lucro") -> go.Figure:
+    """
+    Create a waterfall chart showing how each group impacts profit margin
+    """
+    # Get the latest year data
+    latest_year = group_df['Ano'].max()
+    year_data = group_df[group_df['Ano'] == latest_year]
+    
+    # Get financial data for the year
+    fin_data = financial_df[financial_df['year'] == latest_year].iloc[0]
+    revenue = fin_data['revenue']
+    gross_margin = (revenue - fin_data.get('variable_costs', 0)) / revenue * 100
+    
+    # Calculate impact of each group
+    impacts = []
+    groups = year_data['Grupo'].unique()
+    
+    # Start with gross margin
+    impacts.append({
+        'x': 'Margem Bruta',
+        'y': gross_margin,
+        'measure': 'absolute',
+        'text': f'{gross_margin:.1f}%'
+    })
+    
+    # Add each group's impact
+    running_margin = gross_margin
+    for grupo in groups:
+        grupo_data = year_data[year_data['Grupo'] == grupo]
+        if not grupo_data.empty:
+            impact = -(grupo_data['Valor'].iloc[0] / revenue * 100)
+            running_margin += impact
+            
+            impacts.append({
+                'x': grupo,
+                'y': impact,
+                'measure': 'relative',
+                'text': f'{impact:.1f}%'
+            })
+    
+    # Add final margin
+    impacts.append({
+        'x': 'Margem Líquida',
+        'y': running_margin,
+        'measure': 'total',
+        'text': f'{running_margin:.1f}%'
+    })
+    
+    # Create waterfall chart
+    fig = go.Figure(go.Waterfall(
+        orientation = "v",
+        x = [d['x'] for d in impacts],
+        y = [d['y'] for d in impacts],
+        measure = [d['measure'] for d in impacts],
+        text = [d['text'] for d in impacts],
+        textposition = "outside",
+        connector = {"line": {"color": "rgb(63, 63, 63)"}},
+    ))
+    
+    fig.update_layout(
+        title = f"{title} - {latest_year}",
+        xaxis_title = "Componentes",
+        yaxis_title = "Margem (%)",
+        yaxis = dict(tickformat='.1f', ticksuffix='%'),
+        showlegend = False,
+        height = 500,
+        margin = dict(b=100)
+    )
+    
+    # Rotate x-axis labels
+    fig.update_xaxes(tickangle=-45)
+    
+    return fig
+
+
+def create_group_treemap(groups_data: Dict[str, Dict], year: int, 
+                        title: str = "Composição dos Grupos de Despesas") -> go.Figure:
+    """
+    Create a treemap showing the composition of expense groups
+    """
+    labels = []
+    parents = []
+    values = []
+    colors = []
+    
+    # Color palette
+    color_map = {
+        'Repasse de Comissão': '#FF6B6B',
+        'Funcionários': '#4ECDC4',
+        'Telefones': '#45B7D1',
+        'Marketing': '#FFA07A',
+        'Impostos e Taxas': '#98D8C8',
+        'Administrativo': '#F7DC6F',
+        'Financeiro': '#BB8FCE'
+    }
+    
+    # Root
+    labels.append("Total de Despesas")
+    parents.append("")
+    values.append(0)  # Will be calculated
+    colors.append("#E0E0E0")
+    
+    total_value = 0
+    
+    # Add groups and their items
+    for group_name, group_data in groups_data.items():
+        if year in group_data['years']:
+            year_values = group_data['years'][year]
+            group_value = year_values['annual']
+            
+            # Add group
+            labels.append(group_name)
+            parents.append("Total de Despesas")
+            values.append(group_value)
+            colors.append(color_map.get(group_name, '#95A5A6'))
+            
+            total_value += group_value
+    
+    # Update root value
+    values[0] = total_value
+    
+    # Create treemap
+    fig = go.Figure(go.Treemap(
+        labels=labels,
+        parents=parents,
+        values=values,
+        marker=dict(colors=colors),
+        textinfo="label+value+percent parent",
+        texttemplate='<b>%{label}</b><br>%{value:,.0f}<br>%{percentParent}',
+        hovertemplate='<b>%{label}</b><br>Valor: R$ %{value:,.0f}<br>Percentual: %{percentParent}<extra></extra>'
+    ))
+    
+    fig.update_layout(
+        title=f"{title} - {year}",
+        height=600,
+        margin=dict(t=50, l=25, r=25, b=25)
+    )
+    
     return fig
 
 def create_pnl_evolution_chart(df, title="Evolução do Demonstrativo de Resultados"):
@@ -493,6 +2897,241 @@ def create_pnl_evolution_chart(df, title="Evolução do Demonstrativo de Resulta
 
     return fig
 
+
+def create_group_evolution_chart(group_df: pd.DataFrame, title: str = "Evolução dos Grupos de Despesas") -> go.Figure:
+    """
+    Create a line chart showing evolution of expense groups over time
+    
+    Args:
+        group_df: DataFrame with columns ['Grupo', 'Ano', 'Valor', 'Categoria']
+        title: Chart title
+    """
+    fig = px.line(
+        group_df,
+        x='Ano',
+        y='Valor',
+        color='Grupo',
+        markers=True,
+        title=title,
+        labels={'Valor': 'Valor (R$)', 'Ano': 'Ano'},
+        hover_data={'Categoria': True, 'Itens': True}
+    )
+    
+    # Customize layout
+    fig.update_traces(
+        mode='lines+markers',
+        hovertemplate='<b>%{fullData.name}</b><br>' +
+                     'Ano: %{x}<br>' +
+                     'Valor: R$ %{y:,.2f}<br>' +
+                     'Categoria: %{customdata[0]}<br>' +
+                     '<extra></extra>'
+    )
+    
+    fig.update_layout(
+        hovermode='x unified',
+        xaxis=dict(title='Ano', tickmode='linear'),
+        yaxis=dict(title='Valor (R$)', tickformat=',.0f'),
+        legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02),
+        margin=dict(r=150),
+        height=500
+    )
+    
+    return fig
+
+
+def create_group_comparison_chart(group_df: pd.DataFrame, revenue_df: pd.DataFrame, 
+                                 title: str = "Grupos de Despesas como % da Receita") -> go.Figure:
+    """
+    Create a stacked bar chart showing expense groups as percentage of revenue
+    
+    Args:
+        group_df: DataFrame with expense groups
+        revenue_df: DataFrame with revenue data by year
+    """
+    # Merge with revenue data
+    merged_df = group_df.merge(
+        revenue_df[['year', 'revenue']], 
+        left_on='Ano', 
+        right_on='year', 
+        how='left'
+    )
+    
+    # Calculate percentage
+    merged_df['Percentual'] = (merged_df['Valor'] / merged_df['revenue']) * 100
+    
+    # Pivot for stacked bars
+    pivot_df = merged_df.pivot(index='Ano', columns='Grupo', values='Percentual').fillna(0)
+    
+    fig = go.Figure()
+    
+    # Add traces for each group
+    for grupo in pivot_df.columns:
+        fig.add_trace(go.Bar(
+            name=grupo,
+            x=pivot_df.index,
+            y=pivot_df[grupo],
+            text=[f'{v:.1f}%' for v in pivot_df[grupo]],
+            textposition='inside',
+            hovertemplate=f'<b>{grupo}</b><br>Ano: %{{x}}<br>% da Receita: %{{y:.1f}}%<extra></extra>'
+        ))
+    
+    fig.update_layout(
+        barmode='stack',
+        title=title,
+        xaxis_title='Ano',
+        yaxis_title='% da Receita',
+        yaxis=dict(tickformat='.1f', ticksuffix='%'),
+        hovermode='x unified',
+        height=500,
+        showlegend=True,
+        legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02),
+        margin=dict(r=150)
+    )
+    
+    return fig
+
+
+def create_margin_impact_by_group_chart(group_df: pd.DataFrame, financial_df: pd.DataFrame,
+                                       title: str = "Impacto dos Grupos na Margem de Lucro") -> go.Figure:
+    """
+    Create a waterfall chart showing how each group impacts profit margin
+    """
+    # Get the latest year data
+    latest_year = group_df['Ano'].max()
+    year_data = group_df[group_df['Ano'] == latest_year]
+    
+    # Get financial data for the year
+    fin_data = financial_df[financial_df['year'] == latest_year].iloc[0]
+    revenue = fin_data['revenue']
+    gross_margin = (revenue - fin_data.get('variable_costs', 0)) / revenue * 100
+    
+    # Calculate impact of each group
+    impacts = []
+    groups = year_data['Grupo'].unique()
+    
+    # Start with gross margin
+    impacts.append({
+        'x': 'Margem Bruta',
+        'y': gross_margin,
+        'measure': 'absolute',
+        'text': f'{gross_margin:.1f}%'
+    })
+    
+    # Add each group's impact
+    running_margin = gross_margin
+    for grupo in groups:
+        grupo_data = year_data[year_data['Grupo'] == grupo]
+        if not grupo_data.empty:
+            impact = -(grupo_data['Valor'].iloc[0] / revenue * 100)
+            running_margin += impact
+            
+            impacts.append({
+                'x': grupo,
+                'y': impact,
+                'measure': 'relative',
+                'text': f'{impact:.1f}%'
+            })
+    
+    # Add final margin
+    impacts.append({
+        'x': 'Margem Líquida',
+        'y': running_margin,
+        'measure': 'total',
+        'text': f'{running_margin:.1f}%'
+    })
+    
+    # Create waterfall chart
+    fig = go.Figure(go.Waterfall(
+        orientation = "v",
+        x = [d['x'] for d in impacts],
+        y = [d['y'] for d in impacts],
+        measure = [d['measure'] for d in impacts],
+        text = [d['text'] for d in impacts],
+        textposition = "outside",
+        connector = {"line": {"color": "rgb(63, 63, 63)"}},
+    ))
+    
+    fig.update_layout(
+        title = f"{title} - {latest_year}",
+        xaxis_title = "Componentes",
+        yaxis_title = "Margem (%)",
+        yaxis = dict(tickformat='.1f', ticksuffix='%'),
+        showlegend = False,
+        height = 500,
+        margin = dict(b=100)
+    )
+    
+    # Rotate x-axis labels
+    fig.update_xaxes(tickangle=-45)
+    
+    return fig
+
+
+def create_group_treemap(groups_data: Dict[str, Dict], year: int, 
+                        title: str = "Composição dos Grupos de Despesas") -> go.Figure:
+    """
+    Create a treemap showing the composition of expense groups
+    """
+    labels = []
+    parents = []
+    values = []
+    colors = []
+    
+    # Color palette
+    color_map = {
+        'Repasse de Comissão': '#FF6B6B',
+        'Funcionários': '#4ECDC4',
+        'Telefones': '#45B7D1',
+        'Marketing': '#FFA07A',
+        'Impostos e Taxas': '#98D8C8',
+        'Administrativo': '#F7DC6F',
+        'Financeiro': '#BB8FCE'
+    }
+    
+    # Root
+    labels.append("Total de Despesas")
+    parents.append("")
+    values.append(0)  # Will be calculated
+    colors.append("#E0E0E0")
+    
+    total_value = 0
+    
+    # Add groups and their items
+    for group_name, group_data in groups_data.items():
+        if year in group_data['years']:
+            year_values = group_data['years'][year]
+            group_value = year_values['annual']
+            
+            # Add group
+            labels.append(group_name)
+            parents.append("Total de Despesas")
+            values.append(group_value)
+            colors.append(color_map.get(group_name, '#95A5A6'))
+            
+            total_value += group_value
+    
+    # Update root value
+    values[0] = total_value
+    
+    # Create treemap
+    fig = go.Figure(go.Treemap(
+        labels=labels,
+        parents=parents,
+        values=values,
+        marker=dict(colors=colors),
+        textinfo="label+value+percent parent",
+        texttemplate='<b>%{label}</b><br>%{value:,.0f}<br>%{percentParent}',
+        hovertemplate='<b>%{label}</b><br>Valor: R$ %{value:,.0f}<br>Percentual: %{percentParent}<extra></extra>'
+    ))
+    
+    fig.update_layout(
+        title=f"{title} - {year}",
+        height=600,
+        margin=dict(t=50, l=25, r=25, b=25)
+    )
+    
+    return fig
+
 def create_cost_as_percentage_of_revenue_chart(df, title="Custos como % da Receita"):
     """Create a chart showing costs as a percentage of revenue"""
     fig = go.Figure()
@@ -518,6 +3157,241 @@ def create_cost_as_percentage_of_revenue_chart(df, title="Custos como % da Recei
         margin=dict(l=50, r=50, t=80, b=50)
     )
 
+    return fig
+
+
+def create_group_evolution_chart(group_df: pd.DataFrame, title: str = "Evolução dos Grupos de Despesas") -> go.Figure:
+    """
+    Create a line chart showing evolution of expense groups over time
+    
+    Args:
+        group_df: DataFrame with columns ['Grupo', 'Ano', 'Valor', 'Categoria']
+        title: Chart title
+    """
+    fig = px.line(
+        group_df,
+        x='Ano',
+        y='Valor',
+        color='Grupo',
+        markers=True,
+        title=title,
+        labels={'Valor': 'Valor (R$)', 'Ano': 'Ano'},
+        hover_data={'Categoria': True, 'Itens': True}
+    )
+    
+    # Customize layout
+    fig.update_traces(
+        mode='lines+markers',
+        hovertemplate='<b>%{fullData.name}</b><br>' +
+                     'Ano: %{x}<br>' +
+                     'Valor: R$ %{y:,.2f}<br>' +
+                     'Categoria: %{customdata[0]}<br>' +
+                     '<extra></extra>'
+    )
+    
+    fig.update_layout(
+        hovermode='x unified',
+        xaxis=dict(title='Ano', tickmode='linear'),
+        yaxis=dict(title='Valor (R$)', tickformat=',.0f'),
+        legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02),
+        margin=dict(r=150),
+        height=500
+    )
+    
+    return fig
+
+
+def create_group_comparison_chart(group_df: pd.DataFrame, revenue_df: pd.DataFrame, 
+                                 title: str = "Grupos de Despesas como % da Receita") -> go.Figure:
+    """
+    Create a stacked bar chart showing expense groups as percentage of revenue
+    
+    Args:
+        group_df: DataFrame with expense groups
+        revenue_df: DataFrame with revenue data by year
+    """
+    # Merge with revenue data
+    merged_df = group_df.merge(
+        revenue_df[['year', 'revenue']], 
+        left_on='Ano', 
+        right_on='year', 
+        how='left'
+    )
+    
+    # Calculate percentage
+    merged_df['Percentual'] = (merged_df['Valor'] / merged_df['revenue']) * 100
+    
+    # Pivot for stacked bars
+    pivot_df = merged_df.pivot(index='Ano', columns='Grupo', values='Percentual').fillna(0)
+    
+    fig = go.Figure()
+    
+    # Add traces for each group
+    for grupo in pivot_df.columns:
+        fig.add_trace(go.Bar(
+            name=grupo,
+            x=pivot_df.index,
+            y=pivot_df[grupo],
+            text=[f'{v:.1f}%' for v in pivot_df[grupo]],
+            textposition='inside',
+            hovertemplate=f'<b>{grupo}</b><br>Ano: %{{x}}<br>% da Receita: %{{y:.1f}}%<extra></extra>'
+        ))
+    
+    fig.update_layout(
+        barmode='stack',
+        title=title,
+        xaxis_title='Ano',
+        yaxis_title='% da Receita',
+        yaxis=dict(tickformat='.1f', ticksuffix='%'),
+        hovermode='x unified',
+        height=500,
+        showlegend=True,
+        legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02),
+        margin=dict(r=150)
+    )
+    
+    return fig
+
+
+def create_margin_impact_by_group_chart(group_df: pd.DataFrame, financial_df: pd.DataFrame,
+                                       title: str = "Impacto dos Grupos na Margem de Lucro") -> go.Figure:
+    """
+    Create a waterfall chart showing how each group impacts profit margin
+    """
+    # Get the latest year data
+    latest_year = group_df['Ano'].max()
+    year_data = group_df[group_df['Ano'] == latest_year]
+    
+    # Get financial data for the year
+    fin_data = financial_df[financial_df['year'] == latest_year].iloc[0]
+    revenue = fin_data['revenue']
+    gross_margin = (revenue - fin_data.get('variable_costs', 0)) / revenue * 100
+    
+    # Calculate impact of each group
+    impacts = []
+    groups = year_data['Grupo'].unique()
+    
+    # Start with gross margin
+    impacts.append({
+        'x': 'Margem Bruta',
+        'y': gross_margin,
+        'measure': 'absolute',
+        'text': f'{gross_margin:.1f}%'
+    })
+    
+    # Add each group's impact
+    running_margin = gross_margin
+    for grupo in groups:
+        grupo_data = year_data[year_data['Grupo'] == grupo]
+        if not grupo_data.empty:
+            impact = -(grupo_data['Valor'].iloc[0] / revenue * 100)
+            running_margin += impact
+            
+            impacts.append({
+                'x': grupo,
+                'y': impact,
+                'measure': 'relative',
+                'text': f'{impact:.1f}%'
+            })
+    
+    # Add final margin
+    impacts.append({
+        'x': 'Margem Líquida',
+        'y': running_margin,
+        'measure': 'total',
+        'text': f'{running_margin:.1f}%'
+    })
+    
+    # Create waterfall chart
+    fig = go.Figure(go.Waterfall(
+        orientation = "v",
+        x = [d['x'] for d in impacts],
+        y = [d['y'] for d in impacts],
+        measure = [d['measure'] for d in impacts],
+        text = [d['text'] for d in impacts],
+        textposition = "outside",
+        connector = {"line": {"color": "rgb(63, 63, 63)"}},
+    ))
+    
+    fig.update_layout(
+        title = f"{title} - {latest_year}",
+        xaxis_title = "Componentes",
+        yaxis_title = "Margem (%)",
+        yaxis = dict(tickformat='.1f', ticksuffix='%'),
+        showlegend = False,
+        height = 500,
+        margin = dict(b=100)
+    )
+    
+    # Rotate x-axis labels
+    fig.update_xaxes(tickangle=-45)
+    
+    return fig
+
+
+def create_group_treemap(groups_data: Dict[str, Dict], year: int, 
+                        title: str = "Composição dos Grupos de Despesas") -> go.Figure:
+    """
+    Create a treemap showing the composition of expense groups
+    """
+    labels = []
+    parents = []
+    values = []
+    colors = []
+    
+    # Color palette
+    color_map = {
+        'Repasse de Comissão': '#FF6B6B',
+        'Funcionários': '#4ECDC4',
+        'Telefones': '#45B7D1',
+        'Marketing': '#FFA07A',
+        'Impostos e Taxas': '#98D8C8',
+        'Administrativo': '#F7DC6F',
+        'Financeiro': '#BB8FCE'
+    }
+    
+    # Root
+    labels.append("Total de Despesas")
+    parents.append("")
+    values.append(0)  # Will be calculated
+    colors.append("#E0E0E0")
+    
+    total_value = 0
+    
+    # Add groups and their items
+    for group_name, group_data in groups_data.items():
+        if year in group_data['years']:
+            year_values = group_data['years'][year]
+            group_value = year_values['annual']
+            
+            # Add group
+            labels.append(group_name)
+            parents.append("Total de Despesas")
+            values.append(group_value)
+            colors.append(color_map.get(group_name, '#95A5A6'))
+            
+            total_value += group_value
+    
+    # Update root value
+    values[0] = total_value
+    
+    # Create treemap
+    fig = go.Figure(go.Treemap(
+        labels=labels,
+        parents=parents,
+        values=values,
+        marker=dict(colors=colors),
+        textinfo="label+value+percent parent",
+        texttemplate='<b>%{label}</b><br>%{value:,.0f}<br>%{percentParent}',
+        hovertemplate='<b>%{label}</b><br>Valor: R$ %{value:,.0f}<br>Percentual: %{percentParent}<extra></extra>'
+    ))
+    
+    fig.update_layout(
+        title=f"{title} - {year}",
+        height=600,
+        margin=dict(t=50, l=25, r=25, b=25)
+    )
+    
     return fig
 
 def create_margin_comparison_chart(df, title="Comparativo de Margens"):
@@ -567,4 +3441,322 @@ def create_margin_comparison_chart(df, title="Comparativo de Margens"):
         margin=dict(l=50, r=50, t=80, b=50)
     )
 
+    return fig
+
+
+def create_group_evolution_chart(group_df: pd.DataFrame, title: str = "Evolução dos Grupos de Despesas") -> go.Figure:
+    """
+    Create a line chart showing evolution of expense groups over time
+    
+    Args:
+        group_df: DataFrame with columns ['Grupo', 'Ano', 'Valor', 'Categoria']
+        title: Chart title
+    """
+    fig = px.line(
+        group_df,
+        x='Ano',
+        y='Valor',
+        color='Grupo',
+        markers=True,
+        title=title,
+        labels={'Valor': 'Valor (R$)', 'Ano': 'Ano'},
+        hover_data={'Categoria': True, 'Itens': True}
+    )
+    
+    # Customize layout
+    fig.update_traces(
+        mode='lines+markers',
+        hovertemplate='<b>%{fullData.name}</b><br>' +
+                     'Ano: %{x}<br>' +
+                     'Valor: R$ %{y:,.2f}<br>' +
+                     'Categoria: %{customdata[0]}<br>' +
+                     '<extra></extra>'
+    )
+    
+    fig.update_layout(
+        hovermode='x unified',
+        xaxis=dict(title='Ano', tickmode='linear'),
+        yaxis=dict(title='Valor (R$)', tickformat=',.0f'),
+        legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02),
+        margin=dict(r=150),
+        height=500
+    )
+    
+    return fig
+
+
+def create_group_comparison_chart(group_df: pd.DataFrame, revenue_df: pd.DataFrame, 
+                                 title: str = "Grupos de Despesas como % da Receita") -> go.Figure:
+    """
+    Create a stacked bar chart showing expense groups as percentage of revenue
+    
+    Args:
+        group_df: DataFrame with expense groups
+        revenue_df: DataFrame with revenue data by year
+    """
+    # Merge with revenue data
+    merged_df = group_df.merge(
+        revenue_df[['year', 'revenue']], 
+        left_on='Ano', 
+        right_on='year', 
+        how='left'
+    )
+    
+    # Calculate percentage
+    merged_df['Percentual'] = (merged_df['Valor'] / merged_df['revenue']) * 100
+    
+    # Pivot for stacked bars
+    pivot_df = merged_df.pivot(index='Ano', columns='Grupo', values='Percentual').fillna(0)
+    
+    fig = go.Figure()
+    
+    # Add traces for each group
+    for grupo in pivot_df.columns:
+        fig.add_trace(go.Bar(
+            name=grupo,
+            x=pivot_df.index,
+            y=pivot_df[grupo],
+            text=[f'{v:.1f}%' for v in pivot_df[grupo]],
+            textposition='inside',
+            hovertemplate=f'<b>{grupo}</b><br>Ano: %{{x}}<br>% da Receita: %{{y:.1f}}%<extra></extra>'
+        ))
+    
+    fig.update_layout(
+        barmode='stack',
+        title=title,
+        xaxis_title='Ano',
+        yaxis_title='% da Receita',
+        yaxis=dict(tickformat='.1f', ticksuffix='%'),
+        hovermode='x unified',
+        height=500,
+        showlegend=True,
+        legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02),
+        margin=dict(r=150)
+    )
+    
+    return fig
+
+
+def create_margin_impact_by_group_chart(group_df: pd.DataFrame, financial_df: pd.DataFrame,
+                                       title: str = "Impacto dos Grupos na Margem de Lucro") -> go.Figure:
+    """
+    Create a waterfall chart showing how each group impacts profit margin
+    """
+    # Get the latest year data
+    latest_year = group_df['Ano'].max()
+    year_data = group_df[group_df['Ano'] == latest_year]
+    
+    # Get financial data for the year
+    fin_data = financial_df[financial_df['year'] == latest_year].iloc[0]
+    revenue = fin_data['revenue']
+    gross_margin = (revenue - fin_data.get('variable_costs', 0)) / revenue * 100
+    
+    # Calculate impact of each group
+    impacts = []
+    groups = year_data['Grupo'].unique()
+    
+    # Start with gross margin
+    impacts.append({
+        'x': 'Margem Bruta',
+        'y': gross_margin,
+        'measure': 'absolute',
+        'text': f'{gross_margin:.1f}%'
+    })
+    
+    # Add each group's impact
+    running_margin = gross_margin
+    for grupo in groups:
+        grupo_data = year_data[year_data['Grupo'] == grupo]
+        if not grupo_data.empty:
+            impact = -(grupo_data['Valor'].iloc[0] / revenue * 100)
+            running_margin += impact
+            
+            impacts.append({
+                'x': grupo,
+                'y': impact,
+                'measure': 'relative',
+                'text': f'{impact:.1f}%'
+            })
+    
+    # Add final margin
+    impacts.append({
+        'x': 'Margem Líquida',
+        'y': running_margin,
+        'measure': 'total',
+        'text': f'{running_margin:.1f}%'
+    })
+    
+    # Create waterfall chart
+    fig = go.Figure(go.Waterfall(
+        orientation = "v",
+        x = [d['x'] for d in impacts],
+        y = [d['y'] for d in impacts],
+        measure = [d['measure'] for d in impacts],
+        text = [d['text'] for d in impacts],
+        textposition = "outside",
+        connector = {"line": {"color": "rgb(63, 63, 63)"}},
+    ))
+    
+    fig.update_layout(
+        title = f"{title} - {latest_year}",
+        xaxis_title = "Componentes",
+        yaxis_title = "Margem (%)",
+        yaxis = dict(tickformat='.1f', ticksuffix='%'),
+        showlegend = False,
+        height = 500,
+        margin = dict(b=100)
+    )
+    
+    # Rotate x-axis labels
+    fig.update_xaxes(tickangle=-45)
+    
+    return fig
+
+
+def create_group_treemap(groups_data: Dict[str, Dict], year: int, 
+                        title: str = "Composição dos Grupos de Despesas") -> go.Figure:
+    """
+    Create a treemap showing the composition of expense groups
+    """
+    labels = []
+    parents = []
+    values = []
+    colors = []
+    
+    # Color palette
+    color_map = {
+        'Repasse de Comissão': '#FF6B6B',
+        'Funcionários': '#4ECDC4',
+        'Telefones': '#45B7D1',
+        'Marketing': '#FFA07A',
+        'Impostos e Taxas': '#98D8C8',
+        'Administrativo': '#F7DC6F',
+        'Financeiro': '#BB8FCE'
+    }
+    
+    # Root
+    labels.append("Total de Despesas")
+    parents.append("")
+    values.append(0)  # Will be calculated
+    colors.append("#E0E0E0")
+    
+    total_value = 0
+    
+    # Add groups and their items
+    for group_name, group_data in groups_data.items():
+        if year in group_data['years']:
+            year_values = group_data['years'][year]
+            group_value = year_values['annual']
+            
+            # Add group
+            labels.append(group_name)
+            parents.append("Total de Despesas")
+            values.append(group_value)
+            colors.append(color_map.get(group_name, '#95A5A6'))
+            
+            total_value += group_value
+    
+    # Update root value
+    values[0] = total_value
+    
+    # Create treemap
+    fig = go.Figure(go.Treemap(
+        labels=labels,
+        parents=parents,
+        values=values,
+        marker=dict(colors=colors),
+        textinfo="label+value+percent parent",
+        texttemplate='<b>%{label}</b><br>%{value:,.0f}<br>%{percentParent}',
+        hovertemplate='<b>%{label}</b><br>Valor: R$ %{value:,.0f}<br>Percentual: %{percentParent}<extra></extra>'
+    ))
+    
+    fig.update_layout(
+        title=f"{title} - {year}",
+        height=600,
+        margin=dict(t=50, l=25, r=25, b=25)
+    )
+    
+    return fig
+
+
+def create_pnl_evolution_chart_custom(df, x_col='year', x_title='Ano'):
+    """Create a custom P&L evolution chart that works with different time periods"""
+    
+    if df.empty:
+        return go.Figure()
+    
+    fig = go.Figure()
+    
+    # Add Revenue line
+    fig.add_trace(go.Scatter(
+        x=df[x_col],
+        y=df['revenue'],
+        mode='lines+markers',
+        name='Receita',
+        line=dict(color='#00CC88', width=3),
+        marker=dict(size=8),
+        hovertemplate='<b>%{x}</b><br>Receita: R$ %{y:,.0f}<extra></extra>'
+    ))
+    
+    # Add Total Costs line
+    cost_fields = ['variable_costs', 'fixed_costs', 'non_operational_costs', 'taxes', 
+                   'commissions', 'administrative_expenses', 'marketing_expenses', 'financial_expenses']
+    
+    # Filter cost fields that exist in the dataframe
+    existing_cost_fields = [field for field in cost_fields if field in df.columns]
+    
+    # Calculate total costs
+    if existing_cost_fields:
+        df['total_costs'] = df[existing_cost_fields].sum(axis=1)
+    else:
+        df['total_costs'] = 0
+    
+    fig.add_trace(go.Scatter(
+        x=df[x_col],
+        y=df['total_costs'],
+        mode='lines+markers',
+        name='Custos Totais',
+        line=dict(color='#FF4444', width=3),
+        marker=dict(size=8),
+        hovertemplate='<b>%{x}</b><br>Custos: R$ %{y:,.0f}<extra></extra>'
+    ))
+    
+    # Add Net Profit line
+    fig.add_trace(go.Scatter(
+        x=df[x_col],
+        y=df['net_profit'],
+        mode='lines+markers',
+        name='Lucro Líquido',
+        line=dict(color='#3366CC', width=3),
+        marker=dict(size=8),
+        hovertemplate='<b>%{x}</b><br>Lucro: R$ %{y:,.0f}<extra></extra>'
+    ))
+    
+    # Update layout
+    fig.update_layout(
+        title="Evolução do Demonstrativo de Resultados",
+        xaxis_title=x_title,
+        yaxis_title="Valores (R$)",
+        hovermode='x unified',
+        height=500,
+        yaxis=dict(tickformat=',.0f'),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        )
+    )
+    
+    # Adjust x-axis for better readability with many periods
+    if x_col == 'period' and len(df) > 12:
+        fig.update_xaxes(
+            tickangle=-45,
+            tickmode='linear',
+            dtick=max(1, len(df) // 12)  # Show every Nth label
+        )
+    elif x_col == 'period':
+        fig.update_xaxes(tickangle=-45)
+    
     return fig

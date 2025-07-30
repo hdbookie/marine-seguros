@@ -257,19 +257,19 @@ def get_expense_subcategories():
             'subcategories': {
                 'salarios': {
                     'name': 'Salários e Ordenados',
-                    'patterns': ['salario', 'salário', 'ordenado', 'remuneracao', 'remuneração', 'folha de pagamento', 'holerite']
+                    'patterns': ['salario', 'salário', 'ordenado', 'remuneracao', 'remuneração', 'folha de pagamento', 'holerite', 'funcionario', 'funcionário', 'colaborador', 'empregado']
                 },
                 'beneficios': {
                     'name': 'Benefícios',
-                    'patterns': ['vale transporte', 'vale-transporte', 'vt', 'vale refeicao', 'vale refeição', 'vale alimentacao', 'vale alimentação', 'va', 'vr']
+                    'patterns': ['vale transporte', 'vale-transporte', 'vt', 'vale refeicao', 'vale refeição', 'vale alimentacao', 'vale alimentação', 'va', 'vr', 'plano de saude', 'plano saúde', 'seguro vida', 'auxilio', 'auxílio']
                 },
                 'encargos': {
                     'name': 'Encargos Sociais',
-                    'patterns': ['inss', 'fgts', 'encargo', 'previdencia', 'previdência', 'contribuicao social', 'contribuição social']
+                    'patterns': ['inss', 'fgts', 'encargo', 'previdencia', 'previdência', 'contribuicao social', 'contribuição social', 'pis folha', 'rat', 'gilrat']
                 },
                 'provisoes': {
                     'name': 'Provisões',
-                    'patterns': ['ferias', 'férias', '13o', '13º', 'decimo terceiro', 'décimo terceiro', 'provisao', 'provisão']
+                    'patterns': ['ferias', 'férias', '13o', '13º', 'decimo terceiro', 'décimo terceiro', 'provisao', 'provisão', 'rescisao', 'rescisão']
                 }
             }
         },
@@ -337,7 +337,7 @@ def get_expense_subcategories():
             'subcategories': {
                 'escritorio': {
                     'name': 'Material de Escritório',
-                    'patterns': ['material escritorio', 'material escritório', 'papelaria', 'papel', 'caneta', 'toner', 'cartucho']
+                    'patterns': ['material escritorio', 'material escritório', 'papelaria', 'papel', 'caneta', 'toner', 'cartucho', 'impressao', 'impressão']
                 },
                 'limpeza_material': {
                     'name': 'Material de Limpeza',
@@ -346,6 +346,99 @@ def get_expense_subcategories():
                 'combustivel': {
                     'name': 'Combustíveis',
                     'patterns': ['combustivel', 'combustível', 'gasolina', 'alcool', 'álcool', 'diesel', 'posto', 'abastecimento']
+                }
+            }
+        },
+        'impostos': {
+            'name': '💸 Impostos e Taxas',
+            'subcategories': {
+                'impostos_federais': {
+                    'name': 'Impostos Federais',
+                    'patterns': ['irpj', 'csll', 'pis', 'cofins', 'ipi', 'receita federal', 'darf', 'simples nacional']
+                },
+                'impostos_estaduais': {
+                    'name': 'Impostos Estaduais',
+                    'patterns': ['icms', 'ipva', 'detran', 'sefaz']
+                },
+                'impostos_municipais': {
+                    'name': 'Impostos Municipais',
+                    'patterns': ['iss', 'iptu', 'prefeitura', 'alvara', 'alvará', 'taxa funcionamento']
+                },
+                'impostos_diversos': {
+                    'name': 'Outros Impostos e Taxas',
+                    'patterns': ['imposto', 'taxa', 'tributo', 'multa', 'juros']
+                }
+            }
+        },
+        'comercial': {
+            'name': '💼 Despesas Comerciais',
+            'subcategories': {
+                'comissoes': {
+                    'name': 'Comissões e Repasses',
+                    'patterns': ['comissao', 'comissão', 'repasse', 'corretagem', 'agenciamento', 'intermediacao', 'intermediação']
+                },
+                'vendas': {
+                    'name': 'Despesas de Vendas',
+                    'patterns': ['venda', 'comercial', 'representante', 'vendedor']
+                },
+                'marketing_vendas': {
+                    'name': 'Marketing e Publicidade',
+                    'patterns': ['marketing', 'publicidade', 'propaganda', 'campanha', 'anuncio', 'anúncio', 'midia', 'mídia']
+                }
+            }
+        },
+        'financeiro': {
+            'name': '💰 Despesas Financeiras',
+            'subcategories': {
+                'tarifas_bancarias': {
+                    'name': 'Tarifas Bancárias',
+                    'patterns': ['tarifa', 'taxa bancaria', 'taxa bancária', 'manutencao conta', 'manutenção conta', 'ted', 'doc', 'boleto']
+                },
+                'juros_multas': {
+                    'name': 'Juros e Multas',
+                    'patterns': ['juros', 'multa', 'mora', 'atraso', 'encargo financeiro']
+                },
+                'iof_cpmf': {
+                    'name': 'IOF e Outros',
+                    'patterns': ['iof', 'cpmf', 'imposto financeiro']
+                },
+                'financeiro_geral': {
+                    'name': 'Outras Despesas Financeiras',
+                    'patterns': ['financeiro', 'financeira', 'banco', 'bancario', 'bancária']
+                }
+            }
+        },
+        'operacional': {
+            'name': '⚙️ Despesas Operacionais',
+            'subcategories': {
+                'producao': {
+                    'name': 'Produção',
+                    'patterns': ['producao', 'produção', 'fabrica', 'fábrica', 'industrial']
+                },
+                'logistica': {
+                    'name': 'Logística e Transporte',
+                    'patterns': ['frete', 'transporte', 'logistica', 'logística', 'entrega', 'despacho']
+                },
+                'operacional_geral': {
+                    'name': 'Operacional Geral',
+                    'patterns': ['operacional', 'operacao', 'operação']
+                }
+            }
+        },
+        'administrativo': {
+            'name': '📋 Despesas Administrativas',
+            'subcategories': {
+                'admin_geral': {
+                    'name': 'Administrativo Geral',
+                    'patterns': ['administrativo', 'administrativa', 'administracao', 'administração', 'gestao', 'gestão']
+                },
+                'documentacao': {
+                    'name': 'Documentação e Cartório',
+                    'patterns': ['cartorio', 'cartório', 'registro', 'documento', 'autenticacao', 'autenticação', 'reconhecimento firma']
+                },
+                'correios': {
+                    'name': 'Correios e Malote',
+                    'patterns': ['correio', 'sedex', 'malote', 'correspondencia', 'correspondência']
                 }
             }
         }
