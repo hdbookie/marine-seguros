@@ -596,7 +596,7 @@ class AIChatAssistant:
         
         for year in years:
             revenue_data = data[year].get('revenue', {})
-            total = sum(v for k, v in revenue.items() 
+            total = sum(v for k, v in revenue_data.items() 
                        if k != 'ANNUAL' and isinstance(v, (int, float)))
             revenues.append(total)
         

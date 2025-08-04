@@ -241,6 +241,10 @@ def render_upload_tab(db, use_unified_extractor=True, show_anomalies=True):
                     
                     # Store extracted_data for compatibility
                     st.session_state.extracted_data = unified_data
+                    
+                    # Store uploaded files info for financial analysis
+                    if hasattr(st.session_state, 'file_manager'):
+                        st.session_state.uploaded_files_info = st.session_state.file_manager.registro.get('arquivos', [])
             
                     # Sync to extracted_data format and save to database
                     sync_processed_to_extracted()

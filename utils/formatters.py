@@ -1,7 +1,12 @@
 """Formatting utility functions"""
 
-def format_currency(value):
-    """Format a number as Brazilian currency"""
+def format_currency(value, compact=True):
+    """Format a number as Brazilian currency
+    
+    Args:
+        value: The numeric value to format
+        compact: If True, use M/K notation for large numbers. If False, show full value.
+    """
     if value is None or value == 0:
         return "R$ 0,00"
     
@@ -10,11 +15,15 @@ def format_currency(value):
     value = abs(value)
     
     # Format with thousands separator and 2 decimal places
-    if value >= 1_000_000:
-        formatted = f"R$ {value/1_000_000:,.2f}M".replace(",", ".")
-    elif value >= 1_000:
-        formatted = f"R$ {value/1_000:,.1f}K".replace(",", ".")
+    if compact:
+        if value >= 1_000_000:
+            formatted = f"R$ {value/1_000_000:,.2f}M".replace(",", ".")
+        elif value >= 1_000:
+            formatted = f"R$ {value/1_000:,.1f}K".replace(",", ".")
+        else:
+            formatted = f"R$ {value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     else:
+        # Full format with Brazilian notation (dots for thousands, comma for decimals)
         formatted = f"R$ {value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     
     return f"-{formatted}" if negative else formatted
