@@ -45,7 +45,7 @@ jobs:
     - name: Test imports
       run: |
         python -c "import streamlit; print('Streamlit version:', streamlit.__version__)"
-        python -c "from core.unified_extractor import UnifiedExtractor; print('UnifiedExtractor imported successfully')"
+        python -c "from core.unified_extractor import UnifiedFinancialExtractor; print('UnifiedFinancialExtractor imported successfully')"
         python -c "from gerenciador_arquivos import GerenciadorArquivos; print('GerenciadorArquivos imported successfully')"
 
   deploy:
