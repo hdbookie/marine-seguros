@@ -51,10 +51,14 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
+    - uses: actions/checkout@v3
+    
+    - name: Install Railway CLI
+      run: npm install -g @railway/cli
+    
     - name: Deploy to Railway Production
-      uses: bervProject/railway-deploy@main
-      with:
-        railway_token: ${{ secrets.RAILWAY_TOKEN_PRODUCTION }}
-        service: marine-seguros
       env:
-        RAILWAY_ENVIRONMENT: production
+        RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN_PRODUCTION }}
+      run: |
+        railway link marine-seguros-production
+        railway up --service marine-seguros --environment production
