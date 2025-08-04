@@ -31,5 +31,5 @@ RUN mkdir -p data/arquivos_enviados data
 ENV PYTHONUNBUFFERED=1
 ENV PORT=8501
 
-# Run the application using the same script as Railway
+# Run the application
 CMD ["bash", "start.sh"]
