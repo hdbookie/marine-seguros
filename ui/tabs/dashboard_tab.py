@@ -261,4 +261,4 @@ def render_monthly_analysis(monthly_data, selected_years):
     st.plotly_chart(fig, use_container_width=True)
     
     # Monthly insights
-    render_monthly_insights(filtered_monthly)
+    # render_monthly_insights(filtered_monthly)  # TODO: Implement this function
