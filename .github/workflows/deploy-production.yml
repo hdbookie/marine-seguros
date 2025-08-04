@@ -8,6 +8,8 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: ${{ github.workspace }}
     
     steps:
     - uses: actions/checkout@v3
@@ -42,7 +44,7 @@ jobs:
       run: |
         python -c "import streamlit; print('Streamlit version:', streamlit.__version__)"
         python -c "from core.unified_extractor import UnifiedFinancialExtractor; print('UnifiedFinancialExtractor imported successfully')"
-        python -c "from gerenciador_arquivos import GerenciadorArquivos; print('GerenciadorArquivos imported successfully')"
+        python -c "from core.gerenciador_arquivos import GerenciadorArquivos; print('GerenciadorArquivos imported successfully')"
 
   deploy:
     needs: test
