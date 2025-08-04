@@ -10,6 +10,7 @@ services:
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       # Development environment (files on filesystem)
       - RAILWAY_ENVIRONMENT=development
+      - PYTHONPATH=/app
     volumes:
       # Mount entire project for live reload
       - .:/app
