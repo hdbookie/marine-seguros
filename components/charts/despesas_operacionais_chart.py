@@ -1,5 +1,5 @@
 """
-Gráfico de Despesas Operacionais (Operational Expenses Chart)
+Gráfico de Custos Operacionais (Operational Costs Chart)
 """
 import plotly.express as px
 import plotly.graph_objects as go
@@ -13,17 +13,27 @@ def create_despesas_operacionais_chart(
     title: Optional[str] = None
 ) -> Optional[go.Figure]:
     """
-    Create area chart for operational expenses
+    Create area chart for operational costs (fixed + variable costs)
     
     Args:
-        display_df: DataFrame with operational expenses data
+        display_df: DataFrame with cost data
         view_type: Type of view (Anual, Mensal, etc.)
         title: Optional custom title
         
     Returns:
         Plotly figure or None if no data
     """
-    if display_df.empty or 'operational_costs' not in display_df.columns:
+    # Check if we have the necessary columns
+    if display_df.empty:
+        return None
+    
+    # Calculate total operational costs as fixed + variable
+    if 'fixed_costs' in display_df.columns and 'variable_costs' in display_df.columns:
+        display_df['total_operational_costs'] = display_df['fixed_costs'] + display_df['variable_costs']
+    elif 'operational_costs' in display_df.columns:
+        # Fallback to existing field
+        display_df['total_operational_costs'] = display_df['operational_costs']
+    else:
         return None
     
     # Determine x-axis based on view type
@@ -41,25 +51,26 @@ def create_despesas_operacionais_chart(
     fig = px.area(
         display_df,
         x=x_col,
-        y='operational_costs',
-        title=title or f'Despesas Operacionais {view_type}',
-        color_discrete_sequence=['#FF9800']
+        y='total_operational_costs',
+        title=title or f'Custos Operacionais {view_type}',
+        color_discrete_sequence=['#8B4513']  # Brown color for operational costs
     )
     
     # Add markers and text
     fig.update_traces(
         mode='lines+markers+text',
-        text=[f'R$ {v:,.0f}' for v in display_df['operational_costs']],
+        text=[f'R$ {v:,.0f}' for v in display_df['total_operational_costs']],
         textposition='top center',
         textfont=dict(size=10),
         hovertemplate='<b>%{x}</b><br>' +
-                      'Despesas Operacionais: R$ %{y:,.0f}<br>' +
+                      'Custos Operacionais: R$ %{y:,.0f}<br>' +
+                      '(Fixos + Variáveis)<br>' +
                       '<extra></extra>'
     )
     
     # Update layout
     fig.update_layout(
-        yaxis_title="Despesas Operacionais (R$)",
+        yaxis_title="Custos Operacionais (R$)",
         xaxis_title=x_title,
         hovermode='x unified',
         xaxis=dict(
@@ -72,7 +83,7 @@ def create_despesas_operacionais_chart(
     )
     
     # Add average line
-    avg_operational = display_df['operational_costs'].mean()
+    avg_operational = display_df['total_operational_costs'].mean()
     fig.add_hline(
         y=avg_operational,
         line_dash="dash",
@@ -84,7 +95,7 @@ def create_despesas_operacionais_chart(
     # Add percentage of revenue if available
     if 'revenue' in display_df.columns:
         display_df['op_cost_percentage'] = (
-            display_df['operational_costs'] / display_df['revenue'] * 100
+            display_df['total_operational_costs'] / display_df['revenue'] * 100
         ).fillna(0)
         
         # Add secondary trace for percentage

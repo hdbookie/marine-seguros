@@ -24,5 +24,12 @@ EXPOSE 8501
 # Health check
 HEALTHCHECK CMD curl --fail http://localhost:8501/_stcore/health
 
-# Run the application
-ENTRYPOINT ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+# Create data directories that might not persist in production
+RUN mkdir -p data/arquivos_enviados data
+
+# Set environment to production-like
+ENV PYTHONUNBUFFERED=1
+ENV PORT=8501
+
+# Run the application using the same script as Railway
+CMD ["bash", "start.sh"]

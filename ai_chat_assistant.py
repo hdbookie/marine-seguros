@@ -70,8 +70,12 @@ class AIChatAssistant:
         
         # Show data availability
         if data:
-            years_available = sorted(data.keys())
-            st.info(f"📈 Dados disponíveis: {len(years_available)} anos ({years_available[0]} - {years_available[-1]})")
+            # Filter only numeric years and within reasonable range
+            years_available = sorted([year for year in data.keys() if isinstance(year, (int, float)) and 2015 <= year <= 2030])
+            if years_available:
+                st.info(f"📈 Dados disponíveis: {len(years_available)} anos ({years_available[0]} - {years_available[-1]})")
+            else:
+                st.info("📈 Dados financeiros carregados")
         else:
             st.warning("⚠️ Nenhum dado financeiro disponível")
         
@@ -208,26 +212,27 @@ class AIChatAssistant:
             
             # Generate AI response
             prompt = f"""
-            Você é um analista financeiro especializado analisando dados da Marine Seguros.
+            Você é um analista financeiro especializado e detalhista, com acesso a dados financeiros anuais (macro) e mensais detalhados (micro) da Marine Seguros. Sua função é fornecer insights precisos e acionáveis.
             
-            Contexto atual: {filter_context}
+            Contexto atual de filtros: {filter_context}
             
-            Dados disponíveis:
+            Dados financeiros disponíveis para análise:
             {context}
             
             Pergunta do usuário: {user_input}
             
-            Instruções:
-            1. Responda em português brasileiro
-            2. Seja específico e use números dos dados
-            3. Se não tiver dados suficientes, diga claramente
-            4. Forneça insights acionáveis quando possível
-            5. Use formatação markdown simples:
-               - Use **texto** para negrito
-               - Use quebras de linha para separar parágrafos
-               - Formate números grandes com pontos: 1.234.567
+            Instruções CRÍTICAS para sua resposta:
+            1. Responda **sempre** em português brasileiro.
+            2. Seja extremamente específico e use números dos dados fornecidos. Para perguntas sobre meses ou períodos específicos, utilize os 'Dados Mensais Detalhados'.
+            3. Se a pergunta envolver comparação histórica ou análise de desempenho entre períodos (ex: "Por que março foi melhor que abril de 2024?", "Qual foi o mês mais lucrativo na história?"), utilize os dados detalhados para identificar as causas e tendências.
+            4. Se não tiver dados suficientes para uma análise específica (ex: dados mensais para um ano não carregado), diga claramente que a informação não está disponível nos dados fornecidos.
+            5. Forneça insights acionáveis e recomendações práticas quando possível, baseando-se nos dados.
+            6. Use formatação markdown simples para clareza:
+               - Use **texto** para negrito.
+               - Use quebras de linha para separar parágrafos.
+               - Formate números grandes com pontos para milhares e vírgula para decimais (ex: 1.234.567,89).
             
-            Responda de forma concisa e profissional.
+            Sua resposta deve ser concisa, profissional e diretamente relevante à pergunta do usuário, explorando a profundidade dos dados disponíveis.
             """
             
             try:
@@ -405,7 +410,7 @@ class AIChatAssistant:
                 'time_period': {'type': 'all', 'years': None, 'months': None},
                 'grouping': 'year',
                 'comparison_type': 'time_series',
-                'title': 'Financial Overview',
+                'title': 'Visão Geral Financeira',
                 'format_options': {
                     'show_values': True,
                     'show_percentages': False,
@@ -447,6 +452,14 @@ class AIChatAssistant:
         """Prepare data context for AI"""
         context_parts = []
         
+        # Define months list universally for this function
+        months = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 
+                  'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ']
+        
+        # Define months list universally for this function
+        months = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 
+                  'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ']
+
         # Summarize available data
         years = sorted(data.keys())
         context_parts.append(f"Anos disponíveis: {years}")
@@ -458,6 +471,8 @@ class AIChatAssistant:
             total = sum(v for k, v in revenue.items() if k != 'ANNUAL' and isinstance(v, (int, float)))
             # Ensure year is a regular int, not numpy int64
             total_revenue_by_year[int(year)] = float(total)
+            if year == '2025':
+                print(f"DEBUG: Extracted data for 2025: {year_data}")
         
         context_parts.append(f"Receita por ano: {json.dumps(total_revenue_by_year, indent=2)}")
         
@@ -478,22 +493,54 @@ class AIChatAssistant:
         # Month performance if not filtered
         if 'filter_state' not in st.session_state or not hasattr(st.session_state.filter_state, 'months') or not st.session_state.filter_state.months:
             month_totals = {}
-            for month in ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 
-                         'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ']:
-                total = 0
-                count = 0
-                for year_data in data.values():
+            month_revenues = {month: [] for month in months}
+            month_variable_costs = {month: [] for month in months}
+            month_fixed_costs = {month: [] for month in months}
+            month_net_profits = {month: [] for month in months}
+
+            for year_data in data.values():
+                for month in months:
                     if month in year_data.get('revenue', {}):
-                        total += year_data['revenue'][month]
-                        count += 1
-                if count > 0:
-                    month_totals[month] = total / count
-            
+                        month_revenues[month].append(year_data['revenue'][month])
+                        month_variable_costs[month].append(year_data.get('costs', {}).get(month, 0))
+                        month_fixed_costs[month].append(year_data.get('fixed_costs', {}).get(month, 0))
+                        
+                        # Calculate monthly net profit if possible
+                        monthly_revenue = year_data.get('revenue', {}).get(month, 0)
+                        monthly_variable_costs = year_data.get('costs', {}).get(month, 0)
+                        monthly_fixed_costs = year_data.get('fixed_costs', {}).get(month, 0)
+                        monthly_net_profit = monthly_revenue - monthly_variable_costs - monthly_fixed_costs
+                        month_net_profits[month].append(monthly_net_profit)
+
+            for month in months:
+                if month_revenues[month]:
+                    month_totals[month] = sum(month_revenues[month]) / len(month_revenues[month])
+
             best_months = sorted(month_totals.items(), key=lambda x: x[1], reverse=True)[:3]
             worst_months = sorted(month_totals.items(), key=lambda x: x[1])[:3]
             
-            context_parts.append(f"Melhores meses: {[m[0] for m in best_months]}")
-            context_parts.append(f"Piores meses: {[m[0] for m in worst_months]}")
+            context_parts.append(f"Melhores meses (Receita Média): {[m[0] for m in best_months]}")
+            context_parts.append(f"Piores meses (Receita Média): {[m[0] for m in worst_months]}")
+
+            # Add detailed monthly data
+            detailed_monthly_data = []
+            for year in sorted(data.keys()):
+                year_data = data[year]
+                for month in months:
+                    monthly_revenue = year_data.get('revenue', {}).get(month, 0)
+                    monthly_variable_costs = year_data.get('costs', {}).get(month, 0)
+                    monthly_fixed_costs = year_data.get('fixed_costs', {}).get(month, 0)
+                    monthly_net_profit = monthly_revenue - monthly_variable_costs - monthly_fixed_costs
+                    
+                    detailed_monthly_data.append({
+                        "Ano": year,
+                        "Mês": month,
+                        "Receita": monthly_revenue,
+                        "Custos Variáveis": monthly_variable_costs,
+                        "Custos Fixos": monthly_fixed_costs,
+                        "Lucro Líquido": monthly_net_profit
+                    })
+            context_parts.append("\nDados Mensais Detalhados:\n" + pd.DataFrame(detailed_monthly_data).to_string(index=False))
         
         return "\n".join(context_parts)
     
