@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+  marine-seguros-staging:
+    build: 
+      context: ..
+      dockerfile: Dockerfile
+    container_name: marine-seguros-staging
+    ports:
+      - "8502:8501"  # Different port for staging
+    environment:
+      - PORT=8501
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - RAILWAY_ENVIRONMENT=staging
+      - DATA_PATH=/data
+      - LOG_LEVEL=debug
+      - ENABLE_DEBUG_MODE=true
+    volumes:
+      # Separate data directory for staging
+      - marine-staging-data:/data
+      - marine-staging-logs:/app/logs
+      # Mount code for live editing (development mode)
+      - ../:/app
+      - /app/__pycache__
+      - /app/.git
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - marine-network
+    labels:
+      - "com.marine.environment=staging"
+      - "com.marine.branch=${GIT_BRANCH:-staging}"
+
+volumes:
+  marine-staging-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/marine-seguros/staging/data
+  marine-staging-logs:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/marine-seguros/staging/logs
+
+networks:
+  marine-network:
+    driver: bridge

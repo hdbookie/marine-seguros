@@ -1,11 +1,12 @@
 import pandas as pd
-from typing import Dict, Any, List
-import re
+from typing import Dict
+from .base_hierarchical_extractor import BaseHierarchicalExtractor
 
-class FixedCostExtractor:
+
+class FixedCostExtractor(BaseHierarchicalExtractor):
     def __init__(self):
-        self.months = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 
-                      'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ']
+        super().__init__()
+        # Main category patterns
         self.fixed_cost_patterns = {
             'fixed_costs': ['CUSTOS FIXOS', 'CUSTO FIXO'],
             'admin_expenses': ['DESPESAS ADMINISTRATIVAS', 'DESPESA ADMINISTRATIVA', 'ADMIN'],
@@ -17,138 +18,115 @@ class FixedCostExtractor:
         }
 
     def extract_fixed_costs(self, df: pd.DataFrame, year: int) -> Dict:
+        """Extract fixed costs with hierarchical structure"""
         extracted_costs = {
             'annual': 0,
             'monthly': {},
             'line_items': {},
             'categories': {}
         }
-        annual_col = self._find_annual_column(df)
-        month_cols = self._find_month_columns(df)
-
+        
+        # Find the CUSTOS FIXOS row
+        fixed_costs_row_idx = -1
         for idx, row in df.iterrows():
+            row_label = self._get_row_label(df, idx)
+            if row_label and any(pattern in row_label.upper() for pattern in ['CUSTOS FIXOS', 'CUSTO FIXO']):
+                fixed_costs_row_idx = idx
+                # Extract the total value from this row
+                row_data = self._extract_row_data(df, idx)
+                extracted_costs['annual'] = row_data['annual']
+                extracted_costs['monthly'] = row_data['monthly']
+                break
+        
+        if fixed_costs_row_idx == -1:
+            return extracted_costs
+        
+        # Find the next section header to know where fixed costs end
+        end_row_idx = len(df)
+        section_headers = ['CUSTOS NÃO OPERACIONAIS', 'CUSTOS NAO OPERACIONAIS', 
+                          'RESULTADO', 'MARGEM', 'LUCRO', 'PONTO EQUILIBRIO']
+        
+        for idx in range(fixed_costs_row_idx + 1, len(df)):
+            row_label = self._get_row_label(df, idx)
+            if row_label and any(header in row_label.upper() for header in section_headers):
+                end_row_idx = idx
+                break
+        
+        # Now extract all items between fixed_costs_row_idx and end_row_idx
+        processed_rows = set()
+        processed_rows.add(fixed_costs_row_idx)  # Skip the header row
+        
+        for idx in range(fixed_costs_row_idx + 1, end_row_idx):
+            if idx in processed_rows:
+                continue
+                
             row_label = self._get_row_label(df, idx)
             if not row_label:
                 continue
-
-            category = self._classify_line_item(row_label)
-            if category == 'fixed_costs': # Only process fixed cost category, not other expenses
+            
+            # Skip if this is a sub-item (will be handled by parent)
+            if row_label.strip().startswith("-"):
+                continue
+            
+            # Check if this row has sub-items
+            sub_items = self._extract_sub_items(df, idx, processed_rows)
+            
+            if sub_items:
+                # This is a parent item with sub-items
+                row_data = self._extract_row_data(df, idx)
                 item_key = self._normalize_key(row_label)
-                annual_value = 0
-                monthly_values = {}
-
-                # Extract monthly values
-                for i, month in enumerate(self.months):
-                    col_idx = i * 2 + 1 # Assuming value column is at this index
-                    if col_idx < len(df.columns):
-                        value = self._parse_value(df.iloc[idx, col_idx])
-                        if value is not None:
-                            monthly_values[month] = value
                 
-                # Extract annual value
-                if annual_col and annual_col in df.columns:
-                    annual_value = self._parse_value(df.iloc[idx][annual_col])
-                elif monthly_values:
-                    annual_value = sum(monthly_values.values())
-
-                if annual_value is not None and annual_value != 0:
-                    is_subtotal_item = self._is_subtotal(row_label, annual_value) # Simplified check
+                extracted_costs['line_items'][item_key] = {
+                    'label': row_label,
+                    'annual': row_data['annual'],
+                    'monthly': row_data['monthly'],
+                    'sub_items': sub_items
+                }
+                processed_rows.add(idx)
+            else:
+                # Regular item without sub-items
+                row_data = self._extract_row_data(df, idx)
+                if row_data['annual'] > 0 or any(v > 0 for v in row_data['monthly'].values()):
+                    item_key = self._normalize_key(row_label)
+                    
                     extracted_costs['line_items'][item_key] = {
                         'label': row_label,
-                        'category': category,
-                        'monthly': monthly_values,
-                        'annual': annual_value,
-                        'is_subtotal': is_subtotal_item
+                        'annual': row_data['annual'],
+                        'monthly': row_data['monthly']
                     }
-                    if category not in extracted_costs['categories']:
-                        extracted_costs['categories'][category] = []
-                    extracted_costs['categories'][category].append(item_key)
+                    processed_rows.add(idx)
         
-        # Aggregate totals from line items
-        for item_key, item_data in extracted_costs['line_items'].items():
-            # Skip subtotals to avoid double counting
-            if item_data.get('is_subtotal', False):
-                continue
-                
-            # Add to annual total
-            extracted_costs['annual'] += item_data['annual']
-            
-            # Add to monthly totals
-            for month, value in item_data['monthly'].items():
-                if month not in extracted_costs['monthly']:
-                    extracted_costs['monthly'][month] = 0
-                extracted_costs['monthly'][month] += value
-                
         return extracted_costs
 
-    def _find_annual_column(self, df: pd.DataFrame) -> Any:
-        for col in df.columns:
-            col_str = str(col).upper()
-            if any(term in col_str for term in ['ANUAL', 'ANNUAL', 'TOTAL', 'ANO']):
-                return col
-        return None
-
-    def _find_month_columns(self, df: pd.DataFrame) -> Dict[str, Any]:
-        month_cols = {}
-        for col_idx, col in enumerate(df.columns):
-            col_str = str(col).upper().strip()
-            for month in self.months:
-                if month in col_str:
-                    month_cols[month] = col
-                    break
-        return month_cols
-
-    def _get_row_label(self, df: pd.DataFrame, row_idx: int) -> str:
-        for col_idx in range(min(3, len(df.columns))):
-            value = df.iloc[row_idx, col_idx]
-            if pd.notna(value) and isinstance(value, str) and len(value.strip()) > 0:
-                return value.strip()
-        return None
-
-    def _parse_value(self, val: Any) -> float:
-        if pd.isna(val):
-            return None
-        if isinstance(val, (int, float)):
-            return float(val)
-        if isinstance(val, str):
-            val_clean = val.replace('R$', '').replace('$', '').strip()
-            val_clean = val_clean.replace('.', '').replace(',', '.')
-            val_clean = re.sub(r'[^\d.-]', '', val_clean)
-            try:
-                return float(val_clean)
-            except:
-                return None
-        return None
-
     def _classify_line_item(self, label: str) -> str:
+        """Classify a line item into a category"""
         label_upper = label.upper()
         for category, patterns in self.fixed_cost_patterns.items():
             for pattern in patterns:
                 if pattern in label_upper:
                     return category
-        return None # Not a recognized fixed cost/expense
+        return None
 
-    def _normalize_key(self, label: str) -> str:
-        key = re.sub(r'[^\w\s]', '', label)
-        key = '_'.join(key.lower().split())
-        return key
-
-    def _is_subtotal(self, label: str, value: float) -> bool:
-        label_upper = label.upper().strip()
-        calculation_terms = [
-            'TOTAL', 'SUBTOTAL', 'SOMA', 'PONTO EQUILIBRIO', 'PONTO EQUILÍBRIO',
-            'COMPOSIÇÃO', 'SALDOS', 'DESPESAS - TOTAL', 'CUSTO FIXO + VARIAVEL',
-            'CUSTOS FIXOS + VARIÁVEIS', 'CUSTOS VARIÁVEIS + FIXOS',
-            'CUSTOS FIXOS + VARIÁVEIS + NÃO OPERACIONAIS',
-            'TOTAL CUSTOS', 'CUSTO TOTAL', 'TOTAL GERAL',
-            'DESPESA TOTAL', 'TOTAL DE CUSTOS', 'TOTAL DE DESPESAS',
-            'DEMONSTRATIVO DE RESULTADO', 'DRE'
-        ]
-        if any(term in label_upper for term in calculation_terms):
-            return True
+    def extract_administrative_expenses(self, df: pd.DataFrame, year: int) -> Dict:
+        """Extract administrative expenses"""
+        return self._extract_by_category(df, 'admin_expenses')
+    
+    def extract_marketing_expenses(self, df: pd.DataFrame, year: int) -> Dict:
+        """Extract marketing expenses"""
+        return self._extract_by_category(df, 'marketing_expenses')
+    
+    def extract_financial_expenses(self, df: pd.DataFrame, year: int) -> Dict:
+        """Extract financial expenses"""
+        return self._extract_by_category(df, 'financial_expenses')
+    
+    def _extract_by_category(self, df: pd.DataFrame, category: str) -> Dict:
+        """Extract expenses for a specific category"""
+        extracted = {
+            'annual': 0,
+            'monthly': {},
+            'line_items': {}
+        }
         
-        # Heuristic: if value is exactly 0 and it's not a known fixed cost line, it might be a subtotal
-        if value == 0 and not any(pattern in label_upper for pattern in self.fixed_cost_patterns['fixed_costs']):
-            return True
-
-        return False
+        # This method is for backward compatibility
+        # In the new structure, these are part of fixed costs
+        return extracted

@@ -67,6 +67,14 @@ def render_interactive_cost_breakdown(financial_df, flexible_data, full_width=Tr
     # Debug mode to check commission data structure
     if st.checkbox("🔍 Debug: Ver estrutura de comissões", key="debug_commissions"):
         _debug_commission_structure(flexible_data)
+    
+    # Debug mode to check totals
+    if st.checkbox("🔍 Debug: Ver totais por categoria", key="debug_totals"):
+        _debug_category_totals(flexible_data, categorized_data)
+    
+    # Complete line items table
+    if st.checkbox("📋 Ver todos os itens de linha", key="show_all_line_items"):
+        _show_complete_line_items_table(flexible_data)
 
 
 def _render_breadcrumb_navigation():
@@ -88,7 +96,7 @@ def _render_breadcrumb_navigation():
 
 def _categorize_expenses(financial_df, flexible_data):
     """
-    Categorize all expenses using the expense categorizer
+    Categorize all expenses using universal data when available
     Returns hierarchical structure of categorized expenses
     """
     categorized_data = {}
@@ -104,18 +112,134 @@ def _categorize_expenses(financial_df, flexible_data):
             'uncategorized': []
         }
         
-        # Process all expense categories for detailed breakdown
+        # Temporarily skip universal data processing to use main categories only
+        # This prevents double counting until universal extractor is fully debugged
+        if False and 'universal_data' in year_data and year_data['universal_data']:
+            # Use universal data for complete line item capture
+            universal = year_data['universal_data']
+            
+            # Process categorized items from universal data
+            for category, items in universal.get('categorized_items', {}).items():
+                # Skip revenue items - we only want costs/expenses
+                if category == 'revenue':
+                    continue
+                    
+                # Map category names to our display names
+                display_category = _map_universal_category(category)
+                
+                if display_category not in categorized_data[year]['categories']:
+                    categorized_data[year]['categories'][display_category] = {
+                        'name': _get_category_display_name(display_category),
+                        'total': 0,
+                        'subcategories': {}
+                    }
+                
+                # Process each item
+                for item_key, item_data in items.items():
+                    # Add to appropriate subcategory
+                    subcat_key = f"{category}_items"
+                    if subcat_key not in categorized_data[year]['categories'][display_category]['subcategories']:
+                        categorized_data[year]['categories'][display_category]['subcategories'][subcat_key] = {
+                            'name': category.replace('_', ' ').title(),
+                            'total': 0,
+                            'items': []
+                        }
+                    
+                    # Add the item
+                    categorized_data[year]['categories'][display_category]['subcategories'][subcat_key]['items'].append({
+                        'label': item_data['label'],
+                        'value': item_data['annual'],
+                        'source_category': category,
+                        'sub_items': item_data.get('sub_items', {})
+                    })
+                    
+                    # Update totals
+                    categorized_data[year]['categories'][display_category]['subcategories'][subcat_key]['total'] += item_data['annual']
+                    categorized_data[year]['categories'][display_category]['total'] += item_data['annual']
+            
+            # Process uncategorized items
+            if universal.get('uncategorized_items'):
+                if 'outros' not in categorized_data[year]['categories']:
+                    categorized_data[year]['categories']['outros'] = {
+                        'name': '❓ Outros/Não Categorizados',
+                        'total': 0,
+                        'subcategories': {}
+                    }
+                
+                subcat_key = 'uncategorized_items'
+                categorized_data[year]['categories']['outros']['subcategories'][subcat_key] = {
+                    'name': 'Itens Não Categorizados',
+                    'total': 0,
+                    'items': []
+                }
+                
+                for item_key, item_data in universal['uncategorized_items'].items():
+                    categorized_data[year]['categories']['outros']['subcategories'][subcat_key]['items'].append({
+                        'label': item_data['label'],
+                        'value': item_data['annual'],
+                        'source_category': 'uncategorized',
+                        'sub_items': item_data.get('sub_items', {})
+                    })
+                    
+                    categorized_data[year]['categories']['outros']['subcategories'][subcat_key]['total'] += item_data['annual']
+                    categorized_data[year]['categories']['outros']['total'] += item_data['annual']
+            
+            continue  # Skip the old processing if we have universal data
+        
+        # Process ONLY main expense categories to avoid double counting
+        # Note: other categories like administrative_expenses, marketing_expenses, etc. 
+        # are already included within fixed_costs
+        # Check if commissions are separate or included in variable_costs
         expense_categories = [
-            'fixed_costs', 'variable_costs', 'administrative_expenses',
-            'operational_costs', 'marketing_expenses', 'financial_expenses',
-            'taxes', 'commissions', 'non_operational_costs'
+            'fixed_costs', 'variable_costs', 'non_operational_costs'
         ]
+        
+        # Check if commissions need to be added separately
+        if 'commissions' in year_data and isinstance(year_data['commissions'], dict):
+            comm_data = year_data['commissions']
+            if comm_data.get('annual', 0) > 0:
+                # Check if commissions are already in variable_costs
+                comm_in_variable = False
+                if 'variable_costs' in year_data and 'line_items' in year_data['variable_costs']:
+                    for item_key, item_data in year_data['variable_costs']['line_items'].items():
+                        if isinstance(item_data, dict):
+                            label = item_data.get('label', '').upper()
+                            if 'REPASSE' in label and 'COMISS' in label:
+                                comm_in_variable = True
+                                break
+                
+                if not comm_in_variable:
+                    # Add commissions as a separate category
+                    expense_categories.append('commissions')
+        
+        # Debug: Check if commissions exist in the data
+        if 'commissions' in year_data and isinstance(year_data['commissions'], dict):
+            comm_data = year_data['commissions']
+            print(f"\nDEBUG {year}: Found commissions data")
+            print(f"  Annual total: {comm_data.get('annual', 0)}")
+            if 'line_items' in comm_data:
+                for item_key, item_data in comm_data['line_items'].items():
+                    if isinstance(item_data, dict) and 'sub_items' in item_data:
+                        print(f"  {item_data.get('label', item_key)} has {len(item_data.get('sub_items', {}))} sub-items")
         
         for category in expense_categories:
             if category not in year_data or not isinstance(year_data[category], dict):
                 continue
                 
             cat_data = year_data[category]
+            category_total = cat_data.get('annual', 0) if isinstance(cat_data, dict) else 0
+            line_items_total = 0
+            
+            # Debug: Check what's in each category
+            if category == 'variable_costs' and 'line_items' in cat_data:
+                print(f"\nDEBUG {year}: Variable costs line items:")
+                for k, v in cat_data['line_items'].items():
+                    if isinstance(v, dict):
+                        label = v.get('label', k)
+                        print(f"  - {label}: {v.get('annual', 0)}")
+                        if 'sub_items' in v and v['sub_items']:
+                            print(f"    Has {len(v['sub_items'])} sub-items")
+            
             if 'line_items' in cat_data and isinstance(cat_data['line_items'], dict):
                 for item_key, item_data in cat_data['line_items'].items():
                     if not isinstance(item_data, dict):
@@ -181,6 +305,7 @@ def _categorize_expenses(financial_df, flexible_data):
                             # Update totals
                             categorized_data[year]['categories'][main_cat]['subcategories'][sub_cat]['total'] += difference
                             categorized_data[year]['categories'][main_cat]['total'] += difference
+                            line_items_total += difference
                         
                         # Process each sub-item
                         for sub_key, sub_data in item_data['sub_items'].items():
@@ -225,6 +350,7 @@ def _categorize_expenses(financial_df, flexible_data):
                                 # Update totals
                                 categorized_data[year]['categories'][main_cat]['subcategories'][sub_cat]['total'] += sub_value
                                 categorized_data[year]['categories'][main_cat]['total'] += sub_value
+                                line_items_total += sub_value
                     
                     # Only process as regular item if it has value and no sub_items
                     elif value > 0:
@@ -263,8 +389,95 @@ def _categorize_expenses(financial_df, flexible_data):
                         # Update totals
                         categorized_data[year]['categories'][main_cat]['subcategories'][sub_cat]['total'] += value
                         categorized_data[year]['categories'][main_cat]['total'] += value
+                        line_items_total += value
+            
+            # After processing all line items, check if we captured the full category total
+            if category_total > line_items_total + 0.01:  # Small tolerance for rounding
+                uncaptured_amount = category_total - line_items_total
+                
+                # Classify the uncaptured amount based on the category
+                classification = _classify_by_source_category(category, f"Outros - {category}")
+                main_cat = classification['main_category']
+                sub_cat = classification['subcategory']
+                
+                # Initialize category structure if needed
+                if main_cat not in categorized_data[year]['categories']:
+                    categorized_data[year]['categories'][main_cat] = {
+                        'name': classification['main_category_name'],
+                        'total': 0,
+                        'subcategories': {}
+                    }
+                
+                if sub_cat not in categorized_data[year]['categories'][main_cat]['subcategories']:
+                    categorized_data[year]['categories'][main_cat]['subcategories'][sub_cat] = {
+                        'name': classification['subcategory_name'],
+                        'total': 0,
+                        'items': []
+                    }
+                
+                # Add the uncaptured amount
+                categorized_data[year]['categories'][main_cat]['subcategories'][sub_cat]['items'].append({
+                    'label': f"Outros itens não detalhados - {category.replace('_', ' ').title()}",
+                    'value': uncaptured_amount,
+                    'source_category': category
+                })
+                
+                # Update totals
+                categorized_data[year]['categories'][main_cat]['subcategories'][sub_cat]['total'] += uncaptured_amount
+                categorized_data[year]['categories'][main_cat]['total'] += uncaptured_amount
     
     return categorized_data
+
+
+def _map_universal_category(category):
+    """Map universal category names to display categories"""
+    mapping = {
+        'revenue': 'receita',
+        'salaries': 'pessoal',
+        'rent_utilities': 'ocupacao',
+        'taxes': 'impostos',
+        'commissions': 'comercial',
+        'professional_services': 'servicos',
+        'marketing': 'marketing',
+        'administrative': 'administrativo',
+        'financial': 'financeiro',
+        'insurance': 'seguros',
+        'maintenance': 'manutencao',
+        'software': 'tecnologia',
+        'travel': 'viagens',
+        'meals': 'alimentacao',
+        'depreciation': 'depreciacao',
+        'variable_costs': 'custos_variaveis',
+        'fixed_costs': 'custos_fixos',
+        'non_operational': 'nao_operacional'
+    }
+    return mapping.get(category, category)
+
+
+def _get_category_display_name(category):
+    """Get display name for a category"""
+    names = {
+        'receita': '💰 Receita',
+        'pessoal': '👥 Pessoal',
+        'ocupacao': '🏢 Ocupação e Utilidades',
+        'impostos': '💸 Impostos e Taxas',
+        'comercial': '💼 Despesas Comerciais',
+        'servicos': '🔧 Serviços Profissionais',
+        'marketing': '📢 Marketing e Vendas',
+        'administrativo': '📋 Despesas Administrativas',
+        'financeiro': '💰 Despesas Financeiras',
+        'seguros': '🛡️ Seguros',
+        'manutencao': '🔧 Manutenção',
+        'tecnologia': '💻 Tecnologia',
+        'viagens': '✈️ Viagens',
+        'alimentacao': '🍽️ Alimentação',
+        'depreciacao': '📉 Depreciação',
+        'custos_variaveis': '📊 Custos Variáveis',
+        'custos_fixos': '📊 Custos Fixos',
+        'nao_operacional': '📊 Despesas Não Operacionais',
+        'outros': '❓ Outros'
+    }
+    return names.get(category, category.replace('_', ' ').title())
 
 
 def _classify_by_source_category(source_category, label):
@@ -784,3 +997,241 @@ def _debug_commission_structure(flexible_data):
                 st.write("- Formato de dados inesperado")
             
             st.markdown("---")
+
+
+def _debug_category_totals(flexible_data, categorized_data):
+    """Debug function to check category totals"""
+    st.markdown("#### 🔍 Debug: Totais por Categoria")
+    
+    latest_year = max(year for year in flexible_data.keys() if isinstance(flexible_data[year], dict))
+    
+    st.markdown(f"**Ano: {latest_year}**")
+    
+    if latest_year in flexible_data:
+        year_data = flexible_data[latest_year]
+        
+        # Show main cost categories
+        st.markdown("**Categorias Principais (devem somar R$ 2.53M):**")
+        main_categories = ['variable_costs', 'fixed_costs', 'non_operational_costs']
+        main_total = 0
+        
+        for cat in main_categories:
+            if cat in year_data and isinstance(year_data[cat], dict):
+                value = year_data[cat].get('annual', 0)
+                main_total += value
+                st.write(f"- {cat}: {format_currency(value)}")
+        
+        st.write(f"**Total das categorias principais: {format_currency(main_total)}**")
+        
+        st.markdown("---")
+        
+        # Show what's actually being included in the visualization
+        st.markdown("**O que está sendo incluído na visualização:**")
+        
+        if latest_year in categorized_data:
+            viz_total = 0
+            for cat_key, cat_data in categorized_data[latest_year]['categories'].items():
+                cat_total = cat_data['total']
+                viz_total += cat_total
+                st.write(f"- {cat_data['name']}: {format_currency(cat_total)}")
+                
+                # Show subcategories
+                with st.expander(f"Ver subcategorias de {cat_data['name']}"):
+                    for subcat_key, subcat_data in cat_data['subcategories'].items():
+                        st.write(f"  - {subcat_data['name']}: {format_currency(subcat_data['total'])} ({len(subcat_data['items'])} itens)")
+            
+            st.write(f"**Total na visualização: {format_currency(viz_total)}**")
+            
+            # Show the difference
+            difference = main_total - viz_total
+            if abs(difference) > 1:
+                st.error(f"**Diferença: {format_currency(difference)}** - Há valores não capturados!")
+            else:
+                st.success("✅ Totais coincidem!")
+        
+        st.markdown("---")
+        
+        # Show all categories in the data
+        st.markdown("**Todas as categorias no flexible_data:**")
+        all_categories = [
+            'revenue', 'variable_costs', 'fixed_costs', 'non_operational_costs',
+            'taxes', 'commissions', 'administrative_expenses', 'marketing_expenses',
+            'financial_expenses', 'operational_costs', 'net_profit', 'gross_profit'
+        ]
+        
+        for cat in all_categories:
+            if cat in year_data:
+                if isinstance(year_data[cat], dict):
+                    value = year_data[cat].get('annual', 0)
+                    line_items_count = len(year_data[cat].get('line_items', {}))
+                    st.write(f"- {cat}: {format_currency(value)} ({line_items_count} line items)")
+                else:
+                    st.write(f"- {cat}: {format_currency(year_data[cat])}")
+
+
+def _show_complete_line_items_table(flexible_data):
+    """Show complete table of all line items from universal data"""
+    st.markdown("#### 📋 Todos os Itens de Linha Extraídos")
+    
+    # Collect all line items from all years
+    all_items = []
+    
+    for year, year_data in flexible_data.items():
+        if isinstance(year_data, dict) and 'universal_data' in year_data:
+            universal = year_data['universal_data']
+            
+            # Add all line items
+            for item in universal.get('all_line_items', []):
+                all_items.append({
+                    'Ano': year,
+                    'Item': item['label'],
+                    'Valor Anual': item['annual'],
+                    'Categoria': item.get('category', 'uncategorized'),
+                    'Seção': item.get('section', ''),
+                    'É Sub-item': '✓' if item.get('is_sub_item') else '',
+                    'Pai': item.get('parent', '')
+                })
+    
+    if not all_items:
+        st.info("Nenhum item de linha encontrado. Certifique-se de que os dados foram processados com o extrator universal.")
+        return
+    
+    # Create DataFrame
+    df_items = pd.DataFrame(all_items)
+    
+    # Add filters
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        # Year filter
+        years = sorted(df_items['Ano'].unique())
+        selected_year = st.selectbox("Filtrar por ano:", ['Todos'] + [str(y) for y in years])
+        
+        if selected_year != 'Todos':
+            df_filtered = df_items[df_items['Ano'] == int(selected_year)]
+        else:
+            df_filtered = df_items.copy()
+    
+    with col2:
+        # Category filter
+        categories = sorted(df_filtered['Categoria'].unique())
+        selected_category = st.selectbox("Filtrar por categoria:", ['Todas'] + categories)
+        
+        if selected_category != 'Todas':
+            df_filtered = df_filtered[df_filtered['Categoria'] == selected_category]
+    
+    with col3:
+        # Value filter
+        min_value = st.number_input("Valor mínimo (R$):", min_value=0.0, value=0.0, step=100.0)
+        df_filtered = df_filtered[df_filtered['Valor Anual'] >= min_value]
+    
+    # Search box
+    search_term = st.text_input("🔍 Buscar item:", placeholder="Digite para buscar...")
+    if search_term:
+        mask = df_filtered['Item'].str.contains(search_term, case=False, na=False)
+        df_filtered = df_filtered[mask]
+    
+    # Summary stats
+    st.markdown("**Resumo:**")
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("Total de Itens", len(df_filtered))
+    with col2:
+        st.metric("Valor Total", format_currency(df_filtered['Valor Anual'].sum()))
+    with col3:
+        sub_items_count = len(df_filtered[df_filtered['É Sub-item'] == '✓'])
+        st.metric("Sub-itens", sub_items_count)
+    with col4:
+        categories_count = df_filtered['Categoria'].nunique()
+        st.metric("Categorias", categories_count)
+    
+    # Sort options
+    sort_col1, sort_col2 = st.columns(2)
+    with sort_col1:
+        sort_by = st.selectbox("Ordenar por:", ['Valor Anual', 'Item', 'Categoria', 'Ano'])
+    with sort_col2:
+        sort_ascending = st.checkbox("Ordem crescente", value=False)
+    
+    # Sort DataFrame
+    sort_column_map = {
+        'Valor Anual': 'Valor Anual',
+        'Item': 'Item', 
+        'Categoria': 'Categoria',
+        'Ano': 'Ano'
+    }
+    
+    df_filtered = df_filtered.sort_values(
+        sort_column_map[sort_by], 
+        ascending=sort_ascending
+    )
+    
+    # Display table with formatting
+    st.markdown("---")
+    
+    # Format the DataFrame for display
+    df_display = df_filtered.copy()
+    df_display['Valor Anual'] = df_display['Valor Anual'].apply(format_currency)
+    
+    # Display with pagination
+    items_per_page = st.selectbox("Itens por página:", [50, 100, 200, 500], index=1)
+    
+    total_items = len(df_display)
+    total_pages = (total_items - 1) // items_per_page + 1 if total_items > 0 else 1
+    
+    if total_pages > 1:
+        page = st.number_input("Página:", min_value=1, max_value=total_pages, value=1)
+        start_idx = (page - 1) * items_per_page
+        end_idx = min(start_idx + items_per_page, total_items)
+        df_display = df_display.iloc[start_idx:end_idx]
+        
+        st.info(f"Mostrando itens {start_idx + 1} a {end_idx} de {total_items} (Página {page} de {total_pages})")
+    
+    # Display the table
+    st.dataframe(
+        df_display,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Valor Anual": st.column_config.TextColumn(
+                "Valor Anual",
+                width="medium"
+            )
+        }
+    )
+    
+    # Export option
+    if len(df_filtered) > 0:
+        st.markdown("---")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            # Export filtered data
+            csv = df_filtered.to_csv(index=False).encode('utf-8-sig')
+            st.download_button(
+                label="📥 Baixar dados filtrados (CSV)",
+                data=csv,
+                file_name=f"itens_linha_filtrados_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                mime='text/csv'
+            )
+        
+        with col2:
+            # Quick analysis
+            if st.button("📊 Análise rápida"):
+                st.markdown("**Análise dos dados filtrados:**")
+                
+                # Top categories
+                cat_summary = df_filtered.groupby('Categoria')['Valor Anual'].agg(['count', 'sum']).reset_index()
+                cat_summary.columns = ['Categoria', 'Quantidade', 'Valor Total']
+                cat_summary = cat_summary.sort_values('Valor Total', ascending=False)
+                
+                st.markdown("**Top 5 categorias por valor:**")
+                for i, row in cat_summary.head().iterrows():
+                    st.write(f"{i+1}. {row['Categoria']}: {format_currency(row['Valor Total'])} ({row['Quantidade']} itens)")
+                
+                # Average values
+                avg_value = df_filtered['Valor Anual'].mean()
+                median_value = df_filtered['Valor Anual'].median()
+                
+                st.markdown(f"**Valor médio:** {format_currency(avg_value)}")
+                st.markdown(f"**Valor mediano:** {format_currency(median_value)}")

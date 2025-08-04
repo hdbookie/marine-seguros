@@ -39,6 +39,7 @@ from ui.tabs.micro_analysis import render_micro_analysis_tab
 from ui.tabs.ai_insights_legacy_tab import render_ai_insights_tab
 from ui.tabs.ai_chat_legacy_tab import render_ai_chat_tab
 from ui.tabs.auth_management_tab_simple import render_auth_management_tab
+from ui.tabs.debug_extractors_tab import render_debug_extractors_tab
 
 # Load environment variables
 load_dotenv()
@@ -203,7 +204,7 @@ if hasattr(st.session_state, 'extracted_data') and st.session_state.extracted_da
         traceback.print_exc()
 
 # Main content - Tabs
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
     "📁 Upload", 
     "📊 Dashboard Macro", 
     "🔬 Análise Micro", 
@@ -211,7 +212,8 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
     "💬 AI Chat",
     "🔐 Autenticação",
     "📈 Previsões", 
-    "⚡ Integração"
+    "⚡ Integração",
+    "🔍 Debug Extractors"
 ])
 
 # Tab 1: File Upload
@@ -267,6 +269,10 @@ with tab8:
     - Sincronizar com planilhas Google
     - Exportar relatórios automatizados
     """)
+
+# Tab 9: Debug Extractors
+with tab9:
+    render_debug_extractors_tab()
 
 # Footer
 st.markdown("---")

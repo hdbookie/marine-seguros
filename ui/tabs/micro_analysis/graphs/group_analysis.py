@@ -706,11 +706,13 @@ def _render_top_expenses_evolution(financial_df, flexible_data, full_width=False
                     revenue_value = year_data['revenue'] if year_data['revenue'] else 0
             revenue_by_year[year] = revenue_value
             
-            # Categories to check
+            # Categories to check - only main categories to avoid double counting
+            # Note: taxes and commissions are included in variable_costs
+            # administrative_expenses, marketing_expenses, financial_expenses are included in fixed_costs
+            # Always use only main categories to avoid double counting
+            # The drill-down will show the detailed items within each category
             categories = [
-                'variable_costs', 'fixed_costs', 'taxes', 'commissions',
-                'administrative_expenses', 'marketing_expenses', 
-                'financial_expenses', 'non_operational_costs'
+                'variable_costs', 'fixed_costs', 'non_operational_costs'
             ]
             
             for category in categories:
@@ -1037,23 +1039,99 @@ def _show_year_expense_breakdown(df_expenses, selected_year, revenue_by_year, gr
                 if selected_year in flexible_data:
                     year_flex_data = flexible_data[selected_year]
                     
-                    # Process all categories
-                    for category_key, category_data in year_flex_data.items():
-                        if isinstance(category_data, dict) and 'line_items' in category_data:
-                            cat_display_name = category_key.replace('_', ' ').title()
+                    # Check if we have universal data with ALL line items
+                    if 'universal_data' in year_flex_data and year_flex_data['universal_data']:
+                        universal = year_flex_data['universal_data']
+                        
+                        # Process ALL categorized items
+                        for category, items in universal.get('categorized_items', {}).items():
+                            category_display = category.replace('_', ' ').title()
                             
-                            # Add all line items for this category
-                            for item_key, item_data in category_data['line_items'].items():
+                            for item_key, item_data in items.items():
+                                # Handle items with sub-items
+                                if item_data.get('sub_items'):
+                                    parent_label = item_data['label']
+                                    parent_value = item_data['annual']
+                                    
+                                    # Add each sub-item
+                                    for sub_key, sub_data in item_data['sub_items'].items():
+                                        treemap_data.append({
+                                            'Despesa': sub_data['label'][:40] + '...' if len(sub_data['label']) > 40 else sub_data['label'],
+                                            'Categoria': category_display,
+                                            'SubCategoria': parent_label,
+                                            'Valor': sub_data['annual'],
+                                            'Percentual': (sub_data['annual'] / year_revenue * 100) if year_revenue > 0 else 0,
+                                            'ValorFormatado': format_currency(sub_data['annual'])
+                                        })
+                                    
+                                    # Check if parent total > sum of sub-items
+                                    sub_total = sum(s['annual'] for s in item_data['sub_items'].values())
+                                    if parent_value > sub_total + 0.01:
+                                        # Add the difference as "Outros"
+                                        treemap_data.append({
+                                            'Despesa': 'Outros',
+                                            'Categoria': category_display,
+                                            'SubCategoria': parent_label,
+                                            'Valor': parent_value - sub_total,
+                                            'Percentual': ((parent_value - sub_total) / year_revenue * 100) if year_revenue > 0 else 0,
+                                            'ValorFormatado': format_currency(parent_value - sub_total)
+                                        })
+                                else:
+                                    # Regular item without sub-items
+                                    treemap_data.append({
+                                        'Despesa': item_data['label'][:50] + '...' if len(item_data['label']) > 50 else item_data['label'],
+                                        'Categoria': category_display,
+                                        'SubCategoria': category_display,
+                                        'Valor': item_data['annual'],
+                                        'Percentual': (item_data['annual'] / year_revenue * 100) if year_revenue > 0 else 0,
+                                        'ValorFormatado': format_currency(item_data['annual'])
+                                    })
+                        
+                        # Add uncategorized items
+                        if universal.get('uncategorized_items'):
+                            for item_key, item_data in universal['uncategorized_items'].items():
+                                treemap_data.append({
+                                    'Despesa': item_data['label'][:50] + '...' if len(item_data['label']) > 50 else item_data['label'],
+                                    'Categoria': 'Outros/Não Categorizados',
+                                    'SubCategoria': 'Outros/Não Categorizados',
+                                    'Valor': item_data['annual'],
+                                    'Percentual': (item_data['annual'] / year_revenue * 100) if year_revenue > 0 else 0,
+                                    'ValorFormatado': format_currency(item_data['annual'])
+                                })
+                    else:
+                        # Fallback to old method if no universal data
+                        # Define main categories and their sub-categories
+                        main_categories = {
+                            'variable_costs': ['taxes', 'commissions'],
+                            'fixed_costs': ['administrative_expenses', 'marketing_expenses', 'financial_expenses', 'operational_costs'],
+                            'non_operational_costs': []
+                        }
+                    
+                    # Process main categories
+                    for main_cat, sub_cats in main_categories.items():
+                        if main_cat not in year_flex_data or not isinstance(year_flex_data[main_cat], dict):
+                            continue
+                            
+                        main_cat_data = year_flex_data[main_cat]
+                        main_cat_display = main_cat.replace('_', ' ').title()
+                        main_cat_total = main_cat_data.get('annual', 0)
+                        captured_total = 0
+                        
+                        # Process line items from main category
+                        if 'line_items' in main_cat_data and isinstance(main_cat_data['line_items'], dict):
+                            for item_key, item_data in main_cat_data['line_items'].items():
                                 if isinstance(item_data, dict):
                                     value = item_data.get('annual', 0)
                                     if value > 0:
                                         label = item_data.get('label', item_key)
                                         
+                                        # Skip aggregate items
+                                        skip_terms = ['CUSTOS FIXOS', 'CUSTOS VARIÁVEIS', 'CUSTO FIXO + VARIAVEL']
+                                        if any(term in label.upper() for term in skip_terms):
+                                            continue
+                                        
                                         # Check if this item has sub_items (like commission providers)
                                         if 'sub_items' in item_data and item_data['sub_items']:
-                                            # Add the parent item
-                                            parent_label = label[:50] + '...' if len(label) > 50 else label
-                                            
                                             # Add each sub-item as a separate entry
                                             for sub_key, sub_data in item_data['sub_items'].items():
                                                 if isinstance(sub_data, dict):
@@ -1062,22 +1140,56 @@ def _show_year_expense_breakdown(df_expenses, selected_year, revenue_by_year, gr
                                                         sub_label = sub_data.get('label', sub_key)
                                                         treemap_data.append({
                                                             'Despesa': sub_label[:40] + '...' if len(sub_label) > 40 else sub_label,
-                                                            'Categoria': cat_display_name,
-                                                            'SubCategoria': parent_label,
+                                                            'Categoria': main_cat_display,
+                                                            'SubCategoria': label,
                                                             'Valor': sub_value,
                                                             'Percentual': (sub_value / year_revenue * 100) if year_revenue > 0 else 0,
                                                             'ValorFormatado': format_currency(sub_value)
                                                         })
+                                                        captured_total += sub_value
                                         else:
                                             # Regular item without sub-items
                                             treemap_data.append({
                                                 'Despesa': label[:50] + '...' if len(label) > 50 else label,
-                                                'Categoria': cat_display_name,
-                                                'SubCategoria': cat_display_name,  # Same as category for items without sub-items
+                                                'Categoria': main_cat_display,
+                                                'SubCategoria': main_cat_display,  # Same as category for items without sub-items
                                                 'Valor': value,
                                                 'Percentual': (value / year_revenue * 100) if year_revenue > 0 else 0,
                                                 'ValorFormatado': format_currency(value)
                                             })
+                                            captured_total += value
+                        
+                        # Process sub-categories
+                        for sub_cat in sub_cats:
+                            if sub_cat in year_flex_data and isinstance(year_flex_data[sub_cat], dict):
+                                sub_cat_data = year_flex_data[sub_cat]
+                                if 'line_items' in sub_cat_data and isinstance(sub_cat_data['line_items'], dict):
+                                    for item_key, item_data in sub_cat_data['line_items'].items():
+                                        if isinstance(item_data, dict):
+                                            value = item_data.get('annual', 0)
+                                            if value > 0:
+                                                label = item_data.get('label', item_key)
+                                                treemap_data.append({
+                                                    'Despesa': label[:50] + '...' if len(label) > 50 else label,
+                                                    'Categoria': main_cat_display,
+                                                    'SubCategoria': sub_cat.replace('_', ' ').title(),
+                                                    'Valor': value,
+                                                    'Percentual': (value / year_revenue * 100) if year_revenue > 0 else 0,
+                                                    'ValorFormatado': format_currency(value)
+                                                })
+                                                captured_total += value
+                        
+                        # Add uncaptured amount if any
+                        if main_cat_total > captured_total + 0.01:
+                            uncaptured = main_cat_total - captured_total
+                            treemap_data.append({
+                                'Despesa': 'Outros/Não Detalhado',
+                                'Categoria': main_cat_display,
+                                'SubCategoria': main_cat_display,
+                                'Valor': uncaptured,
+                                'Percentual': (uncaptured / year_revenue * 100) if year_revenue > 0 else 0,
+                                'ValorFormatado': format_currency(uncaptured)
+                            })
                 
                 # If no detailed data, fallback to aggregated view
                 if not treemap_data:
