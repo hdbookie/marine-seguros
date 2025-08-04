@@ -22,7 +22,7 @@ if project_root not in sys.path:
 from auth import init_auth, require_auth, show_login_page, show_user_menu, show_admin_panel
 
 # Import database manager
-from database_manager import DatabaseManager
+from core.database_manager import DatabaseManager
 
 # Import utilities
 from utils.legacy_helpers import (

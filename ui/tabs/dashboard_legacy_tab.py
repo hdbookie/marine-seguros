@@ -1247,22 +1247,7 @@ def render_dashboard_tab(db, use_unified_extractor=True):
                                      ('fixed_costs' in display_df.columns and 'variable_costs' in display_df.columns)):
             x_col, x_title = prepare_x_axis(display_df, view_type)
             
-            # Debug: Check what columns we have
-            print(f"\n[DEBUG OPERATIONAL COSTS CHART] View type: {view_type}")
-            print(f"[DEBUG OPERATIONAL COSTS CHART] Columns in display_df: {list(display_df.columns)}")
-            print(f"[DEBUG OPERATIONAL COSTS CHART] DataFrame shape: {display_df.shape}")
-            if not display_df.empty:
-                print(f"[DEBUG OPERATIONAL COSTS CHART] Sample row data (last row):")
-                sample = display_df.iloc[-1]
-                for col in ['revenue', 'variable_costs', 'fixed_costs', 'operational_costs', 'costs']:
-                    if col in display_df.columns:
-                        val = sample[col]
-                        if isinstance(val, dict):
-                            print(f"  {col}: {val} (dict)")
-                        else:
-                            print(f"  {col}: {val:,.0f}")
-                    else:
-                        print(f"  {col}: NOT IN DATAFRAME")
+            # Creating operational costs chart
             
             # Calculate percentage of operational costs relative to revenue
             if 'revenue' in display_df.columns and 'fixed_costs' in display_df.columns and 'variable_costs' in display_df.columns:
@@ -1294,16 +1279,7 @@ def render_dashboard_tab(db, use_unified_extractor=True):
                 
                 display_df['total_operational_costs'] = display_df['fixed_costs'] + display_df[var_costs_col]
                 
-                # Debug: Print what we're calculating
-                if not display_df.empty:
-                    sample_row = display_df.iloc[-1]  # Last row
-                    print(f"[CRITICAL DEBUG] Custos Operacionais Calculation:")
-                    print(f"  Fixed costs: {sample_row.get('fixed_costs', 0):,.0f}")
-                    print(f"  Variable costs ({var_costs_col}): {sample_row.get(var_costs_col, 0):,.0f}")
-                    print(f"  Total operational: {sample_row.get('total_operational_costs', 0):,.0f}")
-                    print(f"  First 5 total_operational_costs values: {display_df['total_operational_costs'].head().tolist()}")
-                    print(f"  Last 5 total_operational_costs values: {display_df['total_operational_costs'].tail().tolist()}")
-                    print(f"  Min: {display_df['total_operational_costs'].min():,.0f}, Max: {display_df['total_operational_costs'].max():,.0f}")
+                # Calculation complete
             else:
                 # Fallback to existing operational_costs if columns not available
                 if 'operational_costs' in display_df.columns:
@@ -1311,14 +1287,7 @@ def render_dashboard_tab(db, use_unified_extractor=True):
                     display_df['total_operational_costs'] = display_df['operational_costs']
                 else:
                     display_df['total_operational_costs'] = 0
-                print(f"DEBUG: Using fallback operational_costs. Missing required columns.")
-            
-            # Final debug before chart
-            print(f"\n[CHART DEBUG] Creating operational costs chart:")
-            print(f"  Using column: total_operational_costs")
-            print(f"  Data type of column: {display_df['total_operational_costs'].dtype}")
-            print(f"  Sample values: {display_df['total_operational_costs'].head(3).tolist()}")
-            print(f"  Are values numeric? {pd.api.types.is_numeric_dtype(display_df['total_operational_costs'])}")
+                pass  # Using fallback operational_costs
             
             fig_op_costs = px.area(
                 display_df,

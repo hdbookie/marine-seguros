@@ -5,20 +5,9 @@
     "dockerfilePath": "Dockerfile"
   },
   "deploy": {
-    "numReplicas": 1,
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 10,
     "healthcheckPath": "/_stcore/health",
     "healthcheckTimeout": 300
-  },
-  "environments": {
-    "staging": {
-      "build": {
-        "builder": "DOCKERFILE"
-      },
-      "deploy": {
-        "numReplicas": 1
-      }
-    }
   }
 }

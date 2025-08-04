@@ -30,6 +30,7 @@ RUN mkdir -p data/arquivos_enviados data
 # Set environment to production-like
 ENV PYTHONUNBUFFERED=1
 ENV PORT=8501
+ENV PYTHONPATH=/app
 
-# Run the application using the same script as Railway
+# Run the application
 CMD ["bash", "start.sh"]

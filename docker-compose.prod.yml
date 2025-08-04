@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    ports:
+      - "8501:8501"
+    environment:
+      - PORT=8501
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - RAILWAY_ENVIRONMENT=production
+      - DATA_PATH=/data
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - LOG_LEVEL=info
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_PORT=${SMTP_PORT}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - FROM_EMAIL=${FROM_EMAIL}
+      - APP_URL=${APP_URL:-http://localhost:8501}
+    volumes:
+      # Named volumes for persistence (like Railway)
+      - marine-data:/data
+      - marine-uploads:/data/arquivos_enviados
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  marine-data:
+    driver: local
+  marine-uploads:
+    driver: local

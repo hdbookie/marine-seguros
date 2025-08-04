@@ -212,15 +212,9 @@ def _categorize_expenses(financial_df, flexible_data):
                     # Add commissions as a separate category
                     expense_categories.append('commissions')
         
-        # Debug: Check if commissions exist in the data
+        # Check if commissions exist in the data
         if 'commissions' in year_data and isinstance(year_data['commissions'], dict):
             comm_data = year_data['commissions']
-            print(f"\nDEBUG {year}: Found commissions data")
-            print(f"  Annual total: {comm_data.get('annual', 0)}")
-            if 'line_items' in comm_data:
-                for item_key, item_data in comm_data['line_items'].items():
-                    if isinstance(item_data, dict) and 'sub_items' in item_data:
-                        print(f"  {item_data.get('label', item_key)} has {len(item_data.get('sub_items', {}))} sub-items")
         
         for category in expense_categories:
             if category not in year_data or not isinstance(year_data[category], dict):
@@ -230,15 +224,6 @@ def _categorize_expenses(financial_df, flexible_data):
             category_total = cat_data.get('annual', 0) if isinstance(cat_data, dict) else 0
             line_items_total = 0
             
-            # Debug: Check what's in each category
-            if category == 'variable_costs' and 'line_items' in cat_data:
-                print(f"\nDEBUG {year}: Variable costs line items:")
-                for k, v in cat_data['line_items'].items():
-                    if isinstance(v, dict):
-                        label = v.get('label', k)
-                        print(f"  - {label}: {v.get('annual', 0)}")
-                        if 'sub_items' in v and v['sub_items']:
-                            print(f"    Has {len(v['sub_items'])} sub-items")
             
             if 'line_items' in cat_data and isinstance(cat_data['line_items'], dict):
                 for item_key, item_data in cat_data['line_items'].items():
