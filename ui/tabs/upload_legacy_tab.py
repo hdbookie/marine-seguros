@@ -251,14 +251,8 @@ def render_upload_tab(db, use_unified_extractor=True, show_anomalies=True):
             
                     # Save to database
                     try:
-                        print("DEBUG: Attempting to save to database...")
-                        print(f"DEBUG: processed_data exists: {hasattr(st.session_state, 'processed_data')}")
-                        print(f"DEBUG: monthly_data exists: {hasattr(st.session_state, 'monthly_data')}")
-                        if hasattr(st.session_state, 'processed_data') and st.session_state.processed_data:
-                            print(f"DEBUG: processed_data keys: {list(st.session_state.processed_data.keys())}")
                         db.auto_save_state(st.session_state)
                         save_success = True
-                        print("DEBUG: Save completed successfully")
                     except Exception as e:
                         st.error(f"⚠️ Erro ao salvar no banco de dados: {str(e)}")
                         save_success = False

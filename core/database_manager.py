@@ -16,7 +16,7 @@ class DatabaseManager:
             data_dir = os.environ.get('DATA_PATH', 'data')
             db_path = os.path.join(data_dir, 'dashboard.db')
         self.db_path = db_path
-        print(f"DatabaseManager: Using database path: {self.db_path}")
+        # Database path: {self.db_path}
         Path(os.path.dirname(db_path)).mkdir(parents=True, exist_ok=True)
         self._init_database()
     
@@ -673,7 +673,7 @@ class DatabaseManager:
             
             # Save financial data to shared storage
             if hasattr(session_state, 'extracted_data') and session_state.extracted_data:
-                print(f"Attempting to save {len(session_state.extracted_data)} years of data to shared storage...")
+                # Saving {len(session_state.extracted_data)} years of data to shared storage
                 
                 # Track uploaded files for history
                 uploaded_files = []
@@ -830,7 +830,7 @@ class DatabaseManager:
                 # cursor.execute("DELETE FROM financial_data")
                 
                 conn.commit()
-                print("Session data cleared from database")
+                pass  # Session data cleared
                 return True
         except Exception as e:
             print(f"Error clearing session data: {str(e)}")

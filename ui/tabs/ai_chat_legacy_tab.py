@@ -4,7 +4,7 @@ Preserves all original functionality while organizing code
 """
 
 import streamlit as st
-from ai_chat_assistant import AIChatAssistant
+from ai.chat_assistant import AIChatAssistant
 
 
 def render_ai_chat_tab(gemini_api_key):

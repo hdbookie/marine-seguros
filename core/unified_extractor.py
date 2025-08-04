@@ -90,10 +90,9 @@ class UnifiedFinancialExtractor:
     def _extract_unified_data(self, df: pd.DataFrame, year: int) -> Dict:
         revenue_data = self.revenue_extractor.extract_revenue(df, year)
         
-        # Debug: Check if we have monthly data
+        # Check if we have monthly data
         if revenue_data and 'monthly' in revenue_data:
             monthly_count = len([v for v in revenue_data['monthly'].values() if v])
-            print(f"DEBUG: Year {year} - Found {monthly_count} months of revenue data")
         
         variable_costs_data = self.variable_cost_extractor.extract_costs(df, year)
         fixed_costs_data = self.fixed_cost_extractor.extract_fixed_costs(df, year)

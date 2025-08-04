@@ -6,7 +6,7 @@ Preserves all original functionality while organizing code
 import streamlit as st
 import pandas as pd
 from core.financial_processor import FinancialProcessor
-from gerenciador_arquivos import GerenciadorArquivos
+from core.gerenciador_arquivos import GerenciadorArquivos
 import os
 
 
