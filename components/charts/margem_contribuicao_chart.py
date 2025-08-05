@@ -1,7 +1,6 @@
 """
 Gráfico de Margem de Contribuição (Contribution Margin Chart)
 """
-import plotly.express as px
 import plotly.graph_objects as go
 import pandas as pd
 from typing import Optional
@@ -13,7 +12,7 @@ def create_margem_contribuicao_chart(
     title: Optional[str] = None
 ) -> Optional[go.Figure]:
     """
-    Create bar chart for contribution margin percentage
+    Create bar chart for contribution margin (monetary values)
     
     Args:
         display_df: DataFrame with margin data
@@ -30,9 +29,8 @@ def create_margem_contribuicao_chart(
     if 'contribution_margin' not in display_df.columns:
         if 'revenue' in display_df.columns and 'variable_costs' in display_df.columns:
             display_df['contribution_margin'] = (
-                (display_df['revenue'] - display_df['variable_costs']) / 
-                display_df['revenue'] * 100
-            ).fillna(0)
+                display_df['revenue'] - display_df['variable_costs']
+            )
         else:
             return None
     
@@ -47,30 +45,32 @@ def create_margem_contribuicao_chart(
         x_col = 'period'
         x_title = 'Período'
     
-    # Create bar chart
-    fig = px.bar(
-        display_df,
-        x=x_col,
-        y='contribution_margin',
-        title=title or f'Margem de Contribuição {view_type}',
-        text='contribution_margin',
-        color='contribution_margin',
-        color_continuous_scale=['#D32F2F', '#FFC107', '#4CAF50'],
-        color_continuous_midpoint=50
-    )
+    # Calculate period-over-period percentage changes
+    pct_changes = display_df['contribution_margin'].pct_change() * 100
+    pct_changes = pct_changes.fillna(0).round(2)  # First period has no change, round to 2 decimal places
     
-    # Update traces
-    fig.update_traces(
-        texttemplate='%{text:.1f}%',
+    # Create figure with bars for contribution margin
+    fig = go.Figure()
+    
+    # Add contribution margin bars
+    fig.add_trace(go.Bar(
+        x=display_df[x_col],
+        y=display_df['contribution_margin'],
+        name='Margem de Contribuição',
+        marker_color='#9c27b0',  # Purple color for contribution margin
+        text=[f'R$ {v:,.0f}' if i % 2 == 0 or view_type == "Anual" else '' for i, v in enumerate(display_df['contribution_margin'])] if view_type != "Mensal" or len(display_df) <= 20 else None,
         textposition='outside',
+        customdata=pct_changes.values.reshape(-1, 1),
         hovertemplate='<b>%{x}</b><br>' +
-                      'Margem de Contribuição: %{y:.1f}%<br>' +
+                      'Margem de Contribuição: R$ %{y:,.0f}<br>' +
+                      '<b>Variação: %{customdata[0]:+.2f}%</b><br>' +
                       '<extra></extra>'
-    )
+    ))
     
     # Update layout
     fig.update_layout(
-        yaxis_title="Margem de Contribuição (%)",
+        title=title or f'Margem de Contribuição {view_type}',
+        yaxis_title="Valores (R$)",
         xaxis_title=x_title,
         hovermode='x unified',
         xaxis=dict(
@@ -78,28 +78,16 @@ def create_margem_contribuicao_chart(
             tickmode='linear',
             dtick=2 if view_type == "Mensal" and len(display_df) > 24 else None
         ),
-        height=400,
+        height=450 if view_type == "Mensal" else 400,
         margin=dict(t=50, b=100 if view_type == "Mensal" else 50),
-        coloraxis_showscale=False
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        )
     )
     
-    # Add reference lines
-    fig.add_hline(
-        y=50,
-        line_dash="dash",
-        line_color="gray",
-        annotation_text="Meta: 50%",
-        annotation_position="right"
-    )
-    
-    # Add average line
-    avg_margin = display_df['contribution_margin'].mean()
-    fig.add_hline(
-        y=avg_margin,
-        line_dash="dot",
-        line_color="blue",
-        annotation_text=f"Média: {avg_margin:.1f}%",
-        annotation_position="left"
-    )
     
     return fig

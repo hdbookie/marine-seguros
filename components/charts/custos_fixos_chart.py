@@ -37,28 +37,51 @@ def create_custos_fixos_chart(
         x_col = 'period'
         x_title = 'Período'
     
-    # Create bar chart
-    fig = px.bar(
-        display_df,
-        x=x_col,
-        y='fixed_costs',
-        title=title or f'Custos Fixos {view_type}',
-        text='fixed_costs'
-    )
+    # Calculate period-over-period percentage changes
+    pct_changes = display_df['fixed_costs'].pct_change() * 100
+    pct_changes = pct_changes.fillna(0).round(2)  # First period has no change, round to 2 decimal places
     
-    # Update traces
-    fig.update_traces(
-        texttemplate='R$ %{text:,.0f}',
+    # Create figure
+    fig = go.Figure()
+    
+    # Add revenue line first so it appears first in hover
+    if 'revenue' in display_df.columns:
+        pct_changes_revenue = display_df['revenue'].pct_change() * 100
+        pct_changes_revenue = pct_changes_revenue.fillna(0).round(2)
+        
+        fig.add_trace(go.Scatter(
+            x=display_df[x_col],
+            y=display_df['revenue'],
+            name='Receita',
+            mode='lines+markers',
+            line=dict(color='#1f77b4', width=3),
+            marker=dict(size=8),
+            customdata=pct_changes_revenue.values.reshape(-1, 1),
+            hovertemplate='<b>%{x}</b><br>' +
+                          'Receita: R$ %{y:,.0f}<br>' +
+                          '<b>Variação: %{customdata[0]:+.2f}%</b><br>' +
+                          '<extra></extra>'
+        ))
+    
+    # Add fixed costs bars second
+    fig.add_trace(go.Bar(
+        x=display_df[x_col],
+        y=display_df['fixed_costs'],
+        name='Custos Fixos',
+        marker_color='#2ca02c',
+        text=[f'R$ {v:,.0f}' if i % 2 == 0 or view_type == "Anual" else '' for i, v in enumerate(display_df['fixed_costs'])] if view_type != "Mensal" or len(display_df) <= 20 else None,
         textposition='outside',
-        marker_color='#FF6B6B',
+        customdata=pct_changes.values.reshape(-1, 1),
         hovertemplate='<b>%{x}</b><br>' +
                       'Custos Fixos: R$ %{y:,.0f}<br>' +
+                      '<b>Variação: %{customdata[0]:+.2f}%</b><br>' +
                       '<extra></extra>'
-    )
+    ))
     
     # Update layout
     fig.update_layout(
-        yaxis_title="Custos Fixos (R$)",
+        title=title or f'Custos Fixos vs Receita {view_type}',
+        yaxis_title="Valores (R$)",
         xaxis_title=x_title,
         hovermode='x unified',
         xaxis=dict(
@@ -66,18 +89,15 @@ def create_custos_fixos_chart(
             tickmode='linear',
             dtick=2 if view_type == "Mensal" and len(display_df) > 24 else None
         ),
-        height=400,
-        margin=dict(t=50, b=100 if view_type == "Mensal" else 50)
-    )
-    
-    # Add average line
-    avg_fixed_costs = display_df['fixed_costs'].mean()
-    fig.add_hline(
-        y=avg_fixed_costs,
-        line_dash="dash",
-        line_color="gray",
-        annotation_text=f"Média: R$ {avg_fixed_costs:,.0f}",
-        annotation_position="right"
+        height=450 if view_type == "Mensal" else 400,
+        margin=dict(t=50, b=100 if view_type == "Mensal" else 50),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        )
     )
     
     return fig
