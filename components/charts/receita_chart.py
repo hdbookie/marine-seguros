@@ -40,6 +40,11 @@ def create_receita_chart(
     
     x_col, x_title = prepare_x_axis(display_df, view_type)
     
+    # Calculate period-over-period percentage changes
+    pct_changes = display_df['revenue'].pct_change() * 100
+    pct_changes = pct_changes.fillna(0)  # First period has no change
+    pct_changes = pct_changes.round(2)  # Round to 2 decimal places
+    
     # Create base line chart
     fig = px.line(
         display_df, 
@@ -49,24 +54,25 @@ def create_receita_chart(
         markers=True
     )
     
-    # Add text annotations with smart positioning for monthly view
-    if view_type == "Mensal" and len(display_df) > 20:
-        # For crowded monthly view, show values on hover only
-        fig.update_traces(
-            hovertemplate='<b>%{x}</b><br>Receita: R$ %{y:,.0f}<extra></extra>'
-        )
-    else:
-        # For less crowded views, show selected values
-        fig.add_trace(go.Scatter(
-            x=display_df[x_col],
-            y=display_df['revenue'],
-            mode='text',
-            text=[f'R$ {v:,.0f}' if i % 3 == 0 or v == display_df['revenue'].max() or v == display_df['revenue'].min() 
-                  else '' for i, v in enumerate(display_df['revenue'])],
-            textposition='top center',
-            textfont=dict(size=10),
-            showlegend=False
-        ))
+    # Update the main trace with customdata for hover
+    # Only update the first trace (the line chart)
+    fig.data[0].customdata = pct_changes.values.reshape(-1, 1)
+    fig.data[0].hovertemplate = '<b>%{x}</b><br>' + \
+                               'Receita: R$ %{y:,.0f}<br>' + \
+                               '<b>Variação: %{customdata[0]:+.2f}%</b><br>' + \
+                               '<extra></extra>'
+    
+    # Add text annotations - show all values
+    fig.add_trace(go.Scatter(
+        x=display_df[x_col],
+        y=display_df['revenue'],
+        mode='text',
+        text=[f'R$ {v:,.0f}' for v in display_df['revenue']],
+        textposition='top center',
+        textfont=dict(size=10),
+        showlegend=False,
+        hoverinfo='skip'  # Disable hover for text annotations
+    ))
     
     # Update layout
     fig.update_layout(

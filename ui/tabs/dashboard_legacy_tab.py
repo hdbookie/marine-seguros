@@ -18,6 +18,14 @@ from utils.legacy_helpers import (
     get_plotly_config,
     get_default_monthly_range
 )
+from components.charts import (
+    create_receita_chart,
+    create_custos_fixos_chart,
+    create_custos_variaveis_chart,
+    create_margem_contribuicao_chart,
+    create_despesas_operacionais_chart,
+    create_resultado_chart
+)
 from ui.tabs.micro_analysis_tab import render_micro_analysis_tab
 
 
@@ -697,80 +705,21 @@ def render_dashboard_tab(db, use_unified_extractor=True):
         # Revenue Evolution Chart
         st.subheader("📈 Evolução da Receita")
         if not display_df.empty and 'revenue' in display_df.columns and display_df['revenue'].sum() > 0:
-            x_col, x_title = prepare_x_axis(display_df, view_type)
-    
-            fig_revenue = px.line(
-                display_df, 
-                x=x_col, 
-                y='revenue',
-                title=f'Receita {view_type}',
-                markers=True
-            )
-    
-            # Add text annotations with smart positioning for monthly view
-            if view_type == "Mensal" and len(display_df) > 20:
-                # For crowded monthly view, show values on hover only
-                fig_revenue.update_traces(
-                    hovertemplate='<b>%{x}</b><br>Receita: R$ %{y:,.0f}<extra></extra>'
-                )
-            else:
-                # For less crowded views, show selected values
-                fig_revenue.add_trace(go.Scatter(
-                    x=display_df[x_col],
-                    y=display_df['revenue'],
-                    mode='text',
-                    text=[f'R$ {v:,.0f}' if i % 3 == 0 or v == display_df['revenue'].max() or v == display_df['revenue'].min() 
-                          else '' for i, v in enumerate(display_df['revenue'])],
-                    textposition='top center',
-                    textfont=dict(size=10),
-                    showlegend=False
-                ))
-            # For monthly view with many data points, add interactive features
-            if view_type == "Mensal":
-                xaxis_config = dict(
-                    tickangle=-45,
-                    tickmode='linear',
-                    **get_monthly_layout_config()
-                )
-                
-                # Set default range to show last 12 months
-                default_range = get_default_monthly_range(display_df, x_col)
-                if default_range:
-                    xaxis_config['range'] = default_range
-                    
-                fig_revenue.update_layout(
-                    yaxis_title="Receita (R$)",
-                    xaxis_title=x_title,
-                    hovermode='x unified',
-                    xaxis=xaxis_config,
-                    height=600,
-                    margin=dict(t=100, b=100),
-                    dragmode='pan'  # Enable panning by default
-                )
-                # Configure modebar for better interaction
-                config = {
-                    'displayModeBar': True,
-                    'displaylogo': False,
-                    'modeBarButtonsToAdd': ['pan2d', 'zoom2d', 'resetScale2d'],
-                    'scrollZoom': True
-                }
-                st.plotly_chart(fig_revenue, use_container_width=True, config=config)
-            else:
-                fig_revenue.update_layout(
-                    yaxis_title="Receita (R$)",
-                    xaxis_title=x_title,
-                    hovermode='x unified',
-                    xaxis=dict(
-                        tickangle=-45 if view_type == "Mensal" else 0,
-                        tickmode='linear',
-                        dtick=1 if view_type == "Anual" else None,
-                        type='category' if view_type == "Anual" else None,
-                        categoryorder='category ascending' if view_type == "Anual" else None
-                    ),
-                    height=500 if view_type == "Mensal" else 400,
-                    margin=dict(t=50, b=100 if view_type == "Mensal" else 100)
-                )
-                st.plotly_chart(fig_revenue, use_container_width=True)
+            fig_revenue = create_receita_chart(display_df, view_type)
+            
+            if fig_revenue:
+                # For monthly view with many data points, add interactive features
+                if view_type == "Mensal":
+                    # Configure modebar for better interaction
+                    config = {
+                        'displayModeBar': True,
+                        'displaylogo': False,
+                        'modeBarButtonsToAdd': ['pan2d', 'zoom2d', 'resetScale2d'],
+                        'scrollZoom': True
+                    }
+                    st.plotly_chart(fig_revenue, use_container_width=True, config=config)
+                else:
+                    st.plotly_chart(fig_revenue, use_container_width=True)
         else:
             if display_df.empty:
                 st.info("📊 Nenhum dado disponível para o período selecionado. Verifique os filtros.")
@@ -790,6 +739,10 @@ def render_dashboard_tab(db, use_unified_extractor=True):
             if 'profit_margin' not in display_df.columns:
                 display_df['profit_margin'] = (display_df['net_profit'] / display_df['revenue'] * 100).fillna(0)
     
+            # Calculate period-over-period percentage changes
+            margin_changes = display_df['profit_margin'].pct_change() * 100
+            margin_changes = margin_changes.fillna(0).round(2)  # First period has no change
+    
             fig_margin = px.bar(
                 display_df,
                 x=x_col,
@@ -799,11 +752,15 @@ def render_dashboard_tab(db, use_unified_extractor=True):
                 color_continuous_scale='RdYlGn'
             )
     
-            # Always show values on bars
+            # Always show values on bars with percentage changes
             fig_margin.update_traces(
                 text=display_df['profit_margin'].apply(lambda x: f'{x:.2f}%'),
                 textposition='outside',
-                hovertemplate='<b>%{x}</b><br>Margem de Lucro: %{y:.2f}%<extra></extra>'
+                customdata=margin_changes.values.reshape(-1, 1),
+                hovertemplate='<b>%{x}</b><br>' +
+                             'Margem de Lucro: %{y:.2f}%<br>' +
+                             '<b>Variação: %{customdata[0]:+.2f}%</b><br>' +
+                             '<extra></extra>'
             )
     
             # Apply interactive features for monthly view
@@ -865,6 +822,13 @@ def render_dashboard_tab(db, use_unified_extractor=True):
             # Create figure with revenue and variable costs
             fig_var_costs = go.Figure()
             
+            # Calculate percentage changes
+            revenue_pct_changes = display_df['revenue'].pct_change() * 100
+            revenue_pct_changes = revenue_pct_changes.fillna(0).round(2)
+            
+            var_costs_pct_changes = display_df['variable_costs'].pct_change() * 100
+            var_costs_pct_changes = var_costs_pct_changes.fillna(0).round(2)
+            
             # Add revenue line (lighter/background)
             fig_var_costs.add_trace(go.Scatter(
                 x=display_df[x_col],
@@ -873,7 +837,11 @@ def render_dashboard_tab(db, use_unified_extractor=True):
                 mode='lines+markers',
                 line=dict(color='#1f77b4', width=3, dash='dot'),
                 marker=dict(size=8),
-                hovertemplate='<b>%{x}</b><br>Receita: R$ %{y:,.0f}<extra></extra>'
+                customdata=revenue_pct_changes.values.reshape(-1, 1),
+                hovertemplate='<b>%{x}</b><br>' +
+                             'Receita: R$ %{y:,.0f}<br>' +
+                             '<b>Variação: %{customdata[0]:+.2f}%</b><br>' +
+                             '<extra></extra>'
             ))
             
             # Add variable costs line (highlighted)
@@ -884,7 +852,11 @@ def render_dashboard_tab(db, use_unified_extractor=True):
                 mode='lines+markers',
                 line=dict(color='#ff7f0e', width=4),
                 marker=dict(size=10),
-                hovertemplate='<b>%{x}</b><br>Custos Variáveis: R$ %{y:,.0f}<extra></extra>'
+                customdata=var_costs_pct_changes.values.reshape(-1, 1),
+                hovertemplate='<b>%{x}</b><br>' +
+                             'Custos Variáveis: R$ %{y:,.0f}<br>' +
+                             '<b>Variação: %{customdata[0]:+.2f}%</b><br>' +
+                             '<extra></extra>'
             ))
             
             # Calculate percentages for both cost types
@@ -892,14 +864,25 @@ def render_dashboard_tab(db, use_unified_extractor=True):
             if 'fixed_costs' in display_df.columns:
                 display_df['fixed_cost_pct'] = (display_df['fixed_costs'] / display_df['revenue'] * 100).fillna(0)
             
-            # Update variable costs trace to include percentage
+            # Update variable costs trace to include both percentage change and percentage of revenue
+            var_costs_customdata = list(zip(var_costs_pct_changes, display_df['var_cost_pct']))
             fig_var_costs.data[1].update(
-                customdata=display_df['var_cost_pct'],
-                hovertemplate='<b>%{x}</b><br>Custos Variáveis: R$ %{y:,.0f}<br>% da Receita: %{customdata:.1f}%<extra></extra>'
+                customdata=var_costs_customdata,
+                hovertemplate='<b>%{x}</b><br>' +
+                             'Custos Variáveis: R$ %{y:,.0f}<br>' +
+                             '<b>Variação: %{customdata[0]:+.2f}%</b><br>' +
+                             '% da Receita: %{customdata[1]:.1f}%<br>' +
+                             '<extra></extra>'
             )
             
             # Add fixed costs line
             if 'fixed_costs' in display_df.columns:
+                fixed_costs_pct_changes = display_df['fixed_costs'].pct_change() * 100
+                fixed_costs_pct_changes = fixed_costs_pct_changes.fillna(0).round(2)
+                
+                # Combine percentage change and percentage of revenue for customdata
+                fixed_costs_customdata = list(zip(fixed_costs_pct_changes, display_df['fixed_cost_pct']))
+                
                 fig_var_costs.add_trace(go.Scatter(
                     x=display_df[x_col],
                     y=display_df['fixed_costs'],
@@ -907,8 +890,12 @@ def render_dashboard_tab(db, use_unified_extractor=True):
                     mode='lines+markers',
                     line=dict(color='#d62728', width=3),
                     marker=dict(size=8, symbol='square'),
-                    customdata=display_df['fixed_cost_pct'],
-                    hovertemplate='<b>%{x}</b><br>Custos Fixos: R$ %{y:,.0f}<br>% da Receita: %{customdata:.1f}%<extra></extra>'
+                    customdata=fixed_costs_customdata,
+                    hovertemplate='<b>%{x}</b><br>' +
+                                 'Custos Fixos: R$ %{y:,.0f}<br>' +
+                                 '<b>Variação: %{customdata[0]:+.2f}%</b><br>' +
+                                 '% da Receita: %{customdata[1]:.1f}%<br>' +
+                                 '<extra></extra>'
                 ))
             
             # Add text annotations with smart positioning
@@ -941,13 +928,13 @@ def render_dashboard_tab(db, use_unified_extractor=True):
                 xaxis_config = get_monthly_xaxis_config(display_df, x_col)
                     
                 fig_var_costs.update_layout(
-                    title='💸 Custos Variáveis e Fixos vs Receita',
+                    title='💸 Custos Variáveis vs Receita',
                     yaxis_title="Valores (R$)",
                     xaxis_title=x_title,
                     xaxis=xaxis_config,
                     height=600,
                     margin=dict(t=100, b=100),
-                    hovermode='closest',
+                    hovermode='x unified',
                     legend=dict(
                         orientation="h",
                         yanchor="bottom",
@@ -972,7 +959,7 @@ def render_dashboard_tab(db, use_unified_extractor=True):
                 st.plotly_chart(fig_var_costs, use_container_width=True, config=get_plotly_config())
             else:
                 fig_var_costs.update_layout(
-                    title='💸 Custos Variáveis e Fixos vs Receita',
+                    title='💸 Custos Variáveis vs Receita',
                     yaxis_title="Valores (R$)",
                     xaxis_title=x_title,
                     xaxis=dict(
@@ -984,7 +971,7 @@ def render_dashboard_tab(db, use_unified_extractor=True):
                     ),
                     height=500 if view_type == "Mensal" else 450,
                     margin=dict(t=50, b=100 if view_type == "Mensal" else 100),
-                    hovermode='closest',
+                    hovermode='x unified',
                     legend=dict(
                         orientation="h",
                         yanchor="bottom",
@@ -1009,236 +996,36 @@ def render_dashboard_tab(db, use_unified_extractor=True):
 
         # 2. Fixed Costs - Full width
         if not display_df.empty and 'fixed_costs' in display_df.columns:
-            x_col, x_title = prepare_x_axis(display_df, view_type)
+            fig_fixed = create_custos_fixos_chart(display_df, view_type, title='🏢 Custos Fixos')
             
-            # Calculate percentage if not already calculated
-            if 'revenue' in display_df.columns:
-                display_df['fixed_cost_pct'] = (display_df['fixed_costs'] / display_df['revenue'] * 100).fillna(0)
-    
-            # Create figure with bars for fixed costs
-            fig_fixed = go.Figure()
-            
-            # Add fixed costs bars with percentage in hover
-            fig_fixed.add_trace(go.Bar(
-                x=display_df[x_col],
-                y=display_df['fixed_costs'],
-                name='Custos Fixos',
-                marker_color='#2ca02c',
-                text=[f'R$ {v:,.0f}' if i % 2 == 0 or view_type == "Anual" else '' for i, v in enumerate(display_df['fixed_costs'])] if view_type != "Mensal" or len(display_df) <= 20 else None,
-                textposition='outside',
-                customdata=display_df['fixed_cost_pct'] if 'fixed_cost_pct' in display_df.columns else None,
-                hovertemplate='<b>%{x}</b><br>Custos Fixos: R$ %{y:,.0f}<br>% da Receita: %{customdata:.1f}%<extra></extra>'
-            ))
-            
-            # Add revenue line for comparison (same axis)
-            if 'revenue' in display_df.columns:
-                fig_fixed.add_trace(go.Scatter(
-                    x=display_df[x_col],
-                    y=display_df['revenue'],
-                    name='Receita',
-                    mode='lines+markers',
-                    line=dict(color='#1f77b4', width=3),
-                    marker=dict(size=8),
-                    hovertemplate='<b>%{x}</b><br>Receita: R$ %{y:,.0f}<extra></extra>'
-                ))
-    
-            # Apply interactive features for monthly view
-            if view_type == "Mensal":
-                xaxis_config = get_monthly_xaxis_config(display_df, x_col)
-                    
-                fig_fixed.update_layout(
-                    title='🏢 Custos Fixos vs Receita',
-                    yaxis_title="Valores (R$)",
-                    xaxis_title=x_title,
-                    xaxis=xaxis_config,
-                    height=600,
-                    margin=dict(t=100, b=100),
-                    hovermode='x unified',
-                    legend=dict(
-                        orientation="h",
-                        yanchor="bottom",
-                        y=1.02,
-                        xanchor="right",
-                        x=1
-                    ),
-                    dragmode='pan'
-                )
-                st.plotly_chart(fig_fixed, use_container_width=True, config=get_plotly_config())
-            else:
-                fig_fixed.update_layout(
-                    title='🏢 Custos Fixos vs Receita',
-                    yaxis_title="Valores (R$)",
-                    xaxis_title=x_title,
-                    xaxis=dict(
-                        tickangle=-45 if view_type == "Mensal" else 0,
-                        tickmode='linear',
-                        dtick=1 if view_type == "Anual" else (2 if view_type == "Mensal" and len(display_df) > 24 else None),
-                        type='category' if view_type == "Anual" else None,
-                        categoryorder='category ascending' if view_type == "Anual" else None
-                    ),
-                    height=450 if view_type == "Mensal" else 400,
-                    margin=dict(t=50, b=100 if view_type == "Mensal" else 100),
-                    hovermode='x unified',
-                    legend=dict(
-                        orientation="h",
-                        yanchor="bottom",
-                        y=1.02,
-                        xanchor="right",
-                        x=1
-                    )
-                )
-                st.plotly_chart(fig_fixed, use_container_width=True)
+            if fig_fixed:
+                # Apply interactive features for monthly view
+                if view_type == "Mensal":
+                    st.plotly_chart(fig_fixed, use_container_width=True, config=get_plotly_config())
+                else:
+                    st.plotly_chart(fig_fixed, use_container_width=True)
 
         # 3. Variable Costs - Full width (similar to Fixed Costs)
         if not display_df.empty and 'variable_costs' in display_df.columns:
-            x_col, x_title = prepare_x_axis(display_df, view_type)
+            fig_variable = create_custos_variaveis_chart(display_df, view_type, title='📦 Custos Variáveis vs Receita')
             
-            # Calculate percentage if not already calculated
-            if 'revenue' in display_df.columns:
-                display_df['var_cost_pct'] = (display_df['variable_costs'] / display_df['revenue'] * 100).fillna(0)
-    
-            # Create figure with bars for variable costs
-            fig_variable = go.Figure()
-            
-            # Add variable costs bars with percentage in hover
-            fig_variable.add_trace(go.Bar(
-                x=display_df[x_col],
-                y=display_df['variable_costs'],
-                name='Custos Variáveis',
-                marker_color='#ff7f0e',
-                text=[f'R$ {v:,.0f}' if i % 2 == 0 or view_type == "Anual" else '' for i, v in enumerate(display_df['variable_costs'])] if view_type != "Mensal" or len(display_df) <= 20 else None,
-                textposition='outside',
-                customdata=display_df['var_cost_pct'] if 'var_cost_pct' in display_df.columns else None,
-                hovertemplate='<b>%{x}</b><br>Custos Variáveis: R$ %{y:,.0f}<br>% da Receita: %{customdata:.1f}%<extra></extra>'
-            ))
-            
-            # Add revenue line for comparison (same axis)
-            if 'revenue' in display_df.columns:
-                fig_variable.add_trace(go.Scatter(
-                    x=display_df[x_col],
-                    y=display_df['revenue'],
-                    name='Receita',
-                    mode='lines+markers',
-                    line=dict(color='#1f77b4', width=3),
-                    marker=dict(size=8),
-                    hovertemplate='<b>%{x}</b><br>Receita: R$ %{y:,.0f}<extra></extra>'
-                ))
-    
-            # Apply interactive features for monthly view
-            if view_type == "Mensal":
-                xaxis_config = get_monthly_xaxis_config(display_df, x_col)
-                    
-                fig_variable.update_layout(
-                    title='📦 Custos Variáveis vs Receita',
-                    yaxis_title="Valores (R$)",
-                    xaxis_title=x_title,
-                    xaxis=xaxis_config,
-                    height=600,
-                    margin=dict(t=100, b=100),
-                    hovermode='x unified',
-                    legend=dict(
-                        orientation="h",
-                        yanchor="bottom",
-                        y=1.02,
-                        xanchor="center",
-                        x=0.5
-                    ),
-                    dragmode='pan'
-                )
-                st.plotly_chart(fig_variable, use_container_width=True, config=get_plotly_config())
-            else:
-                fig_variable.update_layout(
-                    title='📦 Custos Variáveis vs Receita',
-                    yaxis_title="Valores (R$)",
-                    xaxis_title=x_title,
-                    xaxis=dict(
-                        tickangle=-45 if view_type == "Mensal" else 0,
-                        tickmode='linear',
-                        dtick=1 if view_type == "Anual" else (2 if view_type == "Mensal" and len(display_df) > 24 else None),
-                        type='category' if view_type == "Anual" else None,
-                        categoryorder='category ascending' if view_type == "Anual" else None
-                    ),
-                    height=450 if view_type == "Mensal" else 400,
-                    margin=dict(t=80, b=100 if view_type == "Mensal" else 100),
-                    hovermode='x unified',
-                    legend=dict(
-                        orientation="h",
-                        yanchor="bottom",
-                        y=1.02,
-                        xanchor="center",
-                        x=0.5
-                    )
-                )
-                st.plotly_chart(fig_variable, use_container_width=True)
+            if fig_variable:
+                # Apply interactive features for monthly view
+                if view_type == "Mensal":
+                    st.plotly_chart(fig_variable, use_container_width=True, config=get_plotly_config())
+                else:
+                    st.plotly_chart(fig_variable, use_container_width=True)
 
         # 4. Contribution Margin - Full width
         if not display_df.empty and 'contribution_margin' in display_df.columns:
-            x_col, x_title = prepare_x_axis(display_df, view_type)
-    
-            fig_contrib = px.bar(
-                display_df,
-                x=x_col,
-                y='contribution_margin',
-                title='📈 Margem de Contribuição',
-                color='contribution_margin',
-                color_continuous_scale='Greens'
-            )
-    
-            # Always show values on top of bars
-            fig_contrib.update_traces(
-                text=[f'R$ {v:,.0f}' for v in display_df['contribution_margin']],
-                textposition='outside',
-                hovertemplate='<b>%{x}</b><br>Margem de Contribuição: R$ %{y:,.0f}<extra></extra>'
-            )
-    
-            # Apply interactive features for monthly view
-            if view_type == "Mensal":
-                xaxis_config = get_monthly_xaxis_config(display_df, x_col)
-                    
-                fig_contrib.update_layout(
-                    yaxis_title="Margem de Contribuição (R$)",
-                    xaxis_title=x_title,
-                    showlegend=False,
-                    coloraxis_colorbar=dict(
-                        orientation="h",
-                        yanchor="bottom",
-                        y=1.02,
-                        xanchor="center",
-                        x=0.5,
-                        len=0.6,
-                        thickness=15
-                    ),
-                    xaxis=xaxis_config,
-                    height=600,
-                    margin=dict(t=100, b=100),
-                    dragmode='pan'
-                )
-                st.plotly_chart(fig_contrib, use_container_width=True, config=get_plotly_config())
-            else:
-                fig_contrib.update_layout(
-                    yaxis_title="Margem de Contribuição (R$)",
-                    xaxis_title=x_title,
-                    showlegend=False,
-                    coloraxis_colorbar=dict(
-                        orientation="h",
-                        yanchor="bottom",
-                        y=1.02,
-                        xanchor="center",
-                        x=0.5,
-                        len=0.6,
-                        thickness=15
-                    ),
-                    xaxis=dict(
-                        tickangle=-45 if view_type == "Mensal" else 0,
-                        tickmode='linear',
-                        dtick=1 if view_type == "Anual" else (2 if view_type == "Mensal" and len(display_df) > 24 else None),
-                        type='category' if view_type == "Anual" else None,
-                        categoryorder='category ascending' if view_type == "Anual" else None
-                    ),
-                    height=450 if view_type == "Mensal" else 400,
-                    margin=dict(t=80, b=100 if view_type == "Mensal" else 100)
-                )
-                st.plotly_chart(fig_contrib, use_container_width=True)
+            fig_contrib = create_margem_contribuicao_chart(display_df, view_type, title='📈 Margem de Contribuição')
+            
+            if fig_contrib:
+                # Apply interactive features for monthly view
+                if view_type == "Mensal":
+                    st.plotly_chart(fig_contrib, use_container_width=True, config=get_plotly_config())
+                else:
+                    st.plotly_chart(fig_contrib, use_container_width=True)
 
         # 4. Operational Costs - Full width  
         st.subheader("⚙️ Custos Operacionais")
@@ -1289,60 +1076,14 @@ def render_dashboard_tab(db, use_unified_extractor=True):
                     display_df['total_operational_costs'] = 0
                 pass  # Using fallback operational_costs
             
-            fig_op_costs = px.area(
-                display_df,
-                x=x_col,
-                y='total_operational_costs',
-                title='⚙️ Custos Operacionais (Fixos + Variáveis)',
-                color_discrete_sequence=['#8B4513'],  # Brown color
-                text='total_operational_costs'
-            )
+            fig_op_costs = create_despesas_operacionais_chart(display_df, view_type, title='⚙️ Custos Operacionais (Fixos + Variáveis)')
             
-            # Format text labels
-            fig_op_costs.update_traces(
-                texttemplate='R$ %{text:,.0f}',
-                textposition='top center'
-            )
-            
-            # Update hover template to include percentage and ensure we show the total operational costs
-            if 'op_cost_pct' in display_df.columns:
-                # Create custom data with both the total value and percentage
-                customdata = list(zip(display_df['total_operational_costs'], display_df['op_cost_pct']))
-                fig_op_costs.update_traces(
-                    customdata=customdata,
-                    hovertemplate='<b>%{x}</b><br>Custos Operacionais: R$ %{customdata[0]:,.0f}<br>% da Receita: %{customdata[1]:.1f}%<extra></extra>'
-                )
-    
-            # Apply interactive features for monthly view
-            if view_type == "Mensal":
-                xaxis_config = get_monthly_xaxis_config(display_df, x_col)
-                    
-                fig_op_costs.update_layout(
-                    yaxis_title="Custos Operacionais (R$)",
-                    xaxis_title=x_title,
-                    xaxis=xaxis_config,
-                    height=600,
-                    margin=dict(t=100, b=100),
-                    hovermode='x unified',
-                    dragmode='pan'
-                )
-                st.plotly_chart(fig_op_costs, use_container_width=True, config=get_plotly_config())
-            else:
-                fig_op_costs.update_layout(
-                    yaxis_title="Custos Operacionais (R$)",
-                    xaxis_title=x_title,
-                    xaxis=dict(
-                        tickangle=-45 if view_type == "Mensal" else 0,
-                        tickmode='linear',
-                        dtick=1 if view_type == "Anual" else (2 if view_type == "Mensal" and len(display_df) > 24 else None),
-                        type='category' if view_type == "Anual" else None,
-                        categoryorder='category ascending' if view_type == "Anual" else None
-                    ),
-                    height=450 if view_type == "Mensal" else 400,
-                    margin=dict(t=50, b=100 if view_type == "Mensal" else 100),
-                    hovermode='x unified'
-                )
-                st.plotly_chart(fig_op_costs, use_container_width=True)
+            if fig_op_costs:
+                # Apply interactive features for monthly view
+                if view_type == "Mensal":
+                    st.plotly_chart(fig_op_costs, use_container_width=True, config=get_plotly_config())
+                else:
+                    st.plotly_chart(fig_op_costs, use_container_width=True)
 
         # 4.5. Non-Operational Costs - Full width
         st.subheader("💸 Custos Não Operacionais")
@@ -1357,28 +1098,56 @@ def render_dashboard_tab(db, use_unified_extractor=True):
             if 'revenue' in display_df.columns:
                 display_df['non_op_cost_pct'] = (display_df['non_operational_costs'] / display_df['revenue'] * 100).fillna(0)
             
-            fig_non_op_costs = px.area(
-                display_df,
-                x=x_col,
-                y='non_operational_costs',
+            # Calculate percentage changes
+            non_op_pct_changes = display_df['non_operational_costs'].pct_change() * 100
+            non_op_pct_changes = non_op_pct_changes.fillna(0).round(2)
+            
+            # Create figure
+            fig_non_op_costs = go.Figure()
+            
+            # Add revenue line first so it appears first in hover
+            if 'revenue' in display_df.columns:
+                revenue_pct_changes = display_df['revenue'].pct_change() * 100
+                revenue_pct_changes = revenue_pct_changes.fillna(0).round(2)
+                
+                fig_non_op_costs.add_trace(go.Scatter(
+                    x=display_df[x_col],
+                    y=display_df['revenue'],
+                    name='Receita',
+                    mode='lines+markers',
+                    line=dict(color='#1f77b4', width=3),
+                    marker=dict(size=8),
+                    customdata=revenue_pct_changes.values.reshape(-1, 1),
+                    hovertemplate='<b>%{x}</b><br>' +
+                                  'Receita: R$ %{y:,.0f}<br>' +
+                                  '<b>Variação: %{customdata[0]:+.2f}%</b><br>' +
+                                  '<extra></extra>'
+                ))
+            
+            # Add non-operational costs area
+            fig_non_op_costs.add_trace(go.Scatter(
+                x=display_df[x_col],
+                y=display_df['non_operational_costs'],
+                name='Custos Não Operacionais',
+                mode='lines+markers+text',
+                fill='tozeroy',
+                fillcolor='rgba(255, 107, 107, 0.4)',  # Red with transparency
+                line=dict(color='#FF6B6B', width=2),
+                marker=dict(size=8),
+                text=[f'R$ {v:,.0f}' for v in display_df['non_operational_costs']],
+                textposition='top center',
+                customdata=list(zip(non_op_pct_changes, display_df['non_op_cost_pct'])) if 'non_op_cost_pct' in display_df.columns else non_op_pct_changes.values.reshape(-1, 1),
+                hovertemplate='<b>%{x}</b><br>' +
+                              'Custos Não Operacionais: R$ %{y:,.0f}<br>' +
+                              '<b>Variação: %{customdata[0]:+.2f}%</b><br>' +
+                              ('% da Receita: %{customdata[1]:.1f}%<br>' if 'non_op_cost_pct' in display_df.columns else '') +
+                              '<extra></extra>'
+            ))
+            
+            fig_non_op_costs.update_layout(
                 title='💸 Custos Não Operacionais',
-                color_discrete_sequence=['#FF6B6B'],  # Red color
-                text='non_operational_costs'
+                hovermode='x unified'
             )
-            
-            # Format text labels
-            fig_non_op_costs.update_traces(
-                texttemplate='R$ %{text:,.0f}',
-                textposition='top center'
-            )
-            
-            # Update hover template to include percentage
-            if 'non_op_cost_pct' in display_df.columns:
-                customdata = list(zip(display_df['non_operational_costs'], display_df['non_op_cost_pct']))
-                fig_non_op_costs.update_traces(
-                    customdata=customdata,
-                    hovertemplate='<b>%{x}</b><br>Custos Não Operacionais: R$ %{customdata[0]:,.0f}<br>% da Receita: %{customdata[1]:.1f}%<extra></extra>'
-                )
             
             # Apply interactive features for monthly view
             if view_type == "Mensal":
@@ -1414,48 +1183,23 @@ def render_dashboard_tab(db, use_unified_extractor=True):
         # 5. Result (Profit) - Full width
         st.subheader("💰 Resultado (Lucro Líquido)")
         if not display_df.empty and 'net_profit' in display_df.columns:
-            x_col, x_title = prepare_x_axis(display_df, view_type)
-    
-            # Create a color scale based on positive/negative values
-            colors = ['red' if x < 0 else 'green' for x in display_df['net_profit']]
-    
-            fig_result = go.Figure()
-            fig_result.add_trace(go.Bar(
-                x=display_df[x_col],
-                y=display_df['net_profit'],
-                text=display_df['net_profit'].apply(lambda x: f'R$ {x:,.0f}'),
-                textposition='outside',
-                marker_color=colors,
-                name='Resultado'
-            ))
-    
-            # Add a zero line
-            fig_result.add_hline(y=0, line_dash="dash", line_color="gray")
-    
-            # Apply interactive features for monthly view
-            if view_type == "Mensal":
-                xaxis_config = get_monthly_xaxis_config(display_df, x_col)
-                    
-                fig_result.update_layout(
-                    title=f'Resultado {view_type} (Lucro/Prejuízo)',
-                    yaxis_title="Resultado (R$)",
-                    xaxis_title=x_title,
-                    xaxis=xaxis_config,
-                    height=600,
-                    margin=dict(t=100, b=100),
-                    showlegend=False,
-                    dragmode='pan'
-                )
-                st.plotly_chart(fig_result, use_container_width=True, config=get_plotly_config())
-            else:
-                fig_result.update_layout(
-                    title=f'Resultado {view_type} (Lucro/Prejuízo)',
-                    yaxis_title="Resultado (R$)",
-                    xaxis_title=x_title,
-                    height=500,
-                    showlegend=False
-                )
-                st.plotly_chart(fig_result, use_container_width=True)
+            # Ensure we have total_costs column for the component
+            if 'total_costs' not in display_df.columns:
+                if all(col in display_df.columns for col in ['variable_costs', 'fixed_costs']):
+                    display_df['total_costs'] = display_df['variable_costs'] + display_df['fixed_costs']
+                    if 'operational_costs' in display_df.columns:
+                        display_df['total_costs'] += display_df['operational_costs']
+                    if 'non_operational_costs' in display_df.columns:
+                        display_df['total_costs'] += display_df['non_operational_costs']
+            
+            fig_result = create_resultado_chart(display_df, view_type, title=f'Resultado {view_type} (Lucro/Prejuízo)')
+            
+            if fig_result:
+                # Apply interactive features for monthly view
+                if view_type == "Mensal":
+                    st.plotly_chart(fig_result, use_container_width=True, config=get_plotly_config())
+                else:
+                    st.plotly_chart(fig_result, use_container_width=True)
 
         # Cost Structure Comparison
         st.subheader("📊 Estrutura de Custos")
