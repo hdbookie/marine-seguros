@@ -1231,6 +1231,19 @@ def render_dashboard_tab(db, use_unified_extractor=True):
             display_df['non_op_cost_pct'] = (display_df['non_operational_costs'] / display_df['revenue'] * 100).fillna(0)
             
             display_df['profit_pct'] = (display_df['profit'] / display_df['revenue'] * 100).fillna(0)
+            
+            # Calculate percentage changes for all cost categories
+            var_costs_pct_changes = display_df['variable_costs'].pct_change() * 100
+            var_costs_pct_changes = var_costs_pct_changes.fillna(0).round(2)
+            
+            fixed_costs_pct_changes = display_df['fixed_costs'].pct_change() * 100
+            fixed_costs_pct_changes = fixed_costs_pct_changes.fillna(0).round(2)
+            
+            non_op_costs_pct_changes = display_df['non_operational_costs'].pct_change() * 100
+            non_op_costs_pct_changes = non_op_costs_pct_changes.fillna(0).round(2)
+            
+            profit_pct_changes = display_df['profit'].pct_change() * 100
+            profit_pct_changes = profit_pct_changes.fillna(0).round(2)
     
             # Add variable costs bar (as percentage)
             fig_cost_structure.add_trace(go.Bar(
@@ -1247,9 +1260,10 @@ def render_dashboard_tab(db, use_unified_extractor=True):
                 hovertemplate='<b>Custos Variáveis</b><br>' +
                              'Percentual: %{y:.1f}%<br>' +
                              'Valor: R$ %{customdata[0]:,.0f}<br>' +
-                             '<b>Receita Total: R$ %{customdata[1]:,.0f}</b><br>' +
+                             '<b>Variação: %{customdata[1]:+.2f}%</b><br>' +
+                             'Receita Total: R$ %{customdata[2]:,.0f}<br>' +
                              '<extra></extra>',
-                customdata=list(zip(display_df['variable_costs'], display_df['revenue']))
+                customdata=list(zip(display_df['variable_costs'], var_costs_pct_changes, display_df['revenue']))
             ))
     
             # Add fixed costs bar (as percentage)
@@ -1267,9 +1281,10 @@ def render_dashboard_tab(db, use_unified_extractor=True):
                 hovertemplate='<b>Custos Fixos</b><br>' +
                              'Percentual: %{y:.1f}%<br>' +
                              'Valor: R$ %{customdata[0]:,.0f}<br>' +
-                             '<b>Receita Total: R$ %{customdata[1]:,.0f}</b><br>' +
+                             '<b>Variação: %{customdata[1]:+.2f}%</b><br>' +
+                             'Receita Total: R$ %{customdata[2]:,.0f}<br>' +
                              '<extra></extra>',
-                customdata=list(zip(display_df['fixed_costs'], display_df['revenue']))
+                customdata=list(zip(display_df['fixed_costs'], fixed_costs_pct_changes, display_df['revenue']))
             ))
     
             # Add non-operational costs bar (always show, even if zero)
@@ -1287,9 +1302,10 @@ def render_dashboard_tab(db, use_unified_extractor=True):
                 hovertemplate='<b>Custos Não Operacionais</b><br>' +
                              'Percentual: %{y:.1f}%<br>' +
                              'Valor: R$ %{customdata[0]:,.0f}<br>' +
-                             '<b>Receita Total: R$ %{customdata[1]:,.0f}</b><br>' +
+                             '<b>Variação: %{customdata[1]:+.2f}%</b><br>' +
+                             'Receita Total: R$ %{customdata[2]:,.0f}<br>' +
                              '<extra></extra>',
-                customdata=list(zip(display_df['non_operational_costs'], display_df['revenue']))
+                customdata=list(zip(display_df['non_operational_costs'], non_op_costs_pct_changes, display_df['revenue']))
             ))
     
             # Add profit margin bar
@@ -1307,9 +1323,10 @@ def render_dashboard_tab(db, use_unified_extractor=True):
                 hovertemplate='<b>Margem de Lucro</b><br>' +
                              'Percentual: %{y:.1f}%<br>' +
                              'Valor: R$ %{customdata[0]:,.0f}<br>' +
-                             '<b>Receita Total: R$ %{customdata[1]:,.0f}</b><br>' +
+                             '<b>Variação: %{customdata[1]:+.2f}%</b><br>' +
+                             'Receita Total: R$ %{customdata[2]:,.0f}<br>' +
                              '<extra></extra>',
-                customdata=list(zip(display_df['profit'], display_df['revenue']))
+                customdata=list(zip(display_df['profit'], profit_pct_changes, display_df['revenue']))
             ))
     
             # Add 100% reference line
@@ -1473,46 +1490,6 @@ def render_dashboard_tab(db, use_unified_extractor=True):
                 if isinstance(anomalies, str):
                     st.error(f"String content: {anomalies[:100]}...")
 
-        # Growth Analysis (only for annual view) - Moved to be last
-        if view_type == "Anual":
-            st.subheader("📊 Análise de Crescimento")
-            growth_cols = [col for col in display_df.columns if '_growth' in col]
-            if growth_cols:
-                fig_growth = go.Figure()
-                
-                # Translation mapping for metric names
-                metric_translations = {
-                    'revenue': 'Receita',
-                    'variable_costs': 'Custos Variáveis',
-                    'net_profit': 'Lucro Líquido',
-                    'fixed_costs': 'Custos Fixos',
-                    'operational_costs': 'Custos Operacionais'
-                }
-                
-                for col in growth_cols:
-                    metric_key = col.replace('_growth', '')
-                    metric_name = metric_translations.get(metric_key, metric_key.title())
-                    fig_growth.add_trace(go.Scatter(
-                        x=display_df['year'],
-                        y=display_df[col],
-                        mode='lines+markers',
-                        name=metric_name,
-                        line=dict(width=3)
-                    ))
-                fig_growth.update_layout(
-                    title="Taxa de Crescimento Anual (%)",
-                    xaxis_title="Ano",
-                    yaxis_title="Crescimento (%)",
-                    height=400,
-                    legend=dict(
-                        orientation="h",
-                        yanchor="bottom",
-                        y=1.02,
-                        xanchor="right",
-                        x=1
-                    )
-                )
-                st.plotly_chart(fig_growth, use_container_width=True, key="growth_chart_standard")
 
         # Data table
         with st.expander("📋 Ver Dados Detalhados"):
