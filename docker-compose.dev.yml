@@ -11,6 +11,15 @@ services:
       # Development environment (files on filesystem)
       - RAILWAY_ENVIRONMENT=development
       - PYTHONPATH=/app
+      # Email configuration
+      - SMTP_HOST=${SMTP_HOST:-smtp.gmail.com}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - FROM_EMAIL=${FROM_EMAIL}
+      - APP_URL=${APP_URL:-http://localhost:8501}
+      # JWT Secret for sessions
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-dev-secret-key-change-in-production}
     volumes:
       # Mount entire project for live reload
       - .:/app

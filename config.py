@@ -40,6 +40,17 @@ MAX_FILE_SIZE_MB = 50
 ALLOWED_FILE_TYPES = ['xlsx', 'xls']
 SESSION_TIMEOUT_MINUTES = 30
 
+# Email whitelist - Only these 3 emails can register and access the system
+ALLOWED_EMAILS = [
+    'hdbooks15@gmail.com',
+    'ellen@marineseguros.com.br', 
+    'luiz@marineseguros.com.br'
+]
+
+# Email verification settings
+EMAIL_VERIFICATION_TOKEN_EXPIRY_HOURS = 24
+RESEND_VERIFICATION_COOLDOWN_MINUTES = 5
+
 # Data retention
 AUTO_CLEAR_CACHE_HOURS = 24
 LOG_USER_ACTIONS = True

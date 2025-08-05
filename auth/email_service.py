@@ -170,3 +170,103 @@ class EmailService:
         except Exception as e:
             logger.error(f"Failed to send welcome email: {e}")
             return False
+    
+    def send_verification_email(self, to_email: str, verification_token: str) -> bool:
+        """Send email verification link to new user"""
+        if not self.smtp_user or not self.smtp_password:
+            logger.error("Email configuration missing. Set SMTP_USER and SMTP_PASSWORD environment variables.")
+            return False
+        
+        try:
+            # Create message
+            msg = MIMEMultipart('alternative')
+            msg['Subject'] = 'Marine Seguros - Verifique seu Email'
+            msg['From'] = self.from_email
+            msg['To'] = to_email
+            
+            # Create the body of the message
+            verify_url = f"{self.app_url}?verify_token={verification_token}"
+            
+            text = f"""
+            Olá,
+            
+            Obrigado por se registrar no Marine Seguros!
+            
+            Para ativar sua conta, por favor verifique seu email clicando no link abaixo:
+            {verify_url}
+            
+            Este link é válido por 24 horas.
+            
+            Se você não criou uma conta no Marine Seguros, ignore este email.
+            
+            Atenciosamente,
+            Equipe Marine Seguros
+            """
+            
+            html = f"""
+            <html>
+              <body style="font-family: Arial, sans-serif; color: #333;">
+                <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+                  <h2 style="color: #2563eb;">Marine Seguros - Verifique seu Email</h2>
+                  
+                  <p>Olá,</p>
+                  
+                  <p>Obrigado por se registrar no Marine Seguros!</p>
+                  
+                  <p>Para ativar sua conta, por favor verifique seu email clicando no botão abaixo:</p>
+                  
+                  <div style="text-align: center; margin: 30px 0;">
+                    <a href="{verify_url}" style="background-color: #10b981; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: bold;">
+                      Verificar Email
+                    </a>
+                  </div>
+                  
+                  <p style="color: #666; font-size: 14px;">Ou copie e cole este link no seu navegador:</p>
+                  <p style="color: #2563eb; font-size: 14px; word-break: break-all;">{verify_url}</p>
+                  
+                  <p style="color: #666; font-size: 14px;">Este link é válido por 24 horas.</p>
+                  
+                  <div style="background-color: #fef3c7; border: 1px solid #f59e0b; border-radius: 5px; padding: 15px; margin: 20px 0;">
+                    <p style="color: #92400e; margin: 0; font-size: 14px;">
+                      <strong>Importante:</strong> Apenas os seguintes emails estão autorizados a acessar o sistema:
+                    </p>
+                    <ul style="color: #92400e; font-size: 14px;">
+                      <li>hdbooks15@gmail.com</li>
+                      <li>ellen@marineseguros.com.br</li>
+                      <li>luiz@marineseguros.com.br</li>
+                    </ul>
+                  </div>
+                  
+                  <p style="color: #666; font-size: 14px;">Se você não criou uma conta no Marine Seguros, ignore este email.</p>
+                  
+                  <hr style="border: 1px solid #eee; margin: 30px 0;">
+                  
+                  <p style="color: #999; font-size: 12px;">
+                    Atenciosamente,<br>
+                    Equipe Marine Seguros
+                  </p>
+                </div>
+              </body>
+            </html>
+            """
+            
+            # Record the MIME types of both parts
+            part1 = MIMEText(text, 'plain')
+            part2 = MIMEText(html, 'html')
+            
+            # Attach parts into message container
+            msg.attach(part1)
+            msg.attach(part2)
+            
+            # Send the message via SMTP server
+            with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
+                server.starttls()
+                server.login(self.smtp_user, self.smtp_password)
+                server.send_message(msg)
+            
+            logger.info(f"Verification email sent to {to_email}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to send verification email: {e}")
+            return False
