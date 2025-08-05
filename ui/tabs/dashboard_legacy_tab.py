@@ -355,6 +355,11 @@ def render_dashboard_tab(db, use_unified_extractor=True):
                 # Sort by date for chronological order
                 display_df = display_df.sort_values(['year', 'month_num'])
                 
+                # Create month_year column for charts
+                display_df['month_year'] = display_df.apply(
+                    lambda row: f"{row['month']} {row['year']}", axis=1
+                )
+                
                 # Add data refresh button
                 col1, col2 = st.columns([6, 1])
                 with col2:
