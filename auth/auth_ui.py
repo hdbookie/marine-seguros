@@ -56,13 +56,13 @@ def show_login_form():
     with st.form("login_form"):
         st.subheader("Entrar no Sistema")
         
-        username = st.text_input("Usuário")
+        email = st.text_input("Email", placeholder="seu@email.com")
         password = st.text_input("Senha", type="password")
         remember_me = st.checkbox("Lembrar de mim")
         
         if st.form_submit_button("Entrar", use_container_width=True, type="primary"):
-            if username and password:
-                user = st.session_state.auth_manager.authenticate(username, password)
+            if email and password:
+                user = st.session_state.auth_manager.authenticate(email, password)
                 if user:
                     st.session_state.user = user
                     
@@ -73,7 +73,27 @@ def show_login_form():
                     st.success("Login realizado com sucesso!")
                     st.rerun()
                 else:
-                    st.error("Usuário ou senha incorretos. Após 5 tentativas, a conta será bloqueada por 30 minutos.")
+                    # Check what the actual issue is
+                    import sqlite3
+                    conn = sqlite3.connect(st.session_state.auth_manager.db_path)
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT email_verified FROM users WHERE email = ?", (email.lower(),))
+                    result = cursor.fetchone()
+                    conn.close()
+                    
+                    if result is None:
+                        # Email not registered
+                        st.error("❌ Email não registrado. Por favor, registre-se primeiro.")
+                        # Check if email is in whitelist
+                        from config import ALLOWED_EMAILS
+                        if email.lower() not in [e.lower() for e in ALLOWED_EMAILS]:
+                            st.warning("⚠️ Este email não está autorizado. Apenas emails pré-aprovados podem acessar o sistema.")
+                    elif result[0] == 0:
+                        # Email registered but not verified
+                        st.error("❌ Email não verificado. Verifique sua caixa de entrada para o link de ativação.")
+                    else:
+                        # Email exists and is verified, so password must be wrong
+                        st.error("❌ Senha incorreta. Após 5 tentativas, a conta será bloqueada por 30 minutos.")
             else:
                 st.error("Por favor, preencha todos os campos.")
 
@@ -82,36 +102,49 @@ def show_register_form():
     with st.form("register_form"):
         st.subheader("Criar Nova Conta")
         
-        col1, col2 = st.columns(2)
-        with col1:
-            email = st.text_input("Email")
-            username = st.text_input("Usuário")
-        
-        with col2:
-            password = st.text_input("Senha", type="password")
-            confirm_password = st.text_input("Confirmar Senha", type="password")
+        email = st.text_input("Email", placeholder="seu@email.com")
+        password = st.text_input("Senha", type="password")
+        confirm_password = st.text_input("Confirmar Senha", type="password")
         
         st.info("A senha deve ter pelo menos 8 caracteres.")
         
+        # Show allowed emails
+        with st.expander("📧 Emails autorizados"):
+            from config import ALLOWED_EMAILS
+            for allowed_email in ALLOWED_EMAILS:
+                st.write(f"✅ {allowed_email}")
+        
         if st.form_submit_button("Registrar", use_container_width=True, type="primary"):
-            if email and username and password and confirm_password:
+            if email and password and confirm_password:
                 if len(password) < 8:
                     st.error("A senha deve ter pelo menos 8 caracteres.")
                 elif password != confirm_password:
                     st.error("As senhas não coincidem.")
                 else:
+                    # Generate username from email
+                    username = email.split('@')[0]  # e.g., ellen@marineseguros.com.br -> ellen
+                    
                     # All new users are created as admins by default
                     role = 'admin'
                     
-                    if st.session_state.auth_manager.create_user(email, username, password, role):
-                        st.success("Conta criada com sucesso! Faça login para continuar.")
-                        st.info("Você foi criado como administrador.")
+                    success, result = st.session_state.auth_manager.create_user(email, username, password, role)
+                    if success:
+                        # Create verification token
+                        user_id = int(result)  # result contains user_id when successful
+                        token = st.session_state.auth_manager.create_verification_token(user_id)
                         
-                        # Welcome email disabled per user request
-                        # Only password reset emails are sent
-                        pass
+                        if token:
+                            # Send verification email
+                            email_service = EmailService()
+                            if email_service.send_verification_email(email, token):
+                                st.success("✅ Conta criada com sucesso!")
+                                st.info("📧 Verifique seu email para ativar sua conta. O link expira em 24 horas.")
+                            else:
+                                st.warning("Conta criada, mas houve um erro ao enviar o email de verificação. Entre em contato com o administrador.")
+                        else:
+                            st.warning("Conta criada, mas houve um erro ao gerar o token de verificação.")
                     else:
-                        st.error("Erro ao criar conta. Usuário ou email já existe.")
+                        st.error(f"❌ {result}")  # result contains error message when not successful
             else:
                 st.error("Por favor, preencha todos os campos.")
 
@@ -190,7 +223,11 @@ def show_user_menu():
                 
                 # Create a container for user info
                 with st.container():
-                    st.markdown(f"**Nome:** {st.session_state.user['username']}")
+                    # Extract display name from email or username
+                    display_name = st.session_state.user.get('username', st.session_state.user['email'].split('@')[0])
+                    display_name = display_name.capitalize()
+                    
+                    st.markdown(f"**Nome:** {display_name}")
                     st.markdown(f"**Email:** {st.session_state.user['email']}")
                     role_display = "Administrador" if st.session_state.user['role'] == 'admin' else "Usuário"
                     st.markdown(f"**Função:** {role_display}")
@@ -222,6 +259,13 @@ def show_admin_panel():
     """Display admin panel for user management"""
     st.title("⚙️ Gerenciamento de Usuários")
     
+    # Show allowed emails
+    from config import ALLOWED_EMAILS
+    with st.expander("📧 Emails Autorizados", expanded=True):
+        st.info("Apenas os seguintes emails podem se registrar no sistema:")
+        for email in ALLOWED_EMAILS:
+            st.write(f"✅ {email}")
+    
     users = st.session_state.auth_manager.list_users()
     
     # User list
@@ -234,6 +278,11 @@ def show_admin_panel():
             with col1:
                 st.write(f"**ID:** {user['id']}")
                 st.write(f"**Função:** {user['role']}")
+                email_verified = user.get('email_verified', True)
+                if email_verified:
+                    st.write("**Email:** ✅ Verificado")
+                else:
+                    st.write("**Email:** ❌ Não verificado")
             
             with col2:
                 st.write(f"**Ativo:** {'Sim' if user['is_active'] else 'Não'}")

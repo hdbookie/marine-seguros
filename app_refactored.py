@@ -63,6 +63,21 @@ if st.query_params.get('logout') == 'true' or st.session_state.get('logout_click
     st.session_state.clear()
     st.rerun()
 
+# Check for email verification token
+if 'verify_token' in st.query_params:
+    verify_token = st.query_params['verify_token']
+    success, message = st.session_state.auth_manager.verify_email(verify_token)
+    
+    if success:
+        st.success(message)
+        st.info("Você já pode fazer login com seu usuário e senha.")
+    else:
+        st.error(message)
+    
+    # Clear the token from URL
+    del st.query_params['verify_token']
+    st.rerun()
+
 # Initialize database manager
 db = DatabaseManager()
 
@@ -105,6 +120,10 @@ if not st.session_state.get('user'):
 col1, col2 = st.columns([4, 1])
 with col1:
     st.title("📊 Marine Seguros - Financial Analytics Dashboard")
+    # Show welcome message
+    if st.session_state.get('user'):
+        display_name = st.session_state.user.get('username', st.session_state.user['email'].split('@')[0])
+        st.caption(f"Bem-vindo, {display_name.capitalize()}!")
 with col2:
     # Add refresh button
     if st.button("🔄 Atualizar Dados", help="Carregar dados mais recentes"):
