@@ -10,7 +10,7 @@ from email.mime.multipart import MIMEMultipart
 import os
 from typing import Optional, Dict, Tuple
 import logging
-from config import get_env_var
+from config import get_env_var, ALLOWED_EMAILS, EMAIL_VERIFICATION_TOKEN_EXPIRY_HOURS
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -50,6 +50,7 @@ class AuthManager:
                 password_hash TEXT NOT NULL,
                 role TEXT DEFAULT 'user',
                 is_active BOOLEAN DEFAULT 1,
+                email_verified BOOLEAN DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 last_login TIMESTAMP,
                 failed_attempts INTEGER DEFAULT 0,
@@ -60,6 +61,19 @@ class AuthManager:
         # Password reset tokens
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS reset_tokens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                token TEXT UNIQUE NOT NULL,
+                expires_at TIMESTAMP NOT NULL,
+                used BOOLEAN DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users (id)
+            )
+        ''')
+        
+        # Email verification tokens
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS verification_tokens (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
                 token TEXT UNIQUE NOT NULL,
@@ -96,6 +110,14 @@ class AuthManager:
             )
         ''')
         
+        # Add email_verified column to existing users table if it doesn't exist
+        try:
+            cursor.execute("ALTER TABLE users ADD COLUMN email_verified BOOLEAN DEFAULT 0")
+            conn.commit()
+        except sqlite3.OperationalError:
+            # Column already exists
+            pass
+        
         conn.commit()
         conn.close()
     
@@ -107,33 +129,49 @@ class AuthManager:
         """Verify password against hash"""
         return bcrypt.checkpw(password.encode('utf-8'), password_hash.encode('utf-8'))
     
-    def create_user(self, email: str, username: str, password: str, role: str = 'user') -> bool:
+    def is_email_allowed(self, email: str) -> bool:
+        """Check if email is in the whitelist"""
+        return email.lower() in [e.lower() for e in ALLOWED_EMAILS]
+    
+    def create_user(self, email: str, username: str, password: str, role: str = 'user') -> Tuple[bool, str]:
         """Create new user with hashed password"""
         try:
+            # Check if email is allowed
+            if not self.is_email_allowed(email):
+                self.log_action(None, f"Registration attempt with unauthorized email: {email}", success=False)
+                return False, "Email não autorizado. Apenas emails pré-aprovados podem se registrar."
+            
             conn = sqlite3.connect(self.db_path, timeout=10.0)
             cursor = conn.cursor()
             
             password_hash = self.hash_password(password)
             
+            # Create user with email_verified=False
             cursor.execute('''
-                INSERT INTO users (email, username, password_hash, role)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO users (email, username, password_hash, role, email_verified)
+                VALUES (?, ?, ?, ?, 0)
             ''', (email, username, password_hash, role))
             
+            user_id = cursor.lastrowid
             conn.commit()
             conn.close()
             
-            self.log_action(None, f"User created: {username}", success=True)
-            return True
+            self.log_action(user_id, f"User created: {username} (pending email verification)", success=True)
+            return True, str(user_id)
             
-        except sqlite3.IntegrityError:
-            self.log_action(None, f"Failed to create user: {username} (already exists)", success=False)
-            return False
+        except sqlite3.IntegrityError as e:
+            conn.close()  # Make sure to close connection before logging
+            if "users.email" in str(e):
+                self.log_action(None, f"Failed to create user: duplicate email {email}", success=False)
+                return False, f"O email {email} já está registrado. Use a opção de login."
+            else:
+                self.log_action(None, f"Failed to create user: {username} (already exists)", success=False)
+                return False, "Usuário já existe no sistema."
         except Exception as e:
             logger.error(f"Error creating user: {e}")
-            return False
+            return False, "Erro ao criar usuário. Tente novamente."
     
-    def authenticate(self, username: str, password: str) -> Optional[Dict]:
+    def authenticate(self, email: str, password: str) -> Optional[Dict]:
         """Authenticate user and create session"""
         conn = sqlite3.connect(self.db_path, timeout=10.0)
         cursor = conn.cursor()
@@ -141,18 +179,23 @@ class AuthManager:
         try:
             # Check if user exists and is not locked
             cursor.execute('''
-                SELECT id, email, username, password_hash, role, failed_attempts, locked_until
+                SELECT id, email, username, password_hash, role, failed_attempts, locked_until, email_verified
                 FROM users
-                WHERE username = ? AND is_active = 1
-            ''', (username,))
+                WHERE email = ? AND is_active = 1
+            ''', (email.lower(),))  # Case-insensitive email matching
             
             user = cursor.fetchone()
             
             if not user:
-                self.log_action(None, f"Login attempt for non-existent user: {username}", success=False)
+                self.log_action(None, f"Login attempt for non-existent email: {email}", success=False)
                 return None
             
-            user_id, email, username, password_hash, role, failed_attempts, locked_until = user
+            user_id, email, username, password_hash, role, failed_attempts, locked_until, email_verified = user
+            
+            # Check if email is verified
+            if not email_verified:
+                self.log_action(user_id, "Login attempt with unverified email", success=False)
+                return None
             
             # Check if account is locked
             if locked_until:
@@ -407,16 +450,22 @@ class AuthManager:
     
     def log_action(self, user_id: Optional[int], action: str, success: bool = True):
         """Log security-relevant actions"""
-        conn = sqlite3.connect(self.db_path, timeout=10.0)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            INSERT INTO audit_log (user_id, action, success)
-            VALUES (?, ?, ?)
-        ''', (user_id, action, success))
-        
-        conn.commit()
-        conn.close()
+        try:
+            conn = sqlite3.connect(self.db_path, timeout=10.0)
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                INSERT INTO audit_log (user_id, action, success)
+                VALUES (?, ?, ?)
+            ''', (user_id, action, success))
+            
+            conn.commit()
+            conn.close()
+        except sqlite3.OperationalError as e:
+            # If database is locked, just log to console
+            logger.warning(f"Could not log action (database locked): {action}")
+        except Exception as e:
+            logger.error(f"Error logging action: {e}")
     
     def get_user_by_id(self, user_id: int) -> Optional[Dict]:
         """Get user information by ID"""
@@ -450,7 +499,7 @@ class AuthManager:
         cursor = conn.cursor()
         
         cursor.execute('''
-            SELECT id, email, username, role, is_active, created_at, last_login
+            SELECT id, email, username, role, is_active, created_at, last_login, email_verified
             FROM users
             ORDER BY created_at DESC
         ''')
@@ -464,7 +513,8 @@ class AuthManager:
                 'role': row[3],
                 'is_active': row[4],
                 'created_at': row[5],
-                'last_login': row[6]
+                'last_login': row[6],
+                'email_verified': row[7] if len(row) > 7 else True  # Default to True for old records
             })
         
         conn.close()
@@ -496,3 +546,66 @@ class AuthManager:
         conn.close()
         
         return True
+    
+    def create_verification_token(self, user_id: int) -> Optional[str]:
+        """Create email verification token"""
+        conn = sqlite3.connect(self.db_path, timeout=10.0)
+        cursor = conn.cursor()
+        
+        # Create verification token
+        token = secrets.token_urlsafe(32)
+        expires_at = datetime.now() + timedelta(hours=EMAIL_VERIFICATION_TOKEN_EXPIRY_HOURS)
+        
+        cursor.execute('''
+            INSERT INTO verification_tokens (user_id, token, expires_at)
+            VALUES (?, ?, ?)
+        ''', (user_id, token, expires_at))
+        
+        conn.commit()
+        conn.close()
+        
+        self.log_action(user_id, "Email verification token created", success=True)
+        
+        return token
+    
+    def verify_email(self, token: str) -> Tuple[bool, str]:
+        """Verify email using token"""
+        conn = sqlite3.connect(self.db_path, timeout=10.0)
+        cursor = conn.cursor()
+        
+        # Verify token
+        cursor.execute('''
+            SELECT user_id FROM verification_tokens
+            WHERE token = ? AND expires_at > CURRENT_TIMESTAMP AND used = 0
+        ''', (token,))
+        
+        result = cursor.fetchone()
+        if not result:
+            conn.close()
+            return False, "Token inválido ou expirado."
+        
+        user_id = result[0]
+        
+        # Update user's email_verified status
+        cursor.execute('''
+            UPDATE users SET email_verified = 1
+            WHERE id = ?
+        ''', (user_id,))
+        
+        # Mark token as used
+        cursor.execute('''
+            UPDATE verification_tokens SET used = 1 WHERE token = ?
+        ''', (token,))
+        
+        conn.commit()
+        conn.close()
+        
+        self.log_action(user_id, "Email verified successfully", success=True)
+        
+        return True, "Email verificado com sucesso! Você já pode fazer login."
+    
+    def validate_password(self, password: str) -> Tuple[bool, str]:
+        """Validate password strength"""
+        if len(password) < 8:
+            return False, "A senha deve ter pelo menos 8 caracteres."
+        return True, "Senha válida."
