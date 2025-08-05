@@ -1,7 +1,6 @@
 """
 Gráfico de Custos Operacionais (Operational Costs Chart)
 """
-import plotly.express as px
 import plotly.graph_objects as go
 import pandas as pd
 from typing import Optional
@@ -47,30 +46,60 @@ def create_despesas_operacionais_chart(
         x_col = 'period'
         x_title = 'Período'
     
-    # Create area chart
-    fig = px.area(
-        display_df,
-        x=x_col,
-        y='total_operational_costs',
-        title=title or f'Custos Operacionais {view_type}',
-        color_discrete_sequence=['#8B4513']  # Brown color for operational costs
-    )
+    # Calculate period-over-period percentage changes
+    pct_changes = display_df['total_operational_costs'].pct_change() * 100
+    pct_changes = pct_changes.fillna(0).round(2)  # First period has no change, round to 2 decimal places
     
-    # Add markers and text
-    fig.update_traces(
+    # Create figure
+    fig = go.Figure()
+    
+    # Add revenue line first so it appears first in hover
+    if 'revenue' in display_df.columns:
+        pct_changes_revenue = display_df['revenue'].pct_change() * 100
+        pct_changes_revenue = pct_changes_revenue.fillna(0).round(2)
+        
+        fig.add_trace(go.Scatter(
+            x=display_df[x_col],
+            y=display_df['revenue'],
+            name='Receita',
+            mode='lines+markers+text',
+            line=dict(color='#1f77b4', width=3),
+            marker=dict(size=8),
+            text=[f'R$ {v:,.0f}' if i % 2 == 0 or view_type == "Anual" else '' for i, v in enumerate(display_df['revenue'])] if view_type != "Mensal" or len(display_df) <= 20 else None,
+            textposition='top center',
+            textfont=dict(size=10),
+            customdata=pct_changes_revenue.values.reshape(-1, 1),
+            hovertemplate='<b>%{x}</b><br>' +
+                          'Receita: R$ %{y:,.0f}<br>' +
+                          '<b>Variação: %{customdata[0]:+.2f}%</b><br>' +
+                          '<extra></extra>'
+        ))
+    
+    # Add area chart for operational costs second
+    fig.add_trace(go.Scatter(
+        x=display_df[x_col],
+        y=display_df['total_operational_costs'],
+        name='Custos Operacionais (Fixos + Variáveis)',
         mode='lines+markers+text',
-        text=[f'R$ {v:,.0f}' for v in display_df['total_operational_costs']],
-        textposition='top center',
-        textfont=dict(size=10),
+        fill='tozeroy',
+        fillcolor='rgba(139, 69, 19, 0.4)',  # Brown with transparency
+        line=dict(color='#8B4513', width=2),
+        marker=dict(size=8),
+        text=[f'R$ {v:,.0f}' if i % 2 == 0 or view_type == "Anual" else '' for i, v in enumerate(display_df['total_operational_costs'])] if view_type != "Mensal" or len(display_df) <= 20 else None,
+        textposition='bottom center',
+        textfont=dict(size=10, color='white'),
+        customdata=pct_changes.values.reshape(-1, 1),
         hovertemplate='<b>%{x}</b><br>' +
                       'Custos Operacionais: R$ %{y:,.0f}<br>' +
+                      '<b>Variação: %{customdata[0]:+.2f}%</b><br>' +
                       '(Fixos + Variáveis)<br>' +
                       '<extra></extra>'
-    )
+    ))
     
     # Update layout
     fig.update_layout(
-        yaxis_title="Custos Operacionais (R$)",
+        title=title or f'Custos Operacionais {view_type}',
+        yaxis_title="Valores (R$)",
         xaxis_title=x_title,
         hovermode='x unified',
         xaxis=dict(
@@ -78,49 +107,15 @@ def create_despesas_operacionais_chart(
             tickmode='linear',
             dtick=2 if view_type == "Mensal" and len(display_df) > 24 else None
         ),
-        height=400,
-        margin=dict(t=50, b=100 if view_type == "Mensal" else 50)
-    )
-    
-    # Add average line
-    avg_operational = display_df['total_operational_costs'].mean()
-    fig.add_hline(
-        y=avg_operational,
-        line_dash="dash",
-        line_color="red",
-        annotation_text=f"Média: R$ {avg_operational:,.0f}",
-        annotation_position="right"
-    )
-    
-    # Add percentage of revenue if available
-    if 'revenue' in display_df.columns:
-        display_df['op_cost_percentage'] = (
-            display_df['total_operational_costs'] / display_df['revenue'] * 100
-        ).fillna(0)
-        
-        # Add secondary trace for percentage
-        fig.add_trace(go.Scatter(
-            x=display_df[x_col],
-            y=display_df['op_cost_percentage'],
-            mode='lines+markers',
-            name='% da Receita',
-            line=dict(color='darkred', width=2, dash='dot'),
-            marker=dict(size=6),
-            yaxis='y2',
-            hovertemplate='<b>% da Receita</b><br>' +
-                          'Período: %{x}<br>' +
-                          'Percentual: %{y:.1f}%<br>' +
-                          '<extra></extra>'
-        ))
-        
-        # Add secondary y-axis
-        fig.update_layout(
-            yaxis2=dict(
-                title='% da Receita',
-                overlaying='y',
-                side='right',
-                showgrid=False
-            )
+        height=450 if view_type == "Mensal" else 400,
+        margin=dict(t=50, b=100 if view_type == "Mensal" else 50),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
         )
+    )
     
     return fig

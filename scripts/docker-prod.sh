@@ -7,4 +7,5 @@ echo "🔒 Production environment settings"
 echo ""
 
 # Use the production compose file with volumes
-docker compose -f docker-compose.prod.yml up
+# --build flag ensures we rebuild the image with latest code changes
+docker compose -f docker-compose.prod.yml up --build
