@@ -35,6 +35,7 @@ from utils.formatters import format_time_difference
 # Import tab modules
 from ui.tabs.upload_legacy_tab import render_upload_tab
 from ui.tabs.dashboard_legacy_tab import render_dashboard_tab
+from ui.tabs.enhanced_dashboard_tab import render_enhanced_dashboard_tab
 from ui.tabs.micro_analysis import render_micro_analysis_tab
 from ui.tabs.micro_analysis_v2 import render_micro_analysis_v2_tab
 from ui.tabs.ai_insights_legacy_tab import render_ai_insights_tab
@@ -224,9 +225,10 @@ if hasattr(st.session_state, 'extracted_data') and st.session_state.extracted_da
         traceback.print_exc()
 
 # Main content - Tabs
-tab1, tab2, tab3, tab3b, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
+tab1, tab2, tab2b, tab3, tab3b, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
     "📁 Upload", 
     "📊 Dashboard Macro", 
+    "🔄 Dashboard Integrado",
     "🔬 Análise Micro", 
     "🆕 Micro V2",
     "🤖 AI Insights", 
@@ -244,6 +246,10 @@ with tab1:
 # Tab 2: Dashboard
 with tab2:
     render_dashboard_tab(db, use_unified_extractor=True)
+
+# Tab 2b: Enhanced Integrated Dashboard
+with tab2b:
+    render_enhanced_dashboard_tab(db, use_unified_extractor=True)
 
 # Tab 3: Detailed Breakdown
 with tab3:

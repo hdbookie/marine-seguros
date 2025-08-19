@@ -147,6 +147,7 @@ class UnifiedFinancialExtractor:
             'taxes': tax_data,
             'commissions': commission_data,
             'administrative_expenses': admin_expense_data,
+            'excel_hierarchy': excel_hierarchy,  # ADD the hierarchical data!
             'marketing_expenses': marketing_expense_data,
             'financial_expenses': financial_expense_data,
             'profits': profit_data,

@@ -188,15 +188,40 @@ class ExcelHierarchyExtractor:
                 # We're expecting Level 3 items and have a parent
                 current_children_sum = sum(item['value'] for item in current_subcategory.get('items', []))
                 parent_value = current_subcategory.get('value', 0)
+                parent_name = current_subcategory.get('name', '').lower()
                 
-                # Check if parent is already complete
-                if parent_value > 0 and abs(current_children_sum - parent_value) < 100:
+                # Special handling for Viagens e Deslocamentos
+                is_viagens_parent = 'viagens' in parent_name and 'deslocamento' in parent_name
+                
+                if is_viagens_parent:
+                    # Check if this item is travel-related
+                    travel_keywords = ['alimenta', 'combust', 'hotel', 'estacion', 'pedágio', 'pedagio', 
+                                     'aluguel', 'taxi', 'passagen', 'reembolso']
+                    is_travel_child = any(kw in label.lower() for kw in travel_keywords)
+                    
+                    if is_travel_child:
+                        # Add as child of Viagens
+                        current_subcategory['items'].append({
+                            'level': 3,
+                            'name': label,
+                            'value': annual_value,
+                            'monthly': monthly_values
+                        })
+                        continue
+                    else:
+                        # Not a travel item, end the Viagens parent
+                        expecting_level3_items = False
+                        current_subcategory = None
+                        # Fall through to Level 2 processing
+                
+                # Regular parent-child sum checking
+                elif parent_value > 0 and abs(current_children_sum - parent_value) < 100:
                     # Parent is complete, treat as new Level 2
                     expecting_level3_items = False
                     current_subcategory = None
                     # Don't continue - let it fall through to Level 2 processing
                     
-                elif annual_value > parent_value * 0.8:
+                elif annual_value > parent_value * 0.8 and not is_viagens_parent:
                     # Too large, treat as new Level 2
                     expecting_level3_items = False
                     current_subcategory = None
@@ -280,9 +305,36 @@ class ExcelHierarchyExtractor:
         1. If its value equals the sum of following items  
         2. If following items are indented or have dashes
         3. If it has a round number that looks like a total
+        4. Special cases like "Viagens e Deslocamentos"
         """
         current_label = self._get_cell_value(df.iloc[current_idx], label_col)
         current_value = self._get_numeric_value(df.iloc[current_idx], annual_col) if annual_col else 0
+        
+        # Special case: "Viagens e Deslocamentos" should always be treated as parent
+        if current_label and isinstance(current_label, str):
+            label_lower = current_label.lower()
+            if 'viagens' in label_lower and 'deslocamento' in label_lower:
+                # Check if next items are travel-related
+                travel_keywords = ['alimenta', 'combust', 'hotel', 'estacion', 'pedágio', 'pedagio', 
+                                 'aluguel', 'taxi', 'passagen', 'reembolso']
+                
+                # Look at next few rows
+                has_travel_children = False
+                for i in range(1, min(10, len(df) - current_idx)):
+                    next_idx = current_idx + i
+                    next_label = self._get_cell_value(df.iloc[next_idx], label_col)
+                    if next_label and isinstance(next_label, str):
+                        next_label_lower = next_label.lower()
+                        # Stop if we hit another section
+                        if self._is_level1(next_label):
+                            break
+                        # Check if it's a travel-related item
+                        if any(keyword in next_label_lower for keyword in travel_keywords):
+                            has_travel_children = True
+                            break
+                
+                if has_travel_children:
+                    return True  # Force "Viagens e Deslocamentos" to be a parent
         
         if current_value <= 0:
             return False
@@ -305,9 +357,10 @@ class ExcelHierarchyExtractor:
             if self._is_level1(next_label) or self._is_calculation_row(next_label):
                 break
             
-            # Skip items with dashes - they're explicitly Level 3
-            if next_label.startswith('-'):
-                continue
+            # Items with dashes are explicitly Level 3, include them as children
+            is_dash_item = next_label.startswith('-')
+            if is_dash_item:
+                next_label = next_label.lstrip('- ').strip()
             
             # Get the value of this potential child
             next_value = self._get_numeric_value(df.iloc[next_idx], annual_col) if annual_col else 0
@@ -339,6 +392,13 @@ class ExcelHierarchyExtractor:
             # Allow for small rounding differences (within R$100 or 2%)
             if diff < 100 or (diff / current_value < 0.02):
                 return True
+            
+            # Also check if we have at least 2 children and they sum to approximately the parent
+            # This handles cases like "Viagens e Deslocamentos" where children don't have dashes
+            if len(potential_children) >= 2:
+                # More lenient check for groups of items (within 10% or R$500)
+                if diff < 500 or (diff / current_value < 0.10):
+                    return True
         
         return False
     
