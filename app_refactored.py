@@ -36,6 +36,7 @@ from utils.formatters import format_time_difference
 from ui.tabs.upload_legacy_tab import render_upload_tab
 from ui.tabs.dashboard_legacy_tab import render_dashboard_tab
 from ui.tabs.micro_analysis import render_micro_analysis_tab
+from ui.tabs.micro_analysis_v2 import render_micro_analysis_v2_tab
 from ui.tabs.ai_insights_legacy_tab import render_ai_insights_tab
 from ui.tabs.ai_chat_legacy_tab import render_ai_chat_tab
 from ui.tabs.auth_management_tab_simple import render_auth_management_tab
@@ -223,10 +224,11 @@ if hasattr(st.session_state, 'extracted_data') and st.session_state.extracted_da
         traceback.print_exc()
 
 # Main content - Tabs
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
+tab1, tab2, tab3, tab3b, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
     "📁 Upload", 
     "📊 Dashboard Macro", 
     "🔬 Análise Micro", 
+    "🆕 Micro V2",
     "🤖 AI Insights", 
     "💬 AI Chat",
     "🔐 Autenticação",
@@ -252,6 +254,15 @@ with tab3:
         render_micro_analysis_tab(st.session_state.extracted_data)
     else:
         st.info("👆 Carregue arquivos na aba 'Upload' primeiro.")
+
+# Tab 3b: New Micro Analysis V2
+with tab3b:
+    if hasattr(st.session_state, 'unified_data') and st.session_state.unified_data is not None:
+        render_micro_analysis_v2_tab(st.session_state.unified_data)
+    elif hasattr(st.session_state, 'extracted_data') and st.session_state.extracted_data is not None:
+        render_micro_analysis_v2_tab(st.session_state.extracted_data)
+    else:
+        st.info("👆 Carregue arquivos na aba 'Upload' primeiro para ver a nova análise hierárquica.")
 
 # Tab 4: AI Insights
 with tab4:

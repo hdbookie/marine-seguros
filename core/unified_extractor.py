@@ -13,6 +13,7 @@ from core.extractors.marketing_expense_extractor import MarketingExpenseExtracto
 from core.extractors.financial_expense_extractor import FinancialExpenseExtractor
 from core.profit_extractor import ProfitExtractor
 from core.extractors.universal_line_extractor import UniversalLineExtractor
+from core.extractors.excel_hierarchy_extractor import ExcelHierarchyExtractor
 
 class UnifiedFinancialExtractor:
     def __init__(self):
@@ -27,6 +28,7 @@ class UnifiedFinancialExtractor:
         self.financial_expense_extractor = FinancialExpenseExtractor()
         self.profit_extractor = ProfitExtractor()
         self.universal_line_extractor = UniversalLineExtractor()
+        self.excel_hierarchy_extractor = ExcelHierarchyExtractor()
 
     def extract_from_excel(self, file_path: str) -> Dict[int, Dict]:
         extracted_data = {}
@@ -106,6 +108,9 @@ class UnifiedFinancialExtractor:
         
         # Extract ALL lines using universal extractor
         universal_data = self.universal_line_extractor.extract_all_lines(df, year)
+        
+        # Also extract using Excel hierarchy extractor for native structure
+        excel_hierarchy = self.excel_hierarchy_extractor._extract_hierarchy(df, year)
 
         line_items = {
             **revenue_data.get('line_items', {}),
@@ -150,5 +155,6 @@ class UnifiedFinancialExtractor:
             'monthly_data': {},
             'hierarchy': universal_data.get('hierarchy', []),
             'all_line_items': universal_data.get('all_line_items', []),
-            'universal_data': universal_data
+            'universal_data': universal_data,
+            'excel_hierarchy': excel_hierarchy
         }
