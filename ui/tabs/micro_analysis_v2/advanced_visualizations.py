@@ -65,23 +65,30 @@ def render_waterfall_drilldown(financial_data: Dict, selected_year: int):
     # Create waterfall chart
     fig = _create_waterfall_chart(waterfall_data, st.session_state.waterfall_level)
     
-    # Handle selection for drill-down
-    selected_points = st.plotly_chart(
-        fig,
-        use_container_width=True,
-        on_select="rerun",
-        selection_mode="points",
-        key=f"waterfall_level_{st.session_state.waterfall_level}"
-    )
+    # Display the chart
+    st.plotly_chart(fig, use_container_width=True)
     
-    # Process selection for drill-down
-    if selected_points and selected_points["selection"]["points"]:
-        selected_idx = selected_points["selection"]["points"][0]["pointIndex"]
-        if selected_idx < len(waterfall_data) and waterfall_data[selected_idx].get('drillable', False):
-            selected_item = waterfall_data[selected_idx]
-            st.session_state.waterfall_path.append(selected_item['name'])
-            st.session_state.waterfall_level = min(4, st.session_state.waterfall_level + 1)
-            st.rerun()
+    # Add drill-down buttons for clickable items
+    if any(item.get('drillable', False) for item in waterfall_data):
+        st.markdown("### 🔍 Explorar Categorias")
+        
+        # Create columns for buttons
+        num_items = len([item for item in waterfall_data if item.get('drillable', False)])
+        cols = st.columns(min(3, num_items))
+        
+        col_idx = 0
+        for item in waterfall_data:
+            if item.get('drillable', False):
+                with cols[col_idx % min(3, num_items)]:
+                    if st.button(
+                        f"📊 {item['name']}\n{format_currency(item['value'])}",
+                        key=f"drill_{st.session_state.waterfall_level}_{item['name']}",
+                        use_container_width=True
+                    ):
+                        st.session_state.waterfall_path.append(item['name'])
+                        st.session_state.waterfall_level = min(4, st.session_state.waterfall_level + 1)
+                        st.rerun()
+                col_idx += 1
     
     # Show summary stats for current level
     _render_waterfall_summary(waterfall_data)
@@ -95,10 +102,18 @@ def _prepare_waterfall_data(year_data: Dict, level: int, path: List[str]) -> Lis
     
     sections = year_data['sections']
     
+    # Revenue categories to exclude from waterfall
+    revenue_categories = ['FATURAMENTO', 'RECEITA', 'RECEITAS', 'Outras receitas/creditos']
+    
     if level == 1:
-        # Level 1: Main sections
+        # Level 1: Main sections (costs/expenses only)
         data = []
         for section in sections:
+            section_name = section.get('name', '')
+            # Skip revenue categories
+            if any(rev.upper() in section_name.upper() for rev in revenue_categories):
+                continue
+            
             if section.get('value', 0) > 0:  # Only positive values
                 data.append({
                     'name': section['name'],
@@ -173,15 +188,16 @@ def _create_waterfall_chart(data: List[Dict], level: int) -> go.Figure:
     # Prepare waterfall data
     categories = [item['name'] for item in data]
     values = [item['value'] for item in data]
+    drillable = [item.get('drillable', False) for item in data]
     
     # Create cumulative values for waterfall effect
     cumulative = np.cumsum([0] + values[:-1])
     
-    # Color scheme based on level
+    # Color scheme based on level and drillability
     color_schemes = {
-        1: ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd'],  # Main sections
-        2: ['#aec7e8', '#ffbb78', '#98df8a', '#ff9896', '#c5b0d5'],  # Subcategories  
-        3: ['#c6dbef', '#fdd0a2', '#c7e9c0', '#ffa8a8', '#dadaeb']   # Items
+        1: ['#2E7D32', '#388E3C', '#43A047', '#4CAF50', '#66BB6A'],  # Main sections (green shades)
+        2: ['#1565C0', '#1976D2', '#1E88E5', '#2196F3', '#42A5F5'],  # Subcategories (blue shades)
+        3: ['#E65100', '#EF6C00', '#F57C00', '#FB8C00', '#FF9800']   # Items (orange shades)
     }
     colors = color_schemes.get(level, color_schemes[1])
     
@@ -189,8 +205,14 @@ def _create_waterfall_chart(data: List[Dict], level: int) -> go.Figure:
     fig = go.Figure()
     
     # Add waterfall bars
-    for i, (category, value, cum_val) in enumerate(zip(categories, values, cumulative)):
+    for i, (category, value, cum_val, is_drillable) in enumerate(zip(categories, values, cumulative, drillable)):
         color = colors[i % len(colors)]
+        
+        # Adjust opacity for drillable items
+        bar_opacity = 0.9 if is_drillable else 0.6
+        hover_text = f'<b>{category}</b><br>Valor: {format_currency(value)}<br>Acumulado: {format_currency(cum_val + value)}'
+        if is_drillable:
+            hover_text += '<br><b>📊 Contém subcategorias</b>'
         
         # Main bar (from cumulative to cumulative + value)
         fig.add_trace(go.Bar(
@@ -198,10 +220,14 @@ def _create_waterfall_chart(data: List[Dict], level: int) -> go.Figure:
             y=[value],
             base=[cum_val],
             name=category,
-            marker_color=color,
+            marker=dict(
+                color=color,
+                opacity=bar_opacity,
+                line=dict(color='white', width=2) if is_drillable else dict(width=0)
+            ),
             text=format_currency(value),
             textposition='auto',
-            hovertemplate=f'<b>{category}</b><br>Valor: {format_currency(value)}<br>Acumulado: {format_currency(cum_val + value)}<extra></extra>',
+            hovertemplate=hover_text + '<extra></extra>',
             showlegend=False
         ))
         
@@ -229,13 +255,17 @@ def _create_waterfall_chart(data: List[Dict], level: int) -> go.Figure:
     
     # Update layout
     fig.update_layout(
-        title=f'Waterfall - {_get_waterfall_level_name(level)}',
+        title=dict(
+            text=f'Análise de Custos - {_get_waterfall_level_name(level)}',
+            x=0.5,
+            xanchor='center'
+        ),
         xaxis=dict(title='Categorias', tickangle=-45),
         yaxis=dict(title='Valor (R$)', tickformat=',.0f'),
         height=500,
         showlegend=True,
         hovermode='closest',
-        plot_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(250,250,250,0.5)',
         paper_bgcolor='rgba(0,0,0,0)'
     )
     
@@ -249,10 +279,10 @@ def _create_waterfall_chart(data: List[Dict], level: int) -> go.Figure:
 def _get_waterfall_level_name(level: int) -> str:
     """Get human-readable name for waterfall level"""
     names = {
-        1: "Seções Principais",
+        1: "Categorias de Custos",
         2: "Subcategorias", 
-        3: "Itens Individuais",
-        4: "Detalhes"
+        3: "Itens Detalhados",
+        4: "Componentes"
     }
     return names.get(level, f"Nível {level}")
 
