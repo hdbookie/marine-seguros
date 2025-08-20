@@ -15,7 +15,10 @@ COLORS = {
     'administrative': '#14B8A6',  # Teal for administrative
     'marketing': '#A855F7',       # Purple for marketing
     'financial': '#6366F1',       # Indigo for financial
-    'non_operational': '#F59E0B'  # Amber for non-operational
+    'non_operational': '#F59E0B',  # Amber for non-operational
+    'primary': '#3B82F6',         # Primary blue
+    'secondary': '#8B5CF6',       # Secondary purple
+    'accent': '#22C55E'           # Accent green
 }
 
 # Group colors
@@ -178,5 +181,6 @@ EXPORT_CONFIGS = {
 CHART_PALETTES = {
     'main': ['#3B82F6', '#EF4444', '#22C55E', '#F59E0B', '#8B5CF6', '#EC4899', '#14B8A6'],
     'costs': ['#F97316', '#EC4899', '#8B5CF6', '#14B8A6', '#6366F1', '#F59E0B', '#EF4444'],
-    'sequential': ['#C7D2FE', '#A5B4FC', '#818CF8', '#6366F1', '#4F46E5', '#4338CA', '#3730A3']
+    'sequential': ['#C7D2FE', '#A5B4FC', '#818CF8', '#6366F1', '#4F46E5', '#4338CA', '#3730A3'],
+    'extended': ['#06B6D4', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#F97316', '#14B8A6']
 }

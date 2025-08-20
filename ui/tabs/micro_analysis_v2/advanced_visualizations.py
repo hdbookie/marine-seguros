@@ -652,3 +652,406 @@ def _render_network_statistics(year_data: Dict):
             for subcat in subcats[:3]:  # Show first 3 subcategories
                 items_count = len(subcat.get('items', []))
                 st.write(f"  └─ {subcat['name']}: {items_count} itens - {format_currency(subcat['value'])}")
+
+
+def render_monthly_waterfall(period_data: Dict, selected_year: int, time_period: str = "📊 Mensal"):
+    """
+    Render an interactive monthly waterfall chart showing month-to-month progression
+    """
+    st.markdown(f"### 🌊 Análise Waterfall - {time_period} {selected_year}")
+    
+    # Extract monthly data from all sections
+    monthly_totals = {}
+    sections_monthly_data = {}
+    
+    # Calculate monthly totals for each section
+    for section in period_data.get('sections', []):
+        section_name = section['name']
+        sections_monthly_data[section_name] = {}
+        
+        # Get monthly data from subcategories and items
+        for month_key in ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 
+                         'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ']:
+            month_total = 0
+            
+            # Sum from subcategories
+            for subcat in section.get('subcategories', []):
+                subcat_monthly = subcat.get('monthly', {})
+                month_total += subcat_monthly.get(month_key, 0)
+                
+                # Sum from items within subcategories
+                for item in subcat.get('items', []):
+                    item_monthly = item.get('monthly', {})
+                    month_total += item_monthly.get(month_key, 0)
+            
+            sections_monthly_data[section_name][month_key] = month_total
+            
+            # Add to overall monthly totals
+            if month_key not in monthly_totals:
+                monthly_totals[month_key] = 0
+            monthly_totals[month_key] += month_total
+    
+    if not monthly_totals:
+        st.warning("Dados mensais não disponíveis para esta análise")
+        return
+    
+    # Create month-to-month waterfall data
+    months = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 
+              'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ']
+    
+    # Calculate changes between consecutive months
+    waterfall_data = []
+    cumulative = 0
+    
+    for i, month in enumerate(months):
+        current_value = monthly_totals.get(month, 0)
+        if i == 0:
+            # First month is the starting point
+            waterfall_data.append({
+                'month': month,
+                'value': current_value,
+                'change': current_value,
+                'cumulative': current_value,
+                'type': 'starting'
+            })
+            cumulative = current_value
+        else:
+            # Calculate change from previous month
+            prev_value = monthly_totals.get(months[i-1], 0)
+            change = current_value - prev_value
+            cumulative = current_value
+            
+            waterfall_data.append({
+                'month': month,
+                'value': current_value,
+                'change': change,
+                'cumulative': cumulative,
+                'type': 'increase' if change >= 0 else 'decrease'
+            })
+    
+    # Create waterfall visualization
+    fig = go.Figure()
+    
+    # Add bars for each month
+    for i, data in enumerate(waterfall_data):
+        if data['type'] == 'starting':
+            # Starting month - show full value
+            fig.add_trace(go.Bar(
+                name=data['month'],
+                x=[data['month']],
+                y=[data['value']],
+                marker_color='#3498db',
+                text=[format_currency(data['value'])],
+                textposition='outside',
+                hovertemplate=f"<b>{data['month']}</b><br>Valor: {format_currency(data['value'])}<extra></extra>"
+            ))
+        else:
+            # Show change from previous month
+            color = '#2ecc71' if data['change'] >= 0 else '#e74c3c'
+            fig.add_trace(go.Bar(
+                name=data['month'],
+                x=[data['month']],
+                y=[data['change']],
+                base=[waterfall_data[i-1]['cumulative']] if data['change'] >= 0 else [data['cumulative']],
+                marker_color=color,
+                text=[f"{'+' if data['change'] >= 0 else ''}{format_currency(data['change'])}"],
+                textposition='outside' if data['change'] >= 0 else 'inside',
+                hovertemplate=f"<b>{data['month']}</b><br>Mudança: {'+' if data['change'] >= 0 else ''}{format_currency(data['change'])}<br>Total: {format_currency(data['cumulative'])}<extra></extra>"
+            ))
+    
+    fig.update_layout(
+        title=f"Progressão Mensal de Despesas - {selected_year}",
+        xaxis_title="Mês",
+        yaxis_title="Valor (R$)",
+        showlegend=False,
+        height=500,
+        hovermode='x unified'
+    )
+    
+    # Format y-axis as currency
+    fig.update_layout(yaxis=dict(tickformat=",.0f"))
+    
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Show monthly insights
+    st.markdown("#### 💡 Insights Mensais")
+    
+    # Find biggest increase and decrease
+    biggest_increase = max(waterfall_data[1:], key=lambda x: x['change'] if x['change'] > 0 else 0)
+    biggest_decrease = min(waterfall_data[1:], key=lambda x: x['change'] if x['change'] < 0 else 0)
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        total_expenses = sum(monthly_totals.values())
+        st.metric("💰 Total Anual", format_currency(total_expenses))
+    
+    with col2:
+        if biggest_increase['change'] > 0:
+            st.metric("📈 Maior Aumento", f"{biggest_increase['month']}", 
+                     f"+{format_currency(biggest_increase['change'])}")
+        else:
+            st.metric("📈 Maior Aumento", "N/A", "R$ 0")
+    
+    with col3:
+        if biggest_decrease['change'] < 0:
+            st.metric("📉 Maior Redução", f"{biggest_decrease['month']}", 
+                     f"{format_currency(biggest_decrease['change'])}")
+        else:
+            st.metric("📉 Maior Redução", "N/A", "R$ 0")
+    
+    # Category breakdown selector
+    st.markdown("#### 🔍 Análise por Categoria")
+    
+    if sections_monthly_data:
+        selected_category = st.selectbox(
+            "Selecione uma categoria para ver progressão mensal:",
+            options=list(sections_monthly_data.keys()),
+            key="waterfall_category_selector"
+        )
+        
+        if selected_category:
+            category_data = sections_monthly_data[selected_category]
+            
+            # Create category-specific waterfall
+            fig_cat = go.Figure()
+            
+            category_monthly_values = [category_data.get(month, 0) for month in months]
+            
+            fig_cat.add_trace(go.Scatter(
+                x=months,
+                y=category_monthly_values,
+                mode='lines+markers',
+                name=selected_category,
+                line=dict(color='#9b59b6', width=3),
+                marker=dict(size=8),
+                text=[format_currency(v) for v in category_monthly_values],
+                hovertemplate=f"<b>{selected_category}</b><br>%{{x}}: %{{text}}<extra></extra>"
+            ))
+            
+            fig_cat.update_layout(
+                title=f"Progressão Mensal - {selected_category}",
+                xaxis_title="Mês",
+                yaxis_title="Valor (R$)",
+                height=400,
+                yaxis=dict(tickformat=",.0f")
+            )
+            
+            st.plotly_chart(fig_cat, use_container_width=True)
+
+
+def render_period_waterfall(period_data: Dict, selected_year: int, time_period: str):
+    """
+    Render waterfall chart for quarterly, semestral, and other time periods
+    """
+    st.markdown(f"### 🌊 Análise Waterfall - {time_period} {selected_year}")
+    
+    # Define period mappings based on time_period
+    period_mappings = {}
+    period_labels = []
+    
+    if time_period == "📈 Trimestral":
+        period_mappings = {
+            'Q1': ['JAN', 'FEV', 'MAR'],
+            'Q2': ['ABR', 'MAI', 'JUN'], 
+            'Q3': ['JUL', 'AGO', 'SET'],
+            'Q4': ['OUT', 'NOV', 'DEZ']
+        }
+        period_labels = ['Q1', 'Q2', 'Q3', 'Q4']
+        period_display_names = ['1º Trimestre', '2º Trimestre', '3º Trimestre', '4º Trimestre']
+        
+    elif time_period == "🗓️ Trimestre Personalizado":
+        period_mappings = {
+            'T1': ['JAN', 'FEV', 'MAR', 'ABR'],
+            'T2': ['MAI', 'JUN', 'JUL', 'AGO'], 
+            'T3': ['SET', 'OUT', 'NOV', 'DEZ']
+        }
+        period_labels = ['T1', 'T2', 'T3']
+        period_display_names = ['1º Período', '2º Período', '3º Período']
+        
+    elif time_period == "📆 Semestral":
+        period_mappings = {
+            'S1': ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN'],
+            'S2': ['JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ']
+        }
+        period_labels = ['S1', 'S2']
+        period_display_names = ['1º Semestre', '2º Semestre']
+        
+    else:  # Default to quarterly for ⚙️ Personalizado and others
+        period_mappings = {
+            'Q1': ['JAN', 'FEV', 'MAR'],
+            'Q2': ['ABR', 'MAI', 'JUN'], 
+            'Q3': ['JUL', 'AGO', 'SET'],
+            'Q4': ['OUT', 'NOV', 'DEZ']
+        }
+        period_labels = ['Q1', 'Q2', 'Q3', 'Q4']
+        period_display_names = ['1º Trimestre', '2º Trimestre', '3º Trimestre', '4º Trimestre']
+    
+    # Extract period data from all sections
+    period_totals = {}
+    sections_period_data = {}
+    
+    # Calculate period totals for each section
+    for section in period_data.get('sections', []):
+        section_name = section['name']
+        sections_period_data[section_name] = {}
+        
+        # Get monthly data and aggregate by periods
+        for period_key, months_in_period in period_mappings.items():
+            period_total = 0
+            
+            # Sum from subcategories
+            for subcat in section.get('subcategories', []):
+                subcat_monthly = subcat.get('monthly', {})
+                for month in months_in_period:
+                    period_total += subcat_monthly.get(month, 0)
+                    
+                # Sum from items within subcategories
+                for item in subcat.get('items', []):
+                    item_monthly = item.get('monthly', {})
+                    for month in months_in_period:
+                        period_total += item_monthly.get(month, 0)
+            
+            sections_period_data[section_name][period_key] = period_total
+            
+            # Add to overall period totals
+            if period_key not in period_totals:
+                period_totals[period_key] = 0
+            period_totals[period_key] += period_total
+    
+    # Create waterfall chart data
+    waterfall_x = []
+    waterfall_y = []
+    waterfall_text = []
+    
+    if not period_totals:
+        st.warning("Nenhum dado disponível para o período selecionado.")
+        return
+    
+    # Sort periods to ensure proper order
+    sorted_periods = [(key, period_totals[key]) for key in period_labels if key in period_totals]
+    
+    # First period (base)
+    if sorted_periods:
+        first_period, first_value = sorted_periods[0]
+        waterfall_x.append(period_display_names[period_labels.index(first_period)])
+        waterfall_y.append(first_value)
+        waterfall_text.append(f"R$ {first_value/1000:.1f}K")
+        
+        # Calculate changes between periods
+        for i in range(1, len(sorted_periods)):
+            current_period, current_value = sorted_periods[i]
+            prev_value = sorted_periods[i-1][1]
+            change = current_value - prev_value
+            
+            waterfall_x.append(period_display_names[period_labels.index(current_period)])
+            waterfall_y.append(change)
+            
+            if change >= 0:
+                waterfall_text.append(f"+R$ {change/1000:.1f}K")
+            else:
+                waterfall_text.append(f"-R$ {abs(change)/1000:.1f}K")
+    
+    # Create waterfall chart
+    fig = go.Figure(go.Waterfall(
+        name=f"Progressão {time_period}",
+        orientation="v",
+        measure=["absolute"] + ["relative"] * (len(waterfall_x) - 1),
+        x=waterfall_x,
+        y=waterfall_y,
+        text=waterfall_text,
+        textposition="outside",
+        connector={"line": {"color": "rgb(63, 63, 63)"}},
+        increasing={"marker": {"color": "#2E8B57"}},  # Sea green for increases
+        decreasing={"marker": {"color": "#DC143C"}},  # Crimson for decreases  
+        totals={"marker": {"color": "#1f77b4"}}       # Blue for base values
+    ))
+    
+    fig.update_layout(
+        title=f"Progressão {time_period.replace('📈', '').replace('🗓️', '').replace('📆', '').strip()} de Despesas - {selected_year}",
+        xaxis_title="Período",
+        yaxis_title="Valor (R$)",
+        height=500,
+        hovermode='x unified'
+    )
+    
+    # Format y-axis as currency
+    fig.update_layout(yaxis=dict(tickformat=",.0f"))
+    
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Show period insights
+    st.markdown("#### 💡 Insights por Período")
+    
+    if len(sorted_periods) >= 2:
+        # Calculate insights
+        total_annual = sum(value for _, value in sorted_periods)
+        
+        # Find biggest increase and decrease
+        biggest_increase = max((sorted_periods[i][1] - sorted_periods[i-1][1], i) for i in range(1, len(sorted_periods)))
+        biggest_decrease = min((sorted_periods[i][1] - sorted_periods[i-1][1], i) for i in range(1, len(sorted_periods)))
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.metric("💰 Total Anual", f"R$ {total_annual/1000000:.2f}M")
+        
+        with col2:
+            if biggest_increase[0] > 0:
+                increase_period = period_display_names[biggest_increase[1]]
+                st.metric("📈 Maior Aumento", increase_period, f"+R$ {biggest_increase[0]/1000:.1f}K")
+            else:
+                st.metric("📈 Maior Aumento", "N/A", "R$ 0")
+        
+        with col3:
+            if biggest_decrease[0] < 0:
+                decrease_period = period_display_names[biggest_decrease[1]]
+                st.metric("📉 Maior Redução", decrease_period, f"-R$ {abs(biggest_decrease[0])/1000:.1f}K")
+            else:
+                st.metric("📉 Maior Redução", "N/A", "R$ 0")
+    
+    # Category analysis dropdown
+    st.markdown("#### 🔍 Análise por Categoria")
+    
+    # Get available categories
+    available_categories = [section['name'] for section in period_data.get('sections', [])]
+    
+    if available_categories:
+        selected_category = st.selectbox(
+            "Selecione uma categoria para ver progressão por período:",
+            available_categories
+        )
+        
+        # Show category progression
+        if selected_category in sections_period_data:
+            category_data = sections_period_data[selected_category]
+            
+            # Create category-specific chart
+            cat_x = []
+            cat_y = []
+            
+            for period_key in period_labels:
+                if period_key in category_data:
+                    cat_x.append(period_display_names[period_labels.index(period_key)])
+                    cat_y.append(category_data[period_key])
+            
+            fig_cat = go.Figure()
+            fig_cat.add_trace(go.Bar(
+                x=cat_x,
+                y=cat_y,
+                name=selected_category,
+                marker_color='#3498db',
+                text=[f"R$ {val/1000:.1f}K" for val in cat_y],
+                textposition='outside'
+            ))
+            
+            fig_cat.update_layout(
+                title=f"Progressão {time_period.replace('📈', '').replace('🗓️', '').replace('📆', '').strip()} - {selected_category}",
+                xaxis_title="Período",
+                yaxis_title="Valor (R$)",
+                height=400
+            )
+            
+            fig_cat.update_layout(yaxis=dict(tickformat=",.0f"))
+            
+            st.plotly_chart(fig_cat, use_container_width=True)

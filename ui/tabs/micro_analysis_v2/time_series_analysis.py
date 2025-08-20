@@ -79,7 +79,7 @@ def _render_trends_and_seasonality(financial_data: Dict, selected_years: List[in
     
     # Filter data for selected category
     category_data = time_series_data[time_series_data['category'] == selected_category].copy()
-    category_data['date'] = pd.to_datetime(category_data[['year', 'month_num']].assign(day=1))
+    category_data['date'] = pd.to_datetime(category_data[['year', 'month_num']].assign(day=1).rename(columns={'month_num': 'month'}))
     category_data = category_data.sort_values('date')
     
     # Create trend analysis
@@ -271,7 +271,7 @@ def _render_anomaly_detection(financial_data: Dict, selected_years: List[int]):
     )
     
     category_data = time_series_data[time_series_data['category'] == selected_category].copy()
-    category_data['date'] = pd.to_datetime(category_data[['year', 'month_num']].assign(day=1))
+    category_data['date'] = pd.to_datetime(category_data[['year', 'month_num']].assign(day=1).rename(columns={'month_num': 'month'}))
     category_data = category_data.sort_values('date').reset_index(drop=True)
     
     if len(category_data) < 6:
@@ -440,7 +440,7 @@ def _render_forecasting_analysis(financial_data: Dict, selected_years: List[int]
     )
     
     category_data = time_series_data[time_series_data['category'] == selected_category].copy()
-    category_data['date'] = pd.to_datetime(category_data[['year', 'month_num']].assign(day=1))
+    category_data['date'] = pd.to_datetime(category_data[['year', 'month_num']].assign(day=1).rename(columns={'month_num': 'month'}))
     category_data = category_data.sort_values('date')
     
     if len(category_data) < 6:

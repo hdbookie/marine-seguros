@@ -71,10 +71,9 @@ def render_micro_analysis_v2_tab(financial_data: Dict = None):
     # Simplified interface - controls moved to individual tabs
     # Remove duplicate filters and navigation for cleaner UX
     
-    # Create tabs for different views
-    tab1, tab2, tab3, tab4 = st.tabs([
+    # Create tabs for different views - removed redundant "Comparação Anual" tab
+    tab1, tab2, tab3 = st.tabs([
         "🏗️ Excel Nativa",
-        "📊 Comparação Anual",
         "🎯 Drill-Down Interativo",
         "💡 Insights"
     ])
@@ -87,17 +86,9 @@ def render_micro_analysis_v2_tab(financial_data: Dict = None):
             st.info("Estrutura nativa do Excel não disponível. Faça upload de arquivos Excel.")
     
     with tab2:
-        # Year comparison using native hierarchy
         if excel_hierarchy_data:
-            render_year_comparison(excel_hierarchy_data)
-        else:
-            st.info("Comparação anual requer dados da estrutura nativa do Excel.")
-    
-    with tab3:
-        if excel_hierarchy_data:
-            # Use aggregated data from Excel hierarchy for drill-down
-            aggregated_data = _aggregate_selected_years(excel_hierarchy_data, list(excel_hierarchy_data.keys()))
-            _render_interactive_drilldown(aggregated_data)
+            # Pass Excel hierarchy data directly to drill-down
+            _render_interactive_drilldown(excel_hierarchy_data)
         else:
             st.info("Drill-down interativo requer dados da estrutura nativa do Excel.")
     
@@ -753,9 +744,34 @@ def _render_temporal_analysis(financial_data: Dict, selected_years: List[int]):
     st.plotly_chart(fig, use_container_width=True)
 
 
-def _render_interactive_drilldown(aggregated_data: Dict):
+def _render_interactive_drilldown(excel_hierarchy_data: Dict):
     """Render interactive drill-down analysis"""
     st.markdown("### 🎯 Drill-Down Interativo")
+    
+    # Get available years and select the latest one for drill-down
+    available_years = sorted([year for year in excel_hierarchy_data.keys() if isinstance(year, int)])
+    if not available_years:
+        st.warning("Nenhum dado disponível para drill-down")
+        return
+    
+    selected_year = available_years[-1]  # Use latest year
+    year_data = excel_hierarchy_data[selected_year]
+    
+    # Apply hierarchy consolidation to fix misplaced items
+    from utils.hierarchy_consolidator import HierarchyConsolidator
+    consolidator = HierarchyConsolidator()
+    year_data = consolidator.consolidate_year_data(year_data)
+    
+    if 'sections' not in year_data:
+        st.warning("Dados de seções não encontrados")
+        return
+    
+    # Filter out revenue sections to focus on costs
+    revenue_categories = ['FATURAMENTO', 'RECEITA', 'RECEITAS', 'Outras receitas/creditos']
+    sections = [
+        section for section in year_data['sections']
+        if section.get('name', '').upper() not in [cat.upper() for cat in revenue_categories]
+    ]
     
     # Create columns for navigation
     col1, col2 = st.columns([1, 2])
@@ -764,71 +780,90 @@ def _render_interactive_drilldown(aggregated_data: Dict):
         st.markdown("#### Navegação")
         
         # Level 1: Main categories
-        main_cats = list(aggregated_data['hierarchy'].keys())
+        main_cats = [(section.get('name'), i) for i, section in enumerate(sections)]
         selected_main = st.selectbox(
             "Categoria Principal",
-            [""] + main_cats,
-            format_func=lambda x: aggregated_data['hierarchy'][x]['name'] if x else "Selecione...",
+            [("", -1)] + main_cats,
+            format_func=lambda x: x[0] if x[0] else "Selecione...",
             key="drill_main"
         )
         
         # Level 2: Subcategories
-        if selected_main:
-            subcats = list(aggregated_data['hierarchy'][selected_main]['subcategories'].keys())
+        if selected_main and selected_main[1] >= 0:
+            section_data = sections[selected_main[1]]
+            subcats = [(subcat.get('name'), i) for i, subcat in enumerate(section_data.get('subcategories', []))]
             selected_sub = st.selectbox(
                 "Subcategoria",
-                [""] + subcats,
-                format_func=lambda x: aggregated_data['hierarchy'][selected_main]['subcategories'][x]['name'] if x else "Todas",
+                [("", -1)] + subcats,
+                format_func=lambda x: x[0] if x[0] else "Todas",
                 key="drill_sub"
             )
         else:
             selected_sub = None
         
-        # Level 3: Detail categories
-        if selected_main and selected_sub:
-            detail_cats = list(aggregated_data['hierarchy'][selected_main]['subcategories'][selected_sub].get('detail_categories', {}).keys())
-            if detail_cats:
-                selected_detail = st.selectbox(
-                    "Categoria Detalhada",
-                    [""] + detail_cats,
-                    format_func=lambda x: x.title() if x else "Todas",
-                    key="drill_detail"
+        # Level 3: Items within subcategory
+        if selected_main and selected_main[1] >= 0 and selected_sub and selected_sub[1] >= 0:
+            section_data = sections[selected_main[1]]
+            subcat_data = section_data['subcategories'][selected_sub[1]]
+            items = [(item.get('name'), i) for i, item in enumerate(subcat_data.get('items', []))]
+            if items:
+                selected_item = st.selectbox(
+                    "Item Específico",
+                    [("", -1)] + items,
+                    format_func=lambda x: x[0] if x[0] else "Todos",
+                    key="drill_item"
                 )
             else:
-                selected_detail = None
+                selected_item = None
         else:
-            selected_detail = None
+            selected_item = None
     
     with col2:
         st.markdown("#### Detalhes")
         
-        if selected_main:
-            main_data = aggregated_data['hierarchy'][selected_main]
+        if selected_main and selected_main[1] >= 0:
+            section_data = sections[selected_main[1]]
             
             # Show main category info
-            st.markdown(f"**{main_data['name']}**")
-            st.metric("Total", format_currency(main_data['total']))
+            st.markdown(f"**{section_data['name']}**")
+            st.metric("Total", format_currency(section_data.get('value', 0)))
             
-            if selected_sub:
-                sub_data = main_data['subcategories'][selected_sub]
-                st.markdown(f"**{sub_data['name']}**")
-                st.metric("Subtotal", format_currency(sub_data['total']))
+            if selected_sub and selected_sub[1] >= 0:
+                subcat_data = section_data['subcategories'][selected_sub[1]]
+                st.markdown(f"**{subcat_data['name']}**")
+                st.metric("Subtotal", format_currency(subcat_data.get('value', 0)))
                 
-                if selected_detail and selected_detail in sub_data.get('detail_categories', {}):
-                    detail_data = sub_data['detail_categories'][selected_detail]
-                    st.markdown(f"**{detail_data['name']}**")
-                    st.metric("Total Detalhado", format_currency(detail_data['total']))
+                if selected_item and selected_item[1] >= 0:
+                    item_data = subcat_data['items'][selected_item[1]]
+                    st.markdown(f"**{item_data['name']}**")
+                    st.metric("Valor do Item", format_currency(item_data.get('value', 0)))
                     
-                    # Show items
-                    st.markdown("**Itens:**")
-                    for item in detail_data['items'][:10]:  # Show first 10 items
-                        st.write(f"- {item['label']}: {format_currency(item['annual'])}")
+                    # Show monthly breakdown if available
+                    if 'monthly' in item_data:
+                        st.markdown("**Distribuição Mensal:**")
+                        monthly_data = item_data['monthly']
+                        for month, value in monthly_data.items():
+                            if value > 0:
+                                st.write(f"- {month}: {format_currency(value)}")
                 else:
                     # Show subcategory items
-                    st.markdown("**Top 10 Itens:**")
-                    items_sorted = sorted(sub_data['items'], key=lambda x: x['annual'], reverse=True)
-                    for item in items_sorted[:10]:
-                        st.write(f"- {item['label']}: {format_currency(item['annual'])}")
+                    st.markdown("**Itens nesta subcategoria:**")
+                    items = subcat_data.get('items', [])
+                    if items:
+                        items_sorted = sorted(items, key=lambda x: x.get('value', 0), reverse=True)
+                        for item in items_sorted[:10]:  # Show top 10 items
+                            st.write(f"- {item['name']}: {format_currency(item.get('value', 0))}")
+                    else:
+                        st.info("Nenhum item encontrado nesta subcategoria")
+            else:
+                # Show subcategories in this section
+                st.markdown("**Subcategorias:**")
+                subcategories = section_data.get('subcategories', [])
+                if subcategories:
+                    for subcat in subcategories:
+                        st.write(f"- {subcat['name']}: {format_currency(subcat.get('value', 0))}")
+                else:
+                    st.info("Nenhuma subcategoria encontrada nesta seção")
 
 
 def _render_insights(aggregated_data: Dict):

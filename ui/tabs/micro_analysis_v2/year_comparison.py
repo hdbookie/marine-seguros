@@ -9,6 +9,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 from typing import Dict, List, Optional, Any
 from utils import format_currency
+from utils.hierarchy_consolidator import HierarchyConsolidator
 
 
 def render_year_comparison(financial_data: Dict):
@@ -47,6 +48,11 @@ def render_year_comparison(financial_data: Dict):
     # Get data for both years
     base_data = financial_data[base_year]
     compare_data = financial_data[compare_year]
+    
+    # Apply consolidation to fix hierarchy issues like Energia Elétrica
+    consolidator = HierarchyConsolidator()
+    base_data = consolidator.consolidate_year_data(base_data)
+    compare_data = consolidator.consolidate_year_data(compare_data)
     
     # Visualization selector
     st.markdown("---")

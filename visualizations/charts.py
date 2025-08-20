@@ -2579,11 +2579,14 @@ def create_pnl_waterfall_chart(df, title="Demonstrativo de Resultados (Cascata)"
     """Create a P&L waterfall chart"""
     
     last_year_data = df.iloc[-1]
-    cost_categories = ['variable_costs', 'fixed_costs', 'non_operational_costs', 'taxes', 'commissions', 'administrative_expenses', 'marketing_expenses', 'financial_expenses']
+    all_cost_categories = ['variable_costs', 'fixed_costs', 'non_operational_costs', 'taxes', 'commissions', 'administrative_expenses', 'marketing_expenses', 'financial_expenses']
+    
+    # Filter to only include categories that exist in the data
+    cost_categories = [cat for cat in all_cost_categories if cat in df.columns and pd.notna(last_year_data.get(cat, 0))]
     
     measures = ["absolute"] * (len(cost_categories) + 2)
     x_labels = ["Receita"] + [cat.replace('_', ' ').title() for cat in cost_categories] + ["Lucro Líquido"]
-    y_values = [last_year_data['revenue']] + [-last_year_data[cat] for cat in cost_categories] + [last_year_data['net_profit']]
+    y_values = [last_year_data['revenue']] + [-last_year_data.get(cat, 0) for cat in cost_categories] + [last_year_data.get('net_profit', 0)]
     
     fig = go.Figure(go.Waterfall(
         name = "2025",

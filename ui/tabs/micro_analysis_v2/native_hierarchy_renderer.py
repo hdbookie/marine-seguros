@@ -9,6 +9,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 from typing import Dict, List, Optional, Any
 from utils import format_currency
+from utils.hierarchy_consolidator import HierarchyConsolidator
 from .year_comparison import render_year_comparison
 
 
@@ -101,8 +102,16 @@ def render_native_hierarchy_tab(financial_data: Dict, full_financial_data: Dict 
     # Get period-aware data
     period_data = _get_period_data(year_data, time_period)
     
+    # Apply hierarchy consolidation to fix misplaced items like Energia Elétrica
+    consolidator = HierarchyConsolidator()
+    period_data = consolidator.consolidate_year_data(period_data)
+    
     # Prepare multi-year data for comparison views
     multi_year_data = {year: _get_period_data(financial_data[year], time_period) for year in selected_years}
+    
+    # Apply hierarchy consolidation to fix misplaced items like Energia Elétrica
+    consolidator = HierarchyConsolidator()
+    multi_year_data = {year: consolidator.consolidate_year_data(data) for year, data in multi_year_data.items()}
     
     # Render selected visualization
     st.markdown("---")
@@ -128,10 +137,13 @@ def render_native_hierarchy_tab(financial_data: Dict, full_financial_data: Dict 
         if time_period == "📅 Anual":
             from .advanced_visualizations import render_waterfall_drilldown
             render_waterfall_drilldown({selected_year: period_data}, selected_year)
+        elif time_period == "📊 Mensal":
+            from .advanced_visualizations import render_monthly_waterfall
+            render_monthly_waterfall(period_data, selected_year, time_period)
         else:
-            st.info(f"🚧 Waterfall em desenvolvimento para visualização {time_period}")
-            # Fallback: show composition for now
-            _render_composition_chart(period_data)
+            # Handle quarterly, semestral, and other time periods
+            from .advanced_visualizations import render_period_waterfall
+            render_period_waterfall(period_data, selected_year, time_period)
         
         # Add composition chart for context
         if show_details:
@@ -1793,7 +1805,9 @@ def _render_multi_year_comparison(multi_year_data: Dict, selected_years: List[in
     """
     Render comparison between multiple years with side-by-side sparklines
     """
-    st.header("📊 Comparação Mensal Entre Anos")
+    # Dynamic header based on time period
+    period_name = time_period.replace('📈 ', '').replace('📊 ', '').replace('📆 ', '')
+    st.header(f"📊 Comparação {period_name} Entre Anos")
     
     if len(selected_years) < 2:
         st.warning("Selecione pelo menos 2 anos para comparação.")
@@ -1804,8 +1818,8 @@ def _render_multi_year_comparison(multi_year_data: Dict, selected_years: List[in
     year_range_text = f"{min(sorted_years)} - {max(sorted_years)}"
     st.info(f"🔍 Comparando: {', '.join(map(str, sorted_years))}")
     
-    # Get chart type preference
-    chart_type = "📈 Linha" if time_period == "📊 Mensal" else "📊 Barras"
+    # Get chart type preference - use line charts for all time periods to show progression
+    chart_type = "📈 Linha"
     
     # Filter to expense sections only
     expense_data = {}
@@ -1933,9 +1947,11 @@ def _render_side_by_side_sparklines(expense_data: Dict, selected_years: List[int
                     else:
                         st.metric(f"{year}", "R$ 0")
             
-            # Monthly comparison if data available  
+            # Period comparison if data available  
             if time_period == "📊 Mensal":
                 _render_monthly_section_comparison(section_data, selected_years, year_colors, chart_type)
+            elif time_period in ["📈 Trimestral", "📆 Semestral", "📅 Customizado"]:
+                _render_period_section_comparison(section_data, selected_years, year_colors, chart_type, time_period)
             
             # Show subcategories comparison
             _render_subcategories_comparison(section_data, selected_years, time_period, year_colors)
@@ -2028,6 +2044,121 @@ def _render_monthly_section_comparison(section_data: Dict, selected_years: List[
     st.plotly_chart(fig, use_container_width=True)
 
 
+def _render_period_section_comparison(section_data: Dict, selected_years: List[int], year_colors: Dict, chart_type: str, time_period: str):
+    """
+    Render period comparison (quarterly, semestral, etc.) for a single section across years
+    """
+    
+    # Define period mappings based on time_period
+    if time_period == "📈 Trimestral":
+        period_mappings = {
+            'Q1': ['JAN', 'FEV', 'MAR'],
+            'Q2': ['ABR', 'MAI', 'JUN'], 
+            'Q3': ['JUL', 'AGO', 'SET'],
+            'Q4': ['OUT', 'NOV', 'DEZ']
+        }
+        period_labels = ['Q1', 'Q2', 'Q3', 'Q4']
+    elif time_period == "📆 Semestral":
+        period_mappings = {
+            'S1': ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN'],
+            'S2': ['JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ']
+        }
+        period_labels = ['S1', 'S2']
+    else:  # Custom periods
+        # Default to quarterly for custom
+        period_mappings = {
+            'T1': ['JAN', 'FEV', 'MAR'],
+            'T2': ['ABR', 'MAI', 'JUN'], 
+            'T3': ['JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ']
+        }
+        period_labels = ['T1', 'T2', 'T3']
+    
+    fig = go.Figure()
+    
+    # Collect data for each year
+    all_year_data = {}
+    for year in selected_years:
+        if year in section_data:
+            section = section_data[year]
+            monthly_data = section.get('monthly', {})
+            
+            # Aggregate monthly data to periods
+            period_values = []
+            for period in period_labels:
+                period_total = 0
+                months_in_period = period_mappings.get(period, [])
+                for month in months_in_period:
+                    period_total += monthly_data.get(month, 0)
+                period_values.append(period_total)
+            
+            all_year_data[year] = period_values
+            
+            # Create hover text for each period
+            hover_text = []
+            yearly_total = sum(period_values)
+            
+            for i, (period, value) in enumerate(zip(period_labels, period_values)):
+                text = f"<b>{period} - {year}</b><br>"
+                text += f"<b>Valor:</b> R$ {value:,.2f}<br>"
+                
+                # Add percentage of year total
+                if yearly_total > 0:
+                    pct = (value / yearly_total) * 100
+                    text += f"<b>% do Ano:</b> {pct:.1f}%<br>"
+                
+                # Add period-over-period change
+                if i > 0 and period_values[i-1] > 0:
+                    pop_change = ((value - period_values[i-1]) / period_values[i-1]) * 100
+                    text += f"<b>Var. Período Anterior:</b> {pop_change:+.1f}%<br>"
+                
+                # Add year-over-year change if we have previous year data
+                prev_year = year - 1
+                if prev_year in all_year_data:
+                    prev_value = all_year_data[prev_year][i]
+                    if prev_value > 0:
+                        yoy_change = ((value - prev_value) / prev_value) * 100
+                        text += f"<b>Var. {prev_year}:</b> {yoy_change:+.1f}%"
+                    elif value > 0:
+                        text += f"<b>Var. {prev_year}:</b> Novo"
+                
+                hover_text.append(text)
+            
+            if chart_type == "📈 Linha":
+                fig.add_trace(go.Scatter(
+                    x=period_labels,
+                    y=period_values,
+                    mode='lines+markers',
+                    name=str(year),
+                    line=dict(color=year_colors.get(year, '#1f77b4'), width=2),
+                    marker=dict(size=8),
+                    hovertemplate='%{customdata}<extra></extra>',
+                    customdata=hover_text
+                ))
+            else:  # Bar chart
+                fig.add_trace(go.Bar(
+                    x=period_labels,
+                    y=period_values,
+                    name=str(year),
+                    marker=dict(color=year_colors.get(year, '#1f77b4')),
+                    hovertemplate='%{customdata}<extra></extra>',
+                    customdata=hover_text
+                ))
+    
+    # Configure layout
+    period_type = time_period.replace('📈 ', '').replace('📆 ', '').replace('📅 ', '')
+    fig.update_layout(
+        title=f"Evolução {period_type}",
+        xaxis_title=f"Períodos {period_type}",
+        yaxis_title="Valor (R$)",
+        hovermode='x unified',
+        showlegend=True,
+        height=400,
+        yaxis=dict(tickformat=",.0f")
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+
+
 def _render_subcategories_comparison(section_data: Dict, selected_years: List[int], time_period: str, year_colors: Dict):
     """
     Render subcategories comparison across years
@@ -2039,6 +2170,10 @@ def _render_subcategories_comparison(section_data: Dict, selected_years: List[in
     for section in section_data.values():
         subcats = section.get('subcategories', [])
         all_subcats.update(sub['name'] for sub in subcats)
+    
+    # Debug: Print what subcategories we found for this section
+    section_names = [section.get('name', 'unknown') for section in section_data.values()]
+    print(f"DEBUG: Subcategories in section(s) {section_names}: {sorted(all_subcats)}")
     
     if not all_subcats:
         st.info("Nenhuma subcategoria encontrada")
@@ -2138,9 +2273,117 @@ def _render_subcategories_comparison(section_data: Dict, selected_years: List[in
                             st.metric("Variação", f"{change_pct:+.1f}%")
                         else:
                             st.metric("Variação", "Novo" if val2 > 0 else "N/A")
+                
+                # Add period progression chart for non-monthly time periods
+                if time_period in ["📈 Trimestral", "📆 Semestral", "📅 Customizado"]:
+                    st.markdown(f"**Evolução {time_period.replace('📈 ', '').replace('📆 ', '').replace('📅 ', '')} - {subcat_name}**")
+                    _render_subcategory_period_comparison(section_data, selected_years, subcat_name, year_colors, time_period)
             
             # Show individual items if available
             _render_items_comparison(section_data, selected_years, subcat_name, time_period, year_colors)
+
+
+def _render_subcategory_period_comparison(section_data: Dict, selected_years: List[int], subcat_name: str, year_colors: Dict, time_period: str):
+    """
+    Render period progression chart for subcategory comparison
+    """
+    # Define period mappings based on time_period
+    if time_period == "📈 Trimestral":
+        period_mappings = {
+            'Q1': ['JAN', 'FEV', 'MAR'],
+            'Q2': ['ABR', 'MAI', 'JUN'], 
+            'Q3': ['JUL', 'AGO', 'SET'],
+            'Q4': ['OUT', 'NOV', 'DEZ']
+        }
+        period_labels = ['Q1', 'Q2', 'Q3', 'Q4']
+    elif time_period == "📆 Semestral":
+        period_mappings = {
+            'S1': ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN'],
+            'S2': ['JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ']
+        }
+        period_labels = ['S1', 'S2']
+    else:  # Custom periods
+        period_mappings = {
+            'T1': ['JAN', 'FEV', 'MAR'],
+            'T2': ['ABR', 'MAI', 'JUN'], 
+            'T3': ['JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ']
+        }
+        period_labels = ['T1', 'T2', 'T3']
+    
+    fig = go.Figure()
+    
+    # Collect data for each year
+    for year in selected_years:
+        if year in section_data:
+            # Find the subcategory in this year's data
+            subcats = section_data[year].get('subcategories', [])
+            subcat = next((s for s in subcats if s['name'] == subcat_name), None)
+            
+            if subcat:
+                monthly_data = subcat.get('monthly', {})
+                
+                if monthly_data:
+                    # Aggregate monthly data to periods
+                    period_values = []
+                    for period in period_labels:
+                        period_total = 0
+                        months_in_period = period_mappings.get(period, [])
+                        for month in months_in_period:
+                            period_total += monthly_data.get(month, 0)
+                        period_values.append(period_total)
+                    
+                    # Create hover text for each period
+                    hover_text = []
+                    yearly_total = sum(period_values)
+                    
+                    for i, (period, value) in enumerate(zip(period_labels, period_values)):
+                        text = f"<b>{period} - {year}</b><br>"
+                        text += f"<b>{subcat_name}</b><br>"
+                        text += f"<b>Valor:</b> R$ {value:,.2f}<br>"
+                        
+                        # Add percentage of year total
+                        if yearly_total > 0:
+                            pct = (value / yearly_total) * 100
+                            text += f"<b>% do Ano:</b> {pct:.1f}%<br>"
+                        
+                        # Add period-over-period change
+                        if i > 0 and period_values[i-1] > 0:
+                            pop_change = ((value - period_values[i-1]) / period_values[i-1]) * 100
+                            text += f"<b>Var. Período Anterior:</b> {pop_change:+.1f}%"
+                        
+                        hover_text.append(text)
+                    
+                    # Add line trace for this year
+                    fig.add_trace(go.Scatter(
+                        x=period_labels,
+                        y=period_values,
+                        mode='lines+markers',
+                        name=str(year),
+                        line=dict(color=year_colors.get(year, '#1f77b4'), width=2),
+                        marker=dict(size=6),
+                        hovertemplate='%{customdata}<extra></extra>',
+                        customdata=hover_text
+                    ))
+    
+    # Configure layout
+    period_type = time_period.replace('📈 ', '').replace('📆 ', '').replace('📅 ', '')
+    fig.update_layout(
+        title=None,  # No title since we already have the markdown title
+        xaxis_title=f"Períodos {period_type}",
+        yaxis_title="Valor (R$)",
+        hovermode='x unified',
+        showlegend=True,
+        height=300,
+        margin=dict(t=20, b=50, l=50, r=20),
+        yaxis=dict(tickformat=",.0f")
+    )
+    
+    # Create unique key for plotly chart to avoid conflicts
+    section_name = next(iter(section_data.values())).get('name', 'unknown')
+    safe_section = section_name.replace(' ', '_').replace('/', '_')
+    safe_subcat = subcat_name.replace(' ', '_').replace('/', '_')
+    
+    st.plotly_chart(fig, use_container_width=True, key=f"subcat_period_{safe_section}_{safe_subcat}")
 
 
 def _render_items_comparison(section_data: Dict, selected_years: List[int], subcat_name: str, time_period: str, year_colors: Dict):
@@ -2271,6 +2514,141 @@ def _render_items_comparison(section_data: Dict, selected_years: List[int], subc
                 df[str(year)] = df[str(year)].apply(lambda x: format_currency(x))
             
             st.dataframe(df, use_container_width=True, hide_index=True)
+            
+            # Add period progression charts for individual items in non-monthly periods
+            if time_period in ["📈 Trimestral", "📆 Semestral", "📅 Customizado"]:
+                st.markdown(f"**📊 Evolução {time_period.replace('📈 ', '').replace('📆 ', '').replace('📅 ', '')} por Item**")
+                
+                # Create individual charts for items with significant values
+                items_with_data = []
+                for item_name in sorted(all_items):
+                    # Check if item has meaningful data across years
+                    total_value = 0
+                    for year in selected_years:
+                        if year in subcat_data:
+                            items = subcat_data[year].get('items', [])
+                            item = next((i for i in items if i['name'] == item_name), None)
+                            if item:
+                                total_value += item.get('value', 0)
+                    
+                    if total_value > 1000:  # Only show items with meaningful values (> R$ 1000)
+                        items_with_data.append(item_name)
+                
+                # Render period charts for significant items
+                for item_name in items_with_data[:5]:  # Limit to top 5 items to avoid clutter
+                    with st.expander(f"📈 {item_name} - Evolução {time_period.replace('📈 ', '').replace('📆 ', '').replace('📅 ', '')}", expanded=False):
+                        _render_item_period_comparison(subcat_data, selected_years, item_name, year_colors, time_period, section_data, subcat_name)
+
+
+def _render_item_period_comparison(subcat_data: Dict, selected_years: List[int], item_name: str, year_colors: Dict, time_period: str, section_data: Dict, subcat_name: str):
+    """
+    Render period progression chart for individual item comparison
+    """
+    # Define period mappings based on time_period
+    if time_period == "📈 Trimestral":
+        period_mappings = {
+            'Q1': ['JAN', 'FEV', 'MAR'],
+            'Q2': ['ABR', 'MAI', 'JUN'], 
+            'Q3': ['JUL', 'AGO', 'SET'],
+            'Q4': ['OUT', 'NOV', 'DEZ']
+        }
+        period_labels = ['Q1', 'Q2', 'Q3', 'Q4']
+    elif time_period == "📆 Semestral":
+        period_mappings = {
+            'S1': ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN'],
+            'S2': ['JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ']
+        }
+        period_labels = ['S1', 'S2']
+    else:  # Custom periods
+        period_mappings = {
+            'T1': ['JAN', 'FEV', 'MAR'],
+            'T2': ['ABR', 'MAI', 'JUN'], 
+            'T3': ['JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ']
+        }
+        period_labels = ['T1', 'T2', 'T3']
+    
+    fig = go.Figure()
+    has_data = False
+    
+    # Collect data for each year
+    for year in selected_years:
+        if year in subcat_data:
+            # Find the item in this year's subcategory data
+            items = subcat_data[year].get('items', [])
+            item = next((i for i in items if i['name'] == item_name), None)
+            
+            if item:
+                monthly_data = item.get('monthly', {})
+                
+                if monthly_data:
+                    # Aggregate monthly data to periods
+                    period_values = []
+                    for period in period_labels:
+                        period_total = 0
+                        months_in_period = period_mappings.get(period, [])
+                        for month in months_in_period:
+                            period_total += monthly_data.get(month, 0)
+                        period_values.append(period_total)
+                    
+                    if any(v > 0 for v in period_values):
+                        has_data = True
+                        
+                        # Create hover text for each period
+                        hover_text = []
+                        yearly_total = sum(period_values)
+                        
+                        for i, (period, value) in enumerate(zip(period_labels, period_values)):
+                            text = f"<b>{period} - {year}</b><br>"
+                            text += f"<b>{item_name}</b><br>"
+                            text += f"<b>Valor:</b> R$ {value:,.2f}<br>"
+                            
+                            # Add percentage of year total
+                            if yearly_total > 0:
+                                pct = (value / yearly_total) * 100
+                                text += f"<b>% do Ano:</b> {pct:.1f}%<br>"
+                            
+                            # Add period-over-period change
+                            if i > 0 and period_values[i-1] > 0:
+                                pop_change = ((value - period_values[i-1]) / period_values[i-1]) * 100
+                                text += f"<b>Var. Período Anterior:</b> {pop_change:+.1f}%"
+                            
+                            hover_text.append(text)
+                        
+                        # Add line trace for this year
+                        fig.add_trace(go.Scatter(
+                            x=period_labels,
+                            y=period_values,
+                            mode='lines+markers',
+                            name=str(year),
+                            line=dict(color=year_colors.get(year, '#1f77b4'), width=2),
+                            marker=dict(size=6),
+                            hovertemplate='%{customdata}<extra></extra>',
+                            customdata=hover_text
+                        ))
+    
+    if has_data:
+        # Configure layout
+        period_type = time_period.replace('📈 ', '').replace('📆 ', '').replace('📅 ', '')
+        fig.update_layout(
+            title=None,  # No title since we already have the expander title
+            xaxis_title=f"Períodos {period_type}",
+            yaxis_title="Valor (R$)",
+            hovermode='x unified',
+            showlegend=True,
+            height=250,
+            margin=dict(t=20, b=40, l=40, r=20),
+            yaxis=dict(tickformat=",.0f")
+        )
+        
+        # Create unique key for plotly chart to avoid conflicts
+        section_name = next(iter(section_data.values())).get('name', 'unknown')
+        safe_section = section_name.replace(' ', '_').replace('/', '_')
+        safe_subcat = subcat_name.replace(' ', '_').replace('/', '_')
+        safe_item = item_name.replace(' ', '_').replace('/', '_')
+        
+        st.plotly_chart(fig, use_container_width=True, key=f"item_period_{safe_section}_{safe_subcat}_{safe_item}")
+    else:
+        st.info(f"Sem dados mensais disponíveis para agregação {time_period.replace('📈 ', '').replace('📆 ', '').replace('📅 ', '')} de {item_name}")
 
 
 def _render_section_comparison(expense_data: Dict, selected_years: List[int], all_sections: set):
