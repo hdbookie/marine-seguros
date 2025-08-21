@@ -31,3 +31,22 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+
+# Database files
+auth.db
+auth.db-*
+*.db-shm
+*.db-wal
+dashboard.db
+dashboard.db-*
+
+# Playwright screenshots
+.playwright-mcp/
+*.png
+
+# Debug and test files
+check_*.py
+debug_*.py
+test_*.py
+!test_hierarchy.py
+!test_minimal.py
