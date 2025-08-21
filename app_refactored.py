@@ -38,10 +38,11 @@ from ui.tabs.dashboard_legacy_tab import render_dashboard_tab
 from ui.tabs.enhanced_dashboard_tab import render_enhanced_dashboard_tab
 from ui.tabs.micro_analysis import render_micro_analysis_tab
 from ui.tabs.micro_analysis_v2 import render_micro_analysis_v2_tab
-from ui.tabs.ai_insights_legacy_tab import render_ai_insights_tab
-from ui.tabs.ai_chat_legacy_tab import render_ai_chat_tab
+from ui.tabs.ai_insights_v2_tab import render_ai_insights_v2_tab  # AI Insights
+from ui.tabs.ai_chat_v2_tab import render_ai_chat_v2_tab
 from ui.tabs.auth_management_tab_simple import render_auth_management_tab
 from ui.tabs.debug_extractors_tab import render_debug_extractors_tab
+from ui.tabs.forecast_tab import render_forecast_tab  # New forecast tab
 
 # Load environment variables
 load_dotenv()
@@ -256,27 +257,22 @@ with tab3:
 
 # Tab 4: AI Insights
 with tab4:
-    render_ai_insights_tab(db, gemini_api_key, language)
+    render_ai_insights_v2_tab(db, gemini_api_key, language)
 
 # Tab 5: AI Chat
 with tab5:
-    render_ai_chat_tab(gemini_api_key)
+    render_ai_chat_v2_tab(db, gemini_api_key, language)
 
 # Tab 6: Authentication Management
 with tab6:
     render_auth_management_tab()
 
-# Tab 7: Predictions (placeholder)
+# Tab 7: Predictions
 with tab7:
-    st.header("📈 Previsões Financeiras")
-    st.info("🚧 Esta funcionalidade está em desenvolvimento...")
-    st.markdown("""
-    Em breve você poderá:
-    - Prever receitas futuras
-    - Estimar custos projetados
-    - Simular cenários financeiros
-    - Análise de tendências com ML
-    """)
+    if hasattr(st.session_state, 'extracted_data') and st.session_state.extracted_data:
+        render_forecast_tab(db, st.session_state.extracted_data)
+    else:
+        st.info("👆 Carregue arquivos na aba 'Upload' primeiro para usar as previsões financeiras.")
 
 # Tab 8: Integration (placeholder)
 with tab8:

@@ -139,9 +139,13 @@ class AIChatAssistant:
             cols = st.columns(2)
             for i, question in enumerate(questions[:4]):
                 with cols[i % 2]:
-                    if st.button(question, key=f"suggested_{i}"):
+                    # Create unique key using timestamp and index
+                    import time
+                    unique_key = f"suggested_{i}_{int(time.time() * 1000)}"
+                    if st.button(question, key=unique_key):
                         # Process the suggested question directly
                         self._process_user_message(question, data, filter_context)
+                        st.rerun()
     
     def _render_message(self, message: Dict):
         """Render a single chat message"""

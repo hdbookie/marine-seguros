@@ -194,6 +194,24 @@ class ExcelHierarchyExtractor:
                 is_viagens_parent = 'viagens' in parent_name and 'deslocamento' in parent_name
                 
                 if is_viagens_parent:
+                    # Special case: Despesas Filial should be its own parent, not a child of Viagens
+                    if 'despesas' in label.lower() and 'filial' in label.lower():
+                        # End Viagens context and create Despesas Filial as new parent
+                        expecting_level3_items = False
+                        current_subcategory = None
+                        # Create Despesas Filial as a new subcategory
+                        despesas_filial = {
+                            'level': 2,
+                            'name': label,
+                            'value': annual_value,
+                            'monthly': monthly_values,
+                            'items': []
+                        }
+                        current_section['subcategories'].append(despesas_filial)
+                        current_subcategory = despesas_filial
+                        expecting_level3_items = True
+                        continue
+                    
                     # Check if this item is travel-related
                     travel_keywords = ['alimenta', 'combust', 'hotel', 'estacion', 'pedágio', 'pedagio', 
                                      'aluguel', 'taxi', 'passagen', 'reembolso']
@@ -310,9 +328,15 @@ class ExcelHierarchyExtractor:
         current_label = self._get_cell_value(df.iloc[current_idx], label_col)
         current_value = self._get_numeric_value(df.iloc[current_idx], annual_col) if annual_col else 0
         
-        # Special case: "Viagens e Deslocamentos" should always be treated as parent
+        # Special cases for parent categories
         if current_label and isinstance(current_label, str):
             label_lower = current_label.lower()
+            
+            # Case 1: "Despesas Filial" should always be treated as parent
+            if 'despesas' in label_lower and 'filial' in label_lower:
+                return True
+            
+            # Case 2: "Viagens e Deslocamentos" should always be treated as parent
             if 'viagens' in label_lower and 'deslocamento' in label_lower:
                 # Check if next items are travel-related
                 travel_keywords = ['alimenta', 'combust', 'hotel', 'estacion', 'pedágio', 'pedagio', 

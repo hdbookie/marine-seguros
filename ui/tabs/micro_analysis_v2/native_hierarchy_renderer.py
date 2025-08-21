@@ -38,6 +38,7 @@ def render_native_hierarchy_tab(financial_data: Dict, full_financial_data: Dict 
             [
                 "📂 Estrutura Hierárquica",
                 "📊 Comparação Entre Anos",
+                "📈 Evolução Subcategorias",
                 "🌊 Análise Waterfall",
                 "📈 Tendências Temporais", 
                 "🎯 Análise de Contribuição",
@@ -55,8 +56,9 @@ def render_native_hierarchy_tab(financial_data: Dict, full_financial_data: Dict 
         # Year selector - support both single and multi-year selection
         available_years = sorted(financial_data.keys())
         
-        # Check if this is a comparison visualization
-        if visualization_type == "📊 Comparação Entre Anos" and len(available_years) >= 2:
+        # Check if this is a comparison visualization that needs multiple years
+        needs_multi_year = visualization_type in ["📊 Comparação Entre Anos", "📈 Evolução Subcategorias"]
+        if needs_multi_year and len(available_years) >= 2:
             selected_years = st.multiselect(
                 "📅 Anos (Comparação)",
                 available_years,
@@ -132,6 +134,14 @@ def render_native_hierarchy_tab(financial_data: Dict, full_financial_data: Dict 
         
         # Render monthly comparison between years
         _render_multi_year_comparison(multi_year_data, selected_years, time_period, show_details)
+    
+    elif visualization_type == "📈 Evolução Subcategorias":
+        if len(selected_years) < 2:
+            st.warning("⚠️ Selecione pelo menos 2 anos para visualizar a evolução das subcategorias.")
+            return
+        
+        # Render subcategory evolution across years
+        _render_subcategory_evolution(multi_year_data, selected_years, time_period)
     
     elif visualization_type == "🌊 Análise Waterfall":
         if time_period == "📅 Anual":
@@ -727,7 +737,8 @@ def _render_contribution_analysis(period_data: Dict, time_period: str, selected_
             'category': section['name'],
             'value': section_value,
             'contribution': section_contribution,
-            'level': 'Seção'
+            'level': 'Seção',
+            'parent': None
         })
         
         # Add subcategories
@@ -735,13 +746,27 @@ def _render_contribution_analysis(period_data: Dict, time_period: str, selected_
             subcat_value = subcat.get('value', 0)
             subcat_contribution = (subcat_value / total_expenses) * 100 if total_expenses > 0 else 0
             
-            if subcat_contribution > 1:  # Only show subcategories with >1% contribution
-                contribution_data.append({
-                    'category': f"  └─ {subcat['name']}",
-                    'value': subcat_value,
-                    'contribution': subcat_contribution,
-                    'level': 'Subcategoria'
-                })
+            contribution_data.append({
+                'category': subcat['name'],
+                'value': subcat_value,
+                'contribution': subcat_contribution,
+                'level': 'Subcategoria',
+                'parent': section['name']
+            })
+            
+            # Add individual items
+            for item in subcat.get('items', []):
+                item_value = item.get('value', 0)
+                item_contribution = (item_value / total_expenses) * 100 if total_expenses > 0 else 0
+                
+                if item_contribution > 0.1:  # Only show items with >0.1% contribution
+                    contribution_data.append({
+                        'category': item['name'],
+                        'value': item_value,
+                        'contribution': item_contribution,
+                        'level': 'Item',
+                        'parent': f"{section['name']} > {subcat['name']}"
+                    })
     
     # Sort by contribution descending
     contribution_data.sort(key=lambda x: x['contribution'], reverse=True)
@@ -752,10 +777,37 @@ def _render_contribution_analysis(period_data: Dict, time_period: str, selected_
     with col1:
         st.subheader("📊 Ranking de Contribuição")
         
-        # Create waterfall-style chart
-        categories = [item['category'] for item in contribution_data[:10]]  # Top 10
-        contributions = [item['contribution'] for item in contribution_data[:10]]
-        values = [item['value'] for item in contribution_data[:10]]
+        # Add selector for hierarchical level
+        hierarchy_level = st.radio(
+            "Nível de Análise",
+            ["📂 Categorias Principais", "📁 Subcategorias", "📌 Itens Individuais"],
+            horizontal=True,
+            key="contribution_hierarchy_level"
+        )
+        
+        # Filter data based on selected level
+        if hierarchy_level == "📂 Categorias Principais":
+            filtered_data = [item for item in contribution_data if item['level'] == 'Seção']
+        elif hierarchy_level == "📁 Subcategorias":
+            # Only show subcategories without their parent sections to avoid double counting
+            filtered_data = [item for item in contribution_data if item['level'] == 'Subcategoria']
+        else:  # Items Individuais
+            # Show individual items
+            filtered_data = [item for item in contribution_data if item['level'] == 'Item']
+            if not filtered_data:
+                st.info("Nenhum item individual encontrado com contribuição significativa")
+                filtered_data = []
+        
+        # Create chart with filtered data
+        categories = []
+        for item in filtered_data[:10]:  # Top 10
+            if item['level'] == 'Item' and item.get('parent'):
+                # Show parent context for items
+                categories.append(f"{item['category']} ({item['parent'].split(' > ')[-1]})")
+            else:
+                categories.append(item['category'])
+        contributions = [item['contribution'] for item in filtered_data[:10]]
+        values = [item['value'] for item in filtered_data[:10]]
         
         fig = go.Figure()
         
@@ -789,14 +841,23 @@ def _render_contribution_analysis(period_data: Dict, time_period: str, selected_
     with col2:
         st.subheader("📈 Insights")
         
-        # Top 3 contributors
-        top_3 = contribution_data[:3]
+        # Top 3 contributors from filtered data
+        top_3 = filtered_data[:3] if filtered_data else []
         top_3_total = sum(item['contribution'] for item in top_3)
         
         st.metric("Top 3 Concentração", f"{top_3_total:.1f}%")
         
         for i, item in enumerate(top_3, 1):
-            st.markdown(f"**{i}º** {item['category']}: {item['contribution']:.1f}%")
+            if item['level'] == 'Item' and item.get('parent'):
+                display_name = f"{item['category']} ({item['parent'].split(' > ')[-1]})"
+            else:
+                display_name = item['category']
+            st.markdown(f"**{i}º** {display_name}: {item['contribution']:.1f}%")
+        
+        # Show total for verification
+        total_shown = sum(item['contribution'] for item in filtered_data)
+        if total_shown > 0:
+            st.caption(f"Total mostrado: {total_shown:.1f}%")
         
         # Concentration analysis
         if top_3_total > 70:
@@ -1952,6 +2013,8 @@ def _render_side_by_side_sparklines(expense_data: Dict, selected_years: List[int
                 _render_monthly_section_comparison(section_data, selected_years, year_colors, chart_type)
             elif time_period in ["📈 Trimestral", "📆 Semestral", "📅 Customizado"]:
                 _render_period_section_comparison(section_data, selected_years, year_colors, chart_type, time_period)
+            elif time_period == "📅 Anual":
+                _render_annual_section_comparison(section_data, selected_years, year_colors)
             
             # Show subcategories comparison
             _render_subcategories_comparison(section_data, selected_years, time_period, year_colors)
@@ -2159,6 +2222,679 @@ def _render_period_section_comparison(section_data: Dict, selected_years: List[i
     st.plotly_chart(fig, use_container_width=True)
 
 
+def _render_annual_section_comparison(section_data: Dict, selected_years: List[int], year_colors: Dict):
+    """
+    Render annual comparison for a single section across years with visual graph
+    """
+    fig = go.Figure()
+    
+    # Collect annual totals for each year
+    years = sorted(selected_years)
+    values = []
+    
+    for year in years:
+        if year in section_data:
+            section = section_data[year]
+            annual_value = section.get('value', 0)
+            values.append(annual_value)
+        else:
+            values.append(0)
+    
+    # Create hover text with details
+    hover_texts = []
+    for i, (year, value) in enumerate(zip(years, values)):
+        text = f"<b>{year}</b><br>"
+        text += f"<b>Valor Total:</b> R$ {value:,.2f}<br>"
+        
+        # Add year-over-year change
+        if i > 0 and values[i-1] > 0:
+            change = ((value - values[i-1]) / values[i-1]) * 100
+            text += f"<b>Variação YoY:</b> {change:+.1f}%<br>"
+            diff = value - values[i-1]
+            text += f"<b>Diferença:</b> R$ {diff:,.2f}"
+        elif i > 0:
+            text += f"<b>Variação YoY:</b> Novo"
+        
+        hover_texts.append(text)
+    
+    # Add line trace for the trend
+    fig.add_trace(go.Scatter(
+        x=[str(year) for year in years],
+        y=values,
+        mode='lines+markers',
+        name='Evolução Anual',
+        line=dict(color='#3498db', width=3),
+        marker=dict(size=10, color='#3498db'),
+        text=[f'R$ {v:,.0f}' for v in values],
+        textposition='top center',
+        hovertemplate='%{customdata}<extra></extra>',
+        customdata=hover_texts
+    ))
+    
+    fig.update_layout(
+        title=f"Comparação Anual",
+        height=350,
+        xaxis_title="Ano",
+        xaxis=dict(
+            tickmode='array',
+            tickvals=[str(year) for year in years],
+            ticktext=[str(year) for year in years]
+        ),
+        yaxis_title="Valor (R$)",
+        yaxis=dict(tickformat=",.0f"),
+        showlegend=False,
+        hovermode='x unified',
+        margin=dict(l=50, r=50, t=80, b=50)
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def _render_subcategory_evolution(multi_year_data: Dict, selected_years: List[int], time_period: str):
+    """
+    Render evolution of all subcategories across years in a single comprehensive graph
+    Including Faturamento (Revenue) for comparison
+    """
+    st.header("📈 Evolução das Subcategorias vs Faturamento")
+    
+    # Show recommendation based on data
+    with st.expander("💡 Guia de Visualizações", expanded=False):
+        st.markdown("""
+        **Escolha a melhor visualização para sua análise:**
+        
+        🎯 **Recomendado para melhor visibilidade:**
+        - **Focar em Custos**: Mostra apenas custos, sem faturamento, com escala otimizada
+        - **Área Empilhada**: Visualiza a composição total de custos ao longo do tempo
+        - **% Composição**: Mostra a proporção relativa de cada custo
+        - **Mini Gráficos**: Um gráfico individual para cada subcategoria
+        
+        📊 **Outras opções:**
+        - **Separar Gráficos**: Faturamento e custos em gráficos independentes
+        - **Linear**: Visão padrão com valores absolutos
+        - **% do Faturamento**: Quanto cada custo representa do faturamento
+        - **Índice Base 100**: Compara taxas de crescimento relativo
+        - **Dual Axis**: Duas escalas Y (esquerda para custos, direita para faturamento)
+        - **Logarítmica**: Para grandes diferenças de escala
+        
+        💡 **Dica**: Para melhor visualização dos custos, use "**Focar em Custos**" ou "**Mini Gráficos**".
+        """)
+    
+    st.info("💡 Despesas pontuais (reformas, obras, aquisições) são filtradas automaticamente para melhor visualização das tendências recorrentes.")
+    
+    # Get all sections including revenue
+    all_data = {}
+    for year, data in multi_year_data.items():
+        if 'sections' in data:
+            all_data[year] = data['sections']
+    
+    if not all_data:
+        st.warning("Nenhum dado encontrado para análise.")
+        return
+    
+    # List of one-time expense keywords to filter out
+    one_time_keywords = [
+        'reforma', 'reformas', 'obras', 'construção', 'aquisição',
+        'compra de imóvel', 'compra de equipamento', 'mudança',
+        'instalação inicial', 'setup', 'implantação'
+    ]
+    
+    # Collect all unique subcategories and revenue
+    all_subcategories = {}
+    
+    # First, add Faturamento (Revenue) as the primary line
+    for year in selected_years:
+        if year in all_data:
+            for section in all_data[year]:
+                section_name = section.get('name', '')
+                # Check for revenue sections
+                if section_name.upper() in ['FATURAMENTO', 'RECEITA', 'RECEITAS']:
+                    if 'FATURAMENTO' not in all_subcategories:
+                        all_subcategories['FATURAMENTO'] = {}
+                    all_subcategories['FATURAMENTO'][year] = section.get('value', 0)
+    
+    # Then collect expense subcategories
+    for year in selected_years:
+        if year in all_data:
+            # Filter to expense sections only for subcategories
+            expense_sections = _filter_expense_sections(all_data[year])
+            for section in expense_sections:
+                section_name = section.get('name', '')
+                subcats = section.get('subcategories', [])
+                for subcat in subcats:
+                    subcat_name = subcat.get('name', '')
+                    
+                    # Filter out one-time expenses
+                    is_one_time = any(keyword in subcat_name.lower() for keyword in one_time_keywords)
+                    if is_one_time:
+                        continue  # Skip one-time expenses
+                    
+                    # Use just subcategory name without section prefix for cleaner display
+                    if subcat_name not in all_subcategories:
+                        all_subcategories[subcat_name] = {}
+                    all_subcategories[subcat_name][year] = subcat.get('value', 0)
+    
+    if not all_subcategories:
+        st.info("Nenhuma subcategoria encontrada nos dados.")
+        return
+    
+    # Separate Faturamento from other subcategories
+    faturamento_data = all_subcategories.pop('FATURAMENTO', {})
+    
+    # Sort remaining subcategories by total value across all years
+    sorted_subcats = sorted(
+        all_subcategories.items(),
+        key=lambda x: sum(x[1].values()),
+        reverse=True
+    )
+    
+    # Color palette for subcategories (excluding green which is for Faturamento)
+    colors = [
+        '#e74c3c', '#3498db', '#f39c12', '#9b59b6',
+        '#e67e22', '#1abc9c', '#34495e', '#95a5a6', '#d35400',
+        '#c0392b', '#2980b9', '#f1c40f', '#8e44ad',
+        '#16a085', '#2c3e50', '#7f8c8d', '#c0392b'
+    ]
+    
+    # Options for better visualization
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        # Limit to top N subcategories for clarity
+        max_subcategories = st.slider(
+            "Número de subcategorias de custo a mostrar",
+            min_value=5,
+            max_value=min(20, len(sorted_subcats)),
+            value=min(10, len(sorted_subcats)),
+            key="subcat_evolution_limit"
+        )
+    
+    with col2:
+        # Scaling option
+        scale_option = st.selectbox(
+            "Tipo de Visualização",
+            [
+                "Focar em Custos",
+                "Área Empilhada",
+                "% Composição",
+                "Mini Gráficos",
+                "Separar Gráficos",
+                "Linear",
+                "% do Faturamento",
+                "Índice Base 100",
+                "Dual Axis (Faturamento/Custos)",
+                "Logarítmica"
+            ],
+            help="Diferentes formas de visualizar os dados"
+        )
+    
+    with col3:
+        # Toggle to show/hide Faturamento
+        show_faturamento = st.checkbox(
+            "Mostrar Faturamento",
+            value=True,
+            help="Desmarque para focar apenas nos custos"
+        )
+    
+    # Prepare data for the chart
+    years = sorted(selected_years)
+    
+    # Handle different visualization types
+    if scale_option == "Focar em Custos":
+        # Focus only on expenses, no revenue
+        fig = go.Figure()
+        
+    elif scale_option == "Área Empilhada":
+        # Stacked area chart for expense composition
+        fig = go.Figure()
+        
+    elif scale_option == "% Composição":
+        # Percentage composition over time
+        fig = go.Figure()
+        
+    elif scale_option == "Mini Gráficos":
+        # Create small multiples for each subcategory
+        from plotly.subplots import make_subplots
+        
+        # Calculate grid layout
+        n_subcats = min(max_subcategories, len(sorted_subcats))
+        n_cols = 3
+        n_rows = (n_subcats + n_cols - 1) // n_cols
+        
+        # Create subplots
+        subplot_titles = [name for name, _ in sorted_subcats[:n_subcats]]
+        fig = make_subplots(
+            rows=n_rows, cols=n_cols,
+            subplot_titles=subplot_titles,
+            vertical_spacing=0.15,
+            horizontal_spacing=0.1
+        )
+        
+    elif scale_option == "Separar Gráficos":
+        # Create two separate charts
+        from plotly.subplots import make_subplots
+        fig = make_subplots(
+            rows=2, cols=1,
+            subplot_titles=("Faturamento", "Despesas por Subcategoria"),
+            vertical_spacing=0.12,
+            row_heights=[0.3, 0.7]
+        )
+        
+        # Add Faturamento to top subplot
+        if faturamento_data:
+            values = [faturamento_data.get(year, 0) for year in years]
+            fig.add_trace(go.Scatter(
+                x=[str(year) for year in years],
+                y=values,
+                mode='lines+markers',
+                name='📊 FATURAMENTO',
+                line=dict(color='#27ae60', width=4),
+                marker=dict(size=12, color='#27ae60'),
+                showlegend=False
+            ), row=1, col=1)
+    else:
+        # Single chart for other options
+        fig = go.Figure()
+        
+    # Process data based on visualization type
+    if scale_option == "% do Faturamento":
+        # Convert all values to percentage of revenue
+        revenue_values = [faturamento_data.get(year, 1) for year in years]  # Avoid division by zero
+        
+    elif scale_option == "Índice Base 100":
+        # Index all values to 100 at the first year
+        base_year = years[0]
+        
+    # Add Faturamento as the primary line (if exists and enabled)
+    if scale_option != "Separar Gráficos" and faturamento_data and show_faturamento:
+        values = [faturamento_data.get(year, 0) for year in years]
+        
+        # Adjust values based on visualization type
+        if scale_option == "% do Faturamento":
+            values = [100 for _ in years]  # Revenue is always 100% of itself
+        elif scale_option == "Índice Base 100":
+            base_value = values[0] if values[0] > 0 else 1
+            values = [(v / base_value) * 100 for v in values]
+        
+        # Create hover text for Faturamento
+        hover_texts = []
+        for j, (year, value) in enumerate(zip(years, values)):
+            if scale_option in ["% do Faturamento", "Índice Base 100"]:
+                text = f"<b>FATURAMENTO</b><br>"
+                text += f"<b>{year}:</b> {value:.1f}{'%' if scale_option == '% do Faturamento' else ''}<br>"
+                orig_value = faturamento_data.get(year, 0)
+                text += f"<b>Valor:</b> R$ {orig_value:,.2f}"
+            else:
+                text = f"<b>FATURAMENTO</b><br>"
+                text += f"<b>{year}:</b> R$ {value:,.2f}<br>"
+                
+                # Add year-over-year change
+                if j > 0 and values[j-1] > 0:
+                    change = ((value - values[j-1]) / values[j-1]) * 100
+                    text += f"<b>Variação:</b> {change:+.1f}%"
+            
+            hover_texts.append(text)
+        
+        # Add Faturamento with distinctive styling
+        # Use secondary y-axis if dual axis is selected
+        if scale_option == "Dual Axis (Faturamento/Custos)":
+            fig.add_trace(go.Scatter(
+                x=[str(year) for year in years],
+                y=values,
+                mode='lines+markers',
+                name='📊 FATURAMENTO',
+                line=dict(color='#27ae60', width=4, dash='solid'),
+                marker=dict(size=12, color='#27ae60'),
+                hovertemplate='%{customdata}<extra></extra>',
+                customdata=hover_texts,
+                yaxis='y2'  # Use secondary y-axis
+            ))
+        else:
+            fig.add_trace(go.Scatter(
+                x=[str(year) for year in years],
+                y=values,
+                mode='lines+markers',
+                name='📊 FATURAMENTO',
+                line=dict(color='#27ae60', width=4, dash='solid'),
+                marker=dict(size=12, color='#27ae60'),
+                hovertemplate='%{customdata}<extra></extra>',
+                customdata=hover_texts
+            ))
+    
+    # Add traces for each subcategory based on visualization type
+    if scale_option == "Área Empilhada":
+        # Create stacked area chart
+        for i, (subcat_name, year_values) in enumerate(sorted_subcats[:max_subcategories]):
+            values = [year_values.get(year, 0) for year in years]
+            
+            if any(v > 0 for v in values):
+                fig.add_trace(go.Scatter(
+                    x=[str(year) for year in years],
+                    y=values,
+                    mode='lines',
+                    name=subcat_name,
+                    stackgroup='one',
+                    fillcolor=colors[i % len(colors)],
+                    line=dict(width=0.5, color=colors[i % len(colors)])
+                ))
+    
+    elif scale_option == "% Composição":
+        # Calculate total expenses per year
+        totals_per_year = {}
+        for year in years:
+            total = 0
+            for subcat_name, year_values in sorted_subcats[:max_subcategories]:
+                total += year_values.get(year, 0)
+            totals_per_year[year] = total if total > 0 else 1
+        
+        # Add percentage traces
+        for i, (subcat_name, year_values) in enumerate(sorted_subcats[:max_subcategories]):
+            values = [year_values.get(year, 0) for year in years]
+            percentages = [(v / totals_per_year[y]) * 100 for v, y in zip(values, years)]
+            
+            if any(v > 0 for v in values):
+                fig.add_trace(go.Scatter(
+                    x=[str(year) for year in years],
+                    y=percentages,
+                    mode='lines',
+                    name=subcat_name,
+                    stackgroup='one',
+                    groupnorm='percent',
+                    fillcolor=colors[i % len(colors)],
+                    line=dict(width=0.5, color=colors[i % len(colors)])
+                ))
+    
+    elif scale_option == "Mini Gráficos":
+        # Add individual traces to each subplot
+        for i, (subcat_name, year_values) in enumerate(sorted_subcats[:max_subcategories]):
+            values = [year_values.get(year, 0) for year in years]
+            
+            if any(v > 0 for v in values):
+                row = (i // 3) + 1
+                col = (i % 3) + 1
+                
+                fig.add_trace(go.Scatter(
+                    x=[str(year) for year in years],
+                    y=values,
+                    mode='lines+markers',
+                    name=subcat_name,
+                    line=dict(color=colors[i % len(colors)], width=2),
+                    marker=dict(size=6),
+                    showlegend=False
+                ), row=row, col=col)
+    
+    elif scale_option == "Focar em Custos":
+        # Show only expenses with better scale
+        for i, (subcat_name, year_values) in enumerate(sorted_subcats[:max_subcategories]):
+            values = [year_values.get(year, 0) for year in years]
+            
+            if any(v > 0 for v in values):
+                fig.add_trace(go.Scatter(
+                    x=[str(year) for year in years],
+                    y=values,
+                    mode='lines+markers',
+                    name=subcat_name,
+                    line=dict(color=colors[i % len(colors)], width=2.5),
+                    marker=dict(size=8)
+                ))
+    
+    else:
+        # Default handling for other visualization types
+        for i, (subcat_name, year_values) in enumerate(sorted_subcats[:max_subcategories]):
+            values = [year_values.get(year, 0) for year in years]
+            original_values = values.copy()  # Keep original for hover text
+            
+            # Only show subcategories with some non-zero values
+            if any(v > 0 for v in values):
+                # Adjust values based on visualization type
+                if scale_option == "% do Faturamento":
+                    revenue_values = [faturamento_data.get(year, 1) for year in years]
+                    values = [(v / rv * 100) if rv > 0 else 0 for v, rv in zip(values, revenue_values)]
+                elif scale_option == "Índice Base 100":
+                    base_value = values[0] if values[0] > 0 else 1
+                    values = [(v / base_value) * 100 for v in values]
+                
+                # Create hover text with details
+                hover_texts = []
+                for j, (year, value, orig_value) in enumerate(zip(years, values, original_values)):
+                    text = f"<b>{subcat_name}</b><br>"
+                    
+                    if scale_option == "% do Faturamento":
+                        text += f"<b>{year}:</b> {value:.2f}% do Faturamento<br>"
+                        text += f"<b>Valor:</b> R$ {orig_value:,.2f}"
+                    elif scale_option == "Índice Base 100":
+                        text += f"<b>{year}:</b> Índice {value:.1f}<br>"
+                        text += f"<b>Valor:</b> R$ {orig_value:,.2f}"
+                    else:
+                        text += f"<b>{year}:</b> R$ {orig_value:,.2f}<br>"
+                    
+                    # Add year-over-year change
+                    if j > 0 and original_values[j-1] > 0:
+                        change = ((orig_value - original_values[j-1]) / original_values[j-1]) * 100
+                        text += f"<br><b>Variação:</b> {change:+.1f}%"
+                    elif j > 0 and orig_value > 0:
+                        text += "<br><b>Variação:</b> Novo"
+                    
+                    hover_texts.append(text)
+                
+                # Add to appropriate subplot if using separate charts
+                if scale_option == "Separar Gráficos":
+                    fig.add_trace(go.Scatter(
+                        x=[str(year) for year in years],
+                        y=values,
+                        mode='lines+markers',
+                        name=subcat_name,
+                        line=dict(color=colors[i % len(colors)], width=2),
+                        marker=dict(size=8),
+                        hovertemplate='%{customdata}<extra></extra>',
+                        customdata=hover_texts
+                    ), row=2, col=1)
+                else:
+                    fig.add_trace(go.Scatter(
+                        x=[str(year) for year in years],
+                        y=values,
+                        mode='lines+markers',
+                        name=subcat_name,
+                        line=dict(color=colors[i % len(colors)], width=2),
+                        marker=dict(size=8),
+                        hovertemplate='%{customdata}<extra></extra>',
+                        customdata=hover_texts
+                    ))
+    
+    # Configure layout based on scaling option
+    if scale_option == "Mini Gráficos":
+        # Layout for small multiples
+        fig.update_xaxes(
+            tickmode='array',
+            tickvals=[str(year) for year in years],
+            ticktext=[str(year) for year in years]
+        )
+        fig.update_yaxes(tickformat=",.0f")
+        fig.update_layout(
+            height=200 * n_rows,
+            showlegend=False,
+            title_text=f"Evolução Individual das Subcategorias {min(years)}-{max(years)}"
+        )
+    
+    elif scale_option == "Focar em Custos":
+        # Layout focused on expenses only
+        fig.update_layout(
+            title=f"Top {max_subcategories} Subcategorias de Custos - {min(years)}-{max(years)}",
+            xaxis_title="Ano",
+            xaxis=dict(
+                tickmode='array',
+                tickvals=[str(year) for year in years],
+                ticktext=[str(year) for year in years]
+            ),
+            yaxis_title="Valor (R$)",
+            yaxis=dict(tickformat=",.0f"),
+            hovermode='x unified',
+            height=600,
+            showlegend=True,
+            legend=dict(
+                orientation="v",
+                yanchor="top",
+                y=1,
+                xanchor="left",
+                x=1.02
+            )
+        )
+    
+    elif scale_option == "Área Empilhada":
+        # Layout for stacked area chart
+        fig.update_layout(
+            title=f"Composição de Custos por Subcategoria - {min(years)}-{max(years)}",
+            xaxis_title="Ano",
+            xaxis=dict(
+                tickmode='array',
+                tickvals=[str(year) for year in years],
+                ticktext=[str(year) for year in years]
+            ),
+            yaxis_title="Valor (R$)",
+            yaxis=dict(tickformat=",.0f"),
+            hovermode='x unified',
+            height=600,
+            showlegend=True
+        )
+    
+    elif scale_option == "% Composição":
+        # Layout for percentage composition
+        fig.update_layout(
+            title=f"Composição Percentual de Custos - {min(years)}-{max(years)}",
+            xaxis_title="Ano",
+            xaxis=dict(
+                tickmode='array',
+                tickvals=[str(year) for year in years],
+                ticktext=[str(year) for year in years]
+            ),
+            yaxis_title="Percentual (%)",
+            yaxis=dict(tickformat=".0f", ticksuffix="%", range=[0, 100]),
+            hovermode='x unified',
+            height=600,
+            showlegend=True
+        )
+    
+    elif scale_option == "Separar Gráficos":
+        # Layout for separate charts
+        fig.update_xaxes(
+            tickmode='array',
+            tickvals=[str(year) for year in years],
+            ticktext=[str(year) for year in years]
+        )
+        fig.update_yaxes(tickformat=",.0f", row=1, col=1)
+        fig.update_yaxes(tickformat=",.0f", row=2, col=1)
+        fig.update_layout(
+            height=700,
+            showlegend=True,
+            hovermode='x unified',
+            title_text=f"Evolução Financeira {min(years)}-{max(years)}"
+        )
+    else:
+        layout_config = {
+            'xaxis_title': "Ano",
+            'xaxis': dict(
+                tickmode='array',
+                tickvals=[str(year) for year in years],
+                ticktext=[str(year) for year in years]
+            ),
+            'hovermode': 'x unified',
+            'height': 600,
+            'showlegend': True,
+            'legend': dict(
+                orientation="v",
+                yanchor="top",
+                y=1,
+                xanchor="left",
+                x=1.02
+            ),
+            'margin': dict(l=50, r=250, t=80, b=50)
+        }
+        
+        # Configure title and y-axis based on scale option
+        if scale_option == "% do Faturamento":
+            layout_config['title'] = f"Custos como % do Faturamento - {min(years)}-{max(years)}"
+            layout_config['yaxis'] = dict(
+                title="% do Faturamento",
+                tickformat=".1f",
+                ticksuffix="%"
+            )
+        elif scale_option == "Índice Base 100":
+            layout_config['title'] = f"Evolução Indexada (Base {years[0]}=100) - {min(years)}-{max(years)}"
+            layout_config['yaxis'] = dict(
+                title=f"Índice (Base {years[0]}=100)",
+                tickformat=".0f"
+            )
+        elif scale_option == "Logarítmica":
+            layout_config['title'] = f"{'Faturamento vs ' if show_faturamento else ''}Top {max_subcategories} Subcategorias - Escala Log"
+            layout_config['yaxis'] = dict(
+                title="Valor (R$) - Escala Log",
+                type='log',
+                tickformat=",.0f"
+            )
+        elif scale_option == "Dual Axis (Faturamento/Custos)":
+            layout_config['title'] = f"Faturamento vs Top {max_subcategories} Subcategorias - Dual Axis"
+            layout_config['yaxis'] = dict(
+                title="Custos (R$)",
+                tickformat=",.0f",
+                side='left'
+            )
+            layout_config['yaxis2'] = dict(
+                title="Faturamento (R$)",
+                tickformat=",.0f",
+                overlaying='y',
+                side='right',
+                showgrid=False
+            )
+        else:  # Linear
+            layout_config['title'] = f"{'Faturamento vs ' if show_faturamento else ''}Top {max_subcategories} Subcategorias - {min(years)}-{max(years)}"
+            layout_config['yaxis'] = dict(
+                title="Valor (R$)",
+                tickformat=",.0f"
+            )
+        
+        fig.update_layout(**layout_config)
+    
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Show summary statistics
+    st.markdown("### 📊 Análise de Crescimento")
+    
+    # Add Faturamento to growth analysis if it exists
+    growth_data = []
+    
+    # First add Faturamento growth
+    if faturamento_data and years[0] in faturamento_data and years[-1] in faturamento_data:
+        initial_value = faturamento_data[years[0]]
+        final_value = faturamento_data[years[-1]]
+        if initial_value > 0:
+            growth_rate = ((final_value - initial_value) / initial_value) * 100
+            growth_data.append({
+                'Categoria': '📊 FATURAMENTO',
+                f'{years[0]}': format_currency(initial_value),
+                f'{years[-1]}': format_currency(final_value),
+                'Crescimento %': f"{growth_rate:+.1f}%",
+                'Diferença': format_currency(final_value - initial_value)
+            })
+    
+    # Then add subcategories growth
+    for subcat_name, year_values in sorted_subcats[:max_subcategories]:
+        if years[0] in year_values and years[-1] in year_values:
+            initial_value = year_values[years[0]]
+            final_value = year_values[years[-1]]
+            if initial_value > 0:
+                growth_rate = ((final_value - initial_value) / initial_value) * 100
+                growth_data.append({
+                    'Categoria': subcat_name,
+                    f'{years[0]}': format_currency(initial_value),
+                    f'{years[-1]}': format_currency(final_value),
+                    'Crescimento %': f"{growth_rate:+.1f}%",
+                    'Diferença': format_currency(final_value - initial_value)
+                })
+    
+    if growth_data:
+        df_growth = pd.DataFrame(growth_data)
+        st.dataframe(df_growth, use_container_width=True, hide_index=True)
+
+
 def _render_subcategories_comparison(section_data: Dict, selected_years: List[int], time_period: str, year_colors: Dict):
     """
     Render subcategories comparison across years
@@ -2190,6 +2926,9 @@ def _render_subcategories_comparison(section_data: Dict, selected_years: List[in
                 fig = go.Figure()
                 months = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ']
                 
+                # Dictionary to store most expensive items per month per year
+                most_expensive_items = {}
+                
                 for year in selected_years:
                     if year in section_data:
                         subcats = section_data[year].get('subcategories', [])
@@ -2198,19 +2937,62 @@ def _render_subcategories_comparison(section_data: Dict, selected_years: List[in
                             monthly_data = subcat.get('monthly', {})
                             values = [monthly_data.get(month, 0) for month in months]
                             
+                            # Find most expensive item for each month
+                            items = subcat.get('items', [])
+                            
+                            # If no items, check if subcategory itself has children or breakdown
+                            if not items and subcat.get('children'):
+                                items = subcat.get('children', [])
+                            
+                            for month in months:
+                                max_item_name = None
+                                max_item_value = 0
+                                
+                                # Check all items for this month
+                                for item in items:
+                                    item_monthly = item.get('monthly', {})
+                                    item_value = item_monthly.get(month, 0)
+                                    if item_value > max_item_value:
+                                        max_item_value = item_value
+                                        max_item_name = item.get('name', 'Unknown')
+                                
+                                # If still no items found but subcategory has monthly data, use subcategory itself
+                                if not max_item_name and not items:
+                                    subcat_monthly_value = monthly_data.get(month, 0)
+                                    if subcat_monthly_value > 0:
+                                        max_item_name = f"{subcat_name} (Total)"
+                                        max_item_value = subcat_monthly_value
+                                
+                                if max_item_name and max_item_value > 0:
+                                    if year not in most_expensive_items:
+                                        most_expensive_items[year] = {}
+                                    most_expensive_items[year][month] = {
+                                        'name': max_item_name,
+                                        'value': max_item_value
+                                    }
+                            
                             if any(v > 0 for v in values):
                                 # Calculate year-over-year changes if we have multiple years
                                 hover_text = []
                                 for i, month in enumerate(months):
                                     value = values[i]
                                     text = f"<b>{month} {year}</b><br>"
-                                    text += f"<b>Valor:</b> R$ {value:,.2f}<br>"
+                                    text += f"<b>Valor Total:</b> R$ {value:,.2f}<br>"
+                                    
+                                    # Add most expensive item info
+                                    if year in most_expensive_items and month in most_expensive_items[year]:
+                                        item_info = most_expensive_items[year][month]
+                                        text += f"<b>Item Mais Caro:</b> {item_info['name']}<br>"
+                                        text += f"<b>Valor do Item:</b> R$ {item_info['value']:,.2f}<br>"
+                                        if value > 0:
+                                            item_pct = (item_info['value'] / value) * 100
+                                            text += f"<b>% do Total:</b> {item_pct:.1f}%<br>"
                                     
                                     # Add percentage of total
                                     total = sum(values)
                                     if total > 0:
                                         pct = (value / total) * 100
-                                        text += f"<b>% do Total:</b> {pct:.1f}%<br>"
+                                        text += f"<b>% do Ano:</b> {pct:.1f}%<br>"
                                     
                                     # Add month-over-month change
                                     if i > 0 and values[i-1] > 0:
@@ -2248,7 +3030,10 @@ def _render_subcategories_comparison(section_data: Dict, selected_years: List[in
                 else:
                     st.info("Sem dados mensais disponíveis para esta subcategoria")
             else:
-                # Show annual totals
+                # Show annual totals with graphs
+                st.markdown(f"**📊 Comparação Anual - {subcat_name}**")
+                
+                # First show the metrics
                 cols = st.columns(len(selected_years) + 1)  # +1 for comparison
                 subcat_values = {}
                 
@@ -2274,10 +3059,72 @@ def _render_subcategories_comparison(section_data: Dict, selected_years: List[in
                         else:
                             st.metric("Variação", "Novo" if val2 > 0 else "N/A")
                 
+                # Add annual comparison line chart
+                if subcat_values:
+                    fig = go.Figure()
+                    
+                    # Create line for the trend
+                    years = sorted(subcat_values.keys())
+                    values = [subcat_values[year] for year in years]
+                    
+                    # Create hover text with details
+                    hover_texts = []
+                    for i, (year, value) in enumerate(zip(years, values)):
+                        text = f"<b>{year}</b><br>"
+                        text += f"<b>Valor:</b> R$ {value:,.2f}<br>"
+                        if i > 0:
+                            change = ((value - values[i-1]) / values[i-1] * 100) if values[i-1] > 0 else 0
+                            text += f"<b>Variação:</b> {change:+.1f}%"
+                        hover_texts.append(text)
+                    
+                    fig.add_trace(go.Scatter(
+                        x=[str(year) for year in years],
+                        y=values,
+                        mode='lines+markers',
+                        name=subcat_name,
+                        line=dict(color='#e74c3c', width=3),
+                        marker=dict(size=8, color='#e74c3c'),
+                        text=[f'R$ {v:,.0f}' for v in values],
+                        textposition='top center',
+                        hovertemplate='%{customdata}<extra></extra>',
+                        customdata=hover_texts
+                    ))
+                    
+                    fig.update_layout(
+                        height=250,
+                        margin=dict(t=10, b=30, l=30, r=30),
+                        xaxis_title="Ano",
+                        xaxis=dict(
+                            tickmode='array',
+                            tickvals=[str(year) for year in years],
+                            ticktext=[str(year) for year in years]
+                        ),
+                        yaxis_title="Valor (R$)",
+                        yaxis=dict(tickformat=",.0f"),
+                        showlegend=False
+                    )
+                    
+                    st.plotly_chart(fig, use_container_width=True, key=f"annual_subcat_{subcat_name.replace(' ', '_')}")
+                
                 # Add period progression chart for non-monthly time periods
                 if time_period in ["📈 Trimestral", "📆 Semestral", "📅 Customizado"]:
                     st.markdown(f"**Evolução {time_period.replace('📈 ', '').replace('📆 ', '').replace('📅 ', '')} - {subcat_name}**")
                     _render_subcategory_period_comparison(section_data, selected_years, subcat_name, year_colors, time_period)
+            
+            # Add new visualization: All items in one chart for comparison
+            if time_period == "📊 Mensal":
+                st.markdown(f"**📊 Comparação de Itens - {subcat_name}**")
+                
+                # Let user choose visualization type
+                col1, col2 = st.columns([3, 1])
+                with col2:
+                    chart_type = st.selectbox(
+                        "Tipo de Gráfico",
+                        ["📈 Linhas", "📊 Barras Agrupadas", "📚 Barras Empilhadas", "🌊 Área Empilhada", "🔥 Heatmap", "📊 Análise de Tendência"],
+                        key=f"chart_type_{subcat_name.replace(' ', '_')}"
+                    )
+                
+                _render_items_comparison_chart(section_data, selected_years, subcat_name, chart_type)
             
             # Show individual items if available
             _render_items_comparison(section_data, selected_years, subcat_name, time_period, year_colors)
@@ -2480,40 +3327,129 @@ def _render_items_comparison(section_data: Dict, selected_years: List[int], subc
                 else:
                     st.info("Sem dados mensais disponíveis para este item")
     else:
-        # Show annual comparison table for items
-        item_comparison = []
+        # Show annual comparison with bar chart for items
+        st.markdown("**📊 Comparação Anual de Itens**")
+        
+        # Collect data for visualization
+        item_data = {}
         for item_name in sorted(all_items):
-            row = {'Item': item_name}
+            item_data[item_name] = {}
             
             for year in selected_years:
                 if year in subcat_data:
                     items = subcat_data[year].get('items', [])
                     item = next((i for i in items if i['name'] == item_name), None)
                     value = item.get('value', 0) if item else 0
-                    row[str(year)] = value
+                    item_data[item_name][year] = value
                 else:
-                    row[str(year)] = 0
-            
-            # Calculate change if 2 years
-            if len(selected_years) == 2:
-                val1, val2 = row[str(selected_years[0])], row[str(selected_years[1])]
-                if val1 > 0:
-                    change = ((val2 - val1) / val1) * 100
-                    row['Variação %'] = f"{change:+.1f}%"
-                else:
-                    row['Variação %'] = "Novo" if val2 > 0 else "0%"
-            
-            item_comparison.append(row)
+                    item_data[item_name][year] = 0
         
-        if item_comparison:
-            # Convert to display format
-            df = pd.DataFrame(item_comparison)
+        if item_data:
+            # Create line chart for items
+            fig = go.Figure()
             
-            # Format currency columns
-            for year in selected_years:
-                df[str(year)] = df[str(year)].apply(lambda x: format_currency(x))
+            # Define colors for items
+            item_colors = {
+                'Marketing': '#e74c3c',
+                'Publicidade': '#3498db',
+                'Tráfego pago': '#2ecc71',
+                'Advogados': '#f39c12',
+                'Condomínios': '#9b59b6',
+                'Energia Elétrica': '#1abc9c',
+                'Internet': '#34495e',
+                'Manutenção': '#e67e22',
+                'Segurança': '#95a5a6',
+                'Telefonia': '#d35400'
+            }
+            default_item_colors = ['#c0392b', '#2980b9', '#27ae60', '#f1c40f', '#8e44ad']
             
-            st.dataframe(df, use_container_width=True, hide_index=True)
+            # Add line for each item
+            color_idx = 0
+            years = sorted(selected_years)
+            
+            for item_name in sorted(all_items):
+                values = [item_data[item_name].get(year, 0) for year in years]
+                
+                # Only show items with some data
+                if any(v > 0 for v in values):
+                    # Get color for this item
+                    if item_name in item_colors:
+                        color = item_colors[item_name]
+                    else:
+                        color = default_item_colors[color_idx % len(default_item_colors)]
+                        color_idx += 1
+                    
+                    # Create hover text
+                    hover_texts = []
+                    for i, (year, value) in enumerate(zip(years, values)):
+                        text = f"<b>{item_name}</b><br>"
+                        text += f"<b>{year}</b><br>"
+                        text += f"<b>Valor:</b> R$ {value:,.2f}"
+                        if i > 0 and values[i-1] > 0:
+                            change = ((value - values[i-1]) / values[i-1] * 100)
+                            text += f"<br><b>Variação:</b> {change:+.1f}%"
+                        hover_texts.append(text)
+                    
+                    fig.add_trace(go.Scatter(
+                        x=[str(year) for year in years],
+                        y=values,
+                        mode='lines+markers',
+                        name=item_name,
+                        line=dict(color=color, width=2),
+                        marker=dict(size=6),
+                        hovertemplate='%{customdata}<extra></extra>',
+                        customdata=hover_texts
+                    ))
+            
+            if fig.data:
+                fig.update_layout(
+                    height=350,
+                    margin=dict(t=20, b=30, l=50, r=20),
+                    xaxis_title="Ano",
+                    xaxis=dict(
+                        tickmode='array',
+                        tickvals=[str(year) for year in years],
+                        ticktext=[str(year) for year in years]
+                    ),
+                    yaxis_title="Valor (R$)",
+                    yaxis=dict(tickformat=",.0f"),
+                    showlegend=True,
+                    legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02),
+                    hovermode='x unified'
+                )
+                
+                st.plotly_chart(fig, use_container_width=True, key=f"annual_items_{subcat_name.replace(' ', '_')}")
+            
+            # Also show the comparison table
+            st.markdown("**📋 Tabela Comparativa**")
+            item_comparison = []
+            for item_name in sorted(all_items):
+                row = {'Item': item_name}
+                
+                for year in selected_years:
+                    value = item_data[item_name].get(year, 0)
+                    row[str(year)] = value
+                
+                # Calculate change if 2 years
+                if len(selected_years) == 2:
+                    val1, val2 = row[str(selected_years[0])], row[str(selected_years[1])]
+                    if val1 > 0:
+                        change = ((val2 - val1) / val1) * 100
+                        row['Variação %'] = f"{change:+.1f}%"
+                    else:
+                        row['Variação %'] = "Novo" if val2 > 0 else "0%"
+                
+                item_comparison.append(row)
+            
+            if item_comparison:
+                # Convert to display format
+                df = pd.DataFrame(item_comparison)
+                
+                # Format currency columns
+                for year in selected_years:
+                    df[str(year)] = df[str(year)].apply(lambda x: format_currency(x))
+                
+                st.dataframe(df, use_container_width=True, hide_index=True)
             
             # Add period progression charts for individual items in non-monthly periods
             if time_period in ["📈 Trimestral", "📆 Semestral", "📅 Customizado"]:
@@ -2538,6 +3474,759 @@ def _render_items_comparison(section_data: Dict, selected_years: List[int], subc
                 for item_name in items_with_data[:5]:  # Limit to top 5 items to avoid clutter
                     with st.expander(f"📈 {item_name} - Evolução {time_period.replace('📈 ', '').replace('📆 ', '').replace('📅 ', '')}", expanded=False):
                         _render_item_period_comparison(subcat_data, selected_years, item_name, year_colors, time_period, section_data, subcat_name)
+
+
+def _render_items_comparison_chart(section_data: Dict, selected_years: List[int], subcat_name: str, chart_type: str = "📈 Linhas"):
+    """
+    Render a single chart with all items within a subcategory for easy comparison
+    Supports different chart types for better visualization
+    """
+    months = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ']
+    
+    # Collect all unique items across all selected years
+    all_items = set()
+    items_data = {}
+    
+    for year in selected_years:
+        if year in section_data:
+            subcats = section_data[year].get('subcategories', [])
+            subcat = next((s for s in subcats if s['name'] == subcat_name), None)
+            
+            if subcat:
+                items = subcat.get('items', [])
+                for item in items:
+                    item_name = item.get('name')
+                    if item_name:
+                        all_items.add(item_name)
+                        
+                        # Store monthly data for this item and year
+                        if item_name not in items_data:
+                            items_data[item_name] = {}
+                        
+                        monthly_data = item.get('monthly', {})
+                        if monthly_data:
+                            items_data[item_name][year] = monthly_data
+    
+    if not items_data:
+        st.info("Nenhum item com dados mensais encontrado nesta subcategoria")
+        return
+    
+    # Create the comparison chart
+    fig = go.Figure()
+    
+    # Define color palettes
+    item_base_colors = {
+        'Marketing': '#e74c3c',
+        'Publicidade': '#3498db', 
+        'Tráfego pago': '#2ecc71',
+        'Advogados': '#f39c12',
+        'Condomínios': '#9b59b6',
+        'Energia Elétrica': '#1abc9c',
+        'Internet': '#34495e',
+        'Manutenção': '#e67e22',
+        'Segurança': '#95a5a6',
+        'Telefonia': '#d35400'
+    }
+    
+    # Default colors for items not in the predefined list
+    default_colors = ['#c0392b', '#2980b9', '#27ae60', '#f1c40f', '#8e44ad']
+    
+    # Define consistent year colors
+    year_colors_ordered = {
+        2021: '#9b59b6',  # Purple
+        2022: '#3498db',  # Blue
+        2023: '#e74c3c',  # Red
+        2024: '#f39c12',  # Orange
+        2025: '#2ecc71',  # Green
+        2026: '#1abc9c',  # Turquoise
+    }
+    
+    if chart_type == "📊 Barras Agrupadas":
+        # Create grouped bar chart - much clearer for comparing items
+        # Sort years chronologically
+        sorted_years = sorted(selected_years)
+        
+        for year in sorted_years:
+            # Collect data for all items for this year
+            year_values = []
+            year_items = []
+            
+            for item_name in sorted(all_items):
+                if item_name in items_data and year in items_data[item_name]:
+                    monthly_data = items_data[item_name][year]
+                    # Calculate average monthly value (excluding zeros)
+                    monthly_values = [monthly_data.get(month, 0) for month in months]
+                    non_zero_values = [v for v in monthly_values if v > 0]
+                    avg_value = sum(non_zero_values) / len(non_zero_values) if non_zero_values else 0
+                    
+                    if avg_value > 0:
+                        year_values.append(avg_value)
+                        year_items.append(item_name)
+            
+            if year_values:
+                # Use consistent year color
+                year_color = year_colors_ordered.get(year, '#808080')
+                
+                fig.add_trace(go.Bar(
+                    name=str(year),
+                    x=year_items,
+                    y=year_values,
+                    marker_color=year_color,
+                    text=[f'R$ {v:,.0f}' for v in year_values],
+                    textposition='auto',
+                    hovertemplate='<b>%{x}</b><br>' +
+                                  f'<b>{year}</b><br>' +
+                                  '<b>Média Mensal:</b> R$ %{y:,.2f}<extra></extra>'
+                ))
+        
+        # Focus on showing individual months for better detail
+        st.markdown("**📅 Detalhamento Mensal:**")
+        
+        # Month selector
+        selected_month = st.selectbox(
+            "Selecione o mês para análise detalhada:",
+            months,
+            index=0,
+            key=f"month_select_{subcat_name.replace(' ', '_')}"
+        )
+        
+        # Create detailed bar chart for selected month
+        fig_month = go.Figure()
+        
+        # Sort years chronologically for consistent ordering
+        sorted_years_detail = sorted(selected_years)
+        
+        for year in sorted_years_detail:
+            month_values = []
+            month_items = []
+            
+            for item_name in sorted(all_items):
+                if item_name in items_data and year in items_data[item_name]:
+                    value = items_data[item_name][year].get(selected_month, 0)
+                    if value > 0:
+                        month_values.append(value)
+                        month_items.append(item_name)
+            
+            if month_values:
+                # Use consistent year color
+                year_color = year_colors_ordered.get(year, '#808080')
+                
+                fig_month.add_trace(go.Bar(
+                    name=str(year),
+                    x=month_items,
+                    y=month_values,
+                    marker_color=year_color,
+                    text=[f'R$ {v:,.0f}' for v in month_values],
+                    textposition='auto'
+                ))
+        
+        if fig_month.data:
+            fig_month.update_layout(
+                title=f"Comparação de Itens - {selected_month}",
+                barmode='group',
+                height=300,
+                xaxis_title="Item",
+                yaxis_title="Valor (R$)",
+                yaxis=dict(tickformat=",.0f")
+            )
+            st.plotly_chart(fig_month, use_container_width=True, key=f"month_detail_{subcat_name.replace(' ', '_')}_{selected_month}")
+    
+    elif chart_type == "🌊 Área Empilhada":
+        # Create stacked area chart showing flow over time (like the drawing)
+        # This shows how the composition changes smoothly over time
+        
+        # Prepare data for each item across all months
+        fig = go.Figure()
+        
+        # Create x-axis with all months
+        x_months = []
+        for year in sorted(selected_years):
+            for month in months:
+                x_months.append(f"{month}/{str(year)[-2:]}")
+        
+        # Add area trace for each item
+        for item_name in sorted(all_items):
+            if item_name in items_data:
+                y_values = []
+                
+                for year in sorted(selected_years):
+                    if year in items_data[item_name]:
+                        monthly_data = items_data[item_name][year]
+                        for month in months:
+                            y_values.append(monthly_data.get(month, 0))
+                    else:
+                        # Fill with zeros if no data for this year
+                        y_values.extend([0] * 12)
+                
+                # Only add if there's some data
+                if any(v > 0 for v in y_values):
+                    # Get color for this item
+                    if item_name in item_base_colors:
+                        color = item_base_colors[item_name]
+                    else:
+                        color = default_colors[len(fig.data) % len(default_colors)]
+                    
+                    # Create hover text
+                    hover_texts = []
+                    for i, (month_label, value) in enumerate(zip(x_months, y_values)):
+                        hover_text = f"<b>{item_name}</b><br>"
+                        hover_text += f"<b>{month_label}</b><br>"
+                        hover_text += f"<b>Valor:</b> R$ {value:,.2f}"
+                        hover_texts.append(hover_text)
+                    
+                    fig.add_trace(go.Scatter(
+                        x=x_months,
+                        y=y_values,
+                        mode='lines',
+                        name=item_name,
+                        line=dict(width=0.5, color=color),
+                        fillcolor=color,
+                        stackgroup='one',  # This creates the stacked area effect
+                        hovertemplate='%{customdata}<extra></extra>',
+                        customdata=hover_texts
+                    ))
+        
+        if fig.data:
+            fig.update_layout(
+                title="Fluxo de Despesas ao Longo do Tempo",
+                height=450,
+                xaxis_title="Mês/Ano",
+                yaxis_title="Valor Acumulado (R$)",
+                yaxis=dict(tickformat=",.0f"),
+                hovermode='x unified',
+                showlegend=True,
+                legend=dict(
+                    orientation="v",
+                    yanchor="top",
+                    y=1,
+                    xanchor="left",
+                    x=1.02
+                )
+            )
+            
+            # Adjust x-axis for better readability
+            fig.update_xaxes(
+                tickangle=-45,
+                nticks=len(x_months) // 2  # Show every other month to avoid crowding
+            )
+            
+            st.plotly_chart(fig, use_container_width=True, key=f"area_{subcat_name.replace(' ', '_')}")
+            
+            # Add insights specific to area chart
+            st.markdown("**📊 Análise de Composição:**")
+            
+            # Calculate total for each month
+            monthly_totals = []
+            for i in range(len(x_months)):
+                total = sum(trace.y[i] for trace in fig.data if i < len(trace.y))
+                monthly_totals.append(total)
+            
+            if monthly_totals:
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    # Find month with highest total
+                    max_idx = monthly_totals.index(max(monthly_totals))
+                    if max_idx < len(x_months):
+                        st.metric(
+                            "Pico de Gastos",
+                            x_months[max_idx],
+                            f"R$ {monthly_totals[max_idx]:,.0f}"
+                        )
+                
+                with col2:
+                    # Find month with lowest total
+                    non_zero_totals = [(i, t) for i, t in enumerate(monthly_totals) if t > 0]
+                    if non_zero_totals:
+                        min_idx = min(non_zero_totals, key=lambda x: x[1])[0]
+                        st.metric(
+                            "Menor Gasto",
+                            x_months[min_idx],
+                            f"R$ {monthly_totals[min_idx]:,.0f}"
+                        )
+                
+                with col3:
+                    # Calculate average composition
+                    avg_total = sum(monthly_totals) / len([t for t in monthly_totals if t > 0]) if any(monthly_totals) else 0
+                    st.metric(
+                        "Média Mensal",
+                        f"R$ {avg_total:,.0f}",
+                        f"{len(fig.data)} itens"
+                    )
+            
+            return  # Exit after rendering area chart
+    
+    elif chart_type == "🔥 Heatmap":
+        # Create heatmap showing patterns across months and items
+        import numpy as np
+        
+        # Prepare data matrix
+        all_months_labels = []
+        for year in sorted(selected_years):
+            for month in months:
+                all_months_labels.append(f"{month}/{str(year)[-2:]}")
+        
+        # Create matrix: items x months
+        matrix_data = []
+        item_names_list = sorted(list(all_items))
+        
+        for item_name in item_names_list:
+            row = []
+            for year in sorted(selected_years):
+                if item_name in items_data and year in items_data[item_name]:
+                    monthly_data = items_data[item_name][year]
+                    for month in months:
+                        row.append(monthly_data.get(month, 0))
+                else:
+                    row.extend([0] * 12)
+            matrix_data.append(row)
+        
+        if matrix_data:
+            # Create heatmap
+            fig = go.Figure(data=go.Heatmap(
+                z=matrix_data,
+                x=all_months_labels,
+                y=item_names_list,
+                colorscale='RdYlBu_r',
+                hovertemplate='<b>%{y}</b><br>' +
+                              '<b>%{x}</b><br>' +
+                              '<b>Valor:</b> R$ %{z:,.0f}<extra></extra>',
+                colorbar=dict(title="Valor (R$)")
+            ))
+            
+            fig.update_layout(
+                title="Padrões de Gastos por Item e Mês",
+                height=300 + (len(item_names_list) * 30),
+                xaxis_title="Mês/Ano",
+                yaxis_title="Item",
+                xaxis={'tickangle': -45}
+            )
+            
+            # Show insights below heatmap
+            st.plotly_chart(fig, use_container_width=True, key=f"heatmap_{subcat_name.replace(' ', '_')}")
+            
+            # Identify patterns
+            st.markdown("**🔍 Padrões Identificados:**")
+            
+            # Find highest spending months
+            total_by_month = np.sum(matrix_data, axis=0)
+            peak_months = np.argsort(total_by_month)[-3:][::-1]
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown("**📈 Meses com Maior Gasto:**")
+                for idx in peak_months:
+                    if idx < len(all_months_labels) and total_by_month[idx] > 0:
+                        st.caption(f"• {all_months_labels[idx]}: R$ {total_by_month[idx]:,.0f}")
+            
+            with col2:
+                st.markdown("**💰 Item Mais Consistente:**")
+                # Find item with most consistent spending (lowest std dev relative to mean)
+                for i, item_name in enumerate(item_names_list):
+                    item_values = [v for v in matrix_data[i] if v > 0]
+                    if len(item_values) > 3:
+                        mean_val = np.mean(item_values)
+                        std_val = np.std(item_values)
+                        cv = std_val / mean_val if mean_val > 0 else float('inf')
+                        if cv < 0.5:  # Low coefficient of variation
+                            st.caption(f"• {item_name}: Variação de {cv*100:.1f}%")
+                            break
+            
+            return  # Exit early for heatmap
+    
+    elif chart_type == "📊 Análise de Tendência":
+        # Create trend analysis with growth rates
+        fig = go.Figure()
+        
+        # Calculate growth rates for each item
+        growth_data = {}
+        
+        for item_name in sorted(all_items):
+            if item_name in items_data and len(items_data[item_name]) > 1:
+                years_with_data = sorted(items_data[item_name].keys())
+                if len(years_with_data) >= 2:
+                    # Calculate year-over-year growth
+                    first_year = years_with_data[0]
+                    last_year = years_with_data[-1]
+                    
+                    first_total = sum(items_data[item_name][first_year].values())
+                    last_total = sum(items_data[item_name][last_year].values())
+                    
+                    if first_total > 0:
+                        growth_rate = ((last_total - first_total) / first_total) * 100
+                        growth_data[item_name] = {
+                            'growth': growth_rate,
+                            'first_year': first_year,
+                            'last_year': last_year,
+                            'first_total': first_total,
+                            'last_total': last_total
+                        }
+        
+        if growth_data:
+            # Sort by growth rate
+            sorted_items = sorted(growth_data.items(), key=lambda x: x[1]['growth'], reverse=True)
+            
+            # Create waterfall chart showing changes
+            item_names_sorted = [item[0] for item in sorted_items]
+            growth_rates = [item[1]['growth'] for item in sorted_items]
+            
+            # Color code by positive/negative growth
+            colors = ['green' if g > 0 else 'red' for g in growth_rates]
+            
+            fig.add_trace(go.Bar(
+                x=item_names_sorted,
+                y=growth_rates,
+                marker_color=colors,
+                text=[f"{g:+.1f}%" for g in growth_rates],
+                textposition='outside',
+                hovertemplate='<b>%{x}</b><br>' +
+                              '<b>Crescimento:</b> %{y:+.1f}%<br>' +
+                              '<extra></extra>'
+            ))
+            
+            fig.update_layout(
+                title=f"Taxa de Crescimento ({sorted(selected_years)[0]} → {sorted(selected_years)[-1]})",
+                height=400,
+                xaxis_title="Item",
+                yaxis_title="Taxa de Crescimento (%)",
+                showlegend=False
+            )
+            
+            st.plotly_chart(fig, use_container_width=True, key=f"trend_{subcat_name.replace(' ', '_')}")
+            
+            # Show detailed insights
+            st.markdown("**📊 Análise de Tendências:**")
+            
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.markdown("**🚀 Maior Crescimento:**")
+                for item, data in sorted_items[:2]:
+                    if data['growth'] > 0:
+                        st.success(f"{item}: +{data['growth']:.1f}%")
+                        st.caption(f"R$ {data['first_total']:,.0f} → R$ {data['last_total']:,.0f}")
+            
+            with col2:
+                st.markdown("**📉 Maior Redução:**")
+                for item, data in sorted_items[-2:]:
+                    if data['growth'] < 0:
+                        st.error(f"{item}: {data['growth']:.1f}%")
+                        st.caption(f"R$ {data['first_total']:,.0f} → R$ {data['last_total']:,.0f}")
+            
+            with col3:
+                st.markdown("**📈 Resumo Geral:**")
+                total_first = sum(d['first_total'] for d in growth_data.values())
+                total_last = sum(d['last_total'] for d in growth_data.values())
+                overall_growth = ((total_last - total_first) / total_first * 100) if total_first > 0 else 0
+                
+                if overall_growth > 0:
+                    st.metric("Crescimento Total", f"+{overall_growth:.1f}%", f"R$ {total_last - total_first:,.0f}")
+                else:
+                    st.metric("Redução Total", f"{overall_growth:.1f}%", f"R$ {total_last - total_first:,.0f}")
+            
+            return  # Exit early for trend analysis
+    
+    elif chart_type == "📚 Barras Empilhadas":
+        # Create stacked bar chart showing composition over time
+        for item_name in sorted(all_items):
+            if item_name in items_data:
+                # Combine data from all years
+                all_values = []
+                all_labels = []
+                
+                for year in selected_years:
+                    if year in items_data[item_name]:
+                        monthly_data = items_data[item_name][year]
+                        values = [monthly_data.get(month, 0) for month in months]
+                        all_values.extend(values)
+                        all_labels.extend([f"{month}/{str(year)[-2:]}" for month in months])
+                
+                if any(v > 0 for v in all_values):
+                    # Get color for this item
+                    if item_name in item_base_colors:
+                        color = item_base_colors[item_name]
+                    else:
+                        color = default_colors[len(fig.data) % len(default_colors)]
+                    
+                    fig.add_trace(go.Bar(
+                        name=item_name,
+                        x=all_labels,
+                        y=all_values,
+                        marker_color=color,
+                        hovertemplate='<b>%{fullData.name}</b><br>' +
+                                      '<b>%{x}</b><br>' +
+                                      '<b>Valor:</b> R$ %{y:,.2f}<extra></extra>'
+                    ))
+        
+        fig.update_layout(barmode='stack')
+    
+    else:  # Line chart - cleaner version with continuous x-axis
+        # Create continuous x-axis with all months from all years
+        x_axis_continuous = []
+        for year in sorted(selected_years):
+            for month in months:
+                x_axis_continuous.append(f"{month}/{str(year)[-2:]}")
+        
+        # Add a trace for each item
+        color_idx = 0
+        for item_name in sorted(all_items):
+            if item_name in items_data:
+                # Get base color for this item
+                if item_name in item_base_colors:
+                    item_color = item_base_colors[item_name]
+                else:
+                    item_color = default_colors[color_idx % len(default_colors)]
+                    color_idx += 1
+                
+                # Collect all values across years
+                all_values = []
+                hover_texts = []
+                
+                for year in sorted(selected_years):
+                    if year in items_data[item_name]:
+                        monthly_data = items_data[item_name][year]
+                        for month in months:
+                            value = monthly_data.get(month, 0)
+                            all_values.append(value)
+                            
+                            hover_text = f"<b>{item_name}</b><br>"
+                            hover_text += f"<b>{month} {year}</b><br>"
+                            hover_text += f"<b>Valor:</b> R$ {value:,.2f}"
+                            hover_texts.append(hover_text)
+                    else:
+                        # Fill with zeros if no data for this year
+                        all_values.extend([0] * 12)
+                        for month in months:
+                            hover_text = f"<b>{item_name}</b><br>"
+                            hover_text += f"<b>{month} {year}</b><br>"
+                            hover_text += f"<b>Sem dados</b>"
+                            hover_texts.append(hover_text)
+                
+                if any(v > 0 for v in all_values):
+                    fig.add_trace(go.Scatter(
+                        x=x_axis_continuous,
+                        y=all_values,
+                        mode='lines+markers',
+                        name=item_name,
+                        line=dict(color=item_color, width=2),
+                        marker=dict(size=4, color=item_color),
+                        hovertemplate='%{customdata}<extra></extra>',
+                        customdata=hover_texts
+                    ))
+    
+    if fig.data:
+        # Different layout configurations based on chart type
+        if chart_type == "📊 Barras Agrupadas":
+            fig.update_layout(
+                title="Média Mensal por Item",
+                barmode='group',
+                height=350,
+                margin=dict(t=40, b=30, l=50, r=20),
+                xaxis_title="Item",
+                yaxis_title="Valor Médio Mensal (R$)",
+                yaxis=dict(tickformat=",.0f"),
+                showlegend=True
+            )
+        elif chart_type == "📚 Barras Empilhadas":
+            fig.update_layout(
+                height=400,
+                margin=dict(t=20, b=50, l=50, r=20),
+                xaxis_title="Mês/Ano",
+                yaxis_title="Valor (R$)",
+                yaxis=dict(tickformat=",.0f"),
+                showlegend=True,
+                xaxis_tickangle=-45
+            )
+        else:  # Line chart
+            fig.update_layout(
+                height=400,
+                margin=dict(t=20, b=50, l=50, r=20),
+                xaxis_title="Mês/Ano",
+                yaxis_title="Valor (R$)",
+                yaxis=dict(tickformat=",.0f"),
+                showlegend=True,
+                legend=dict(
+                    orientation="v",
+                    yanchor="top",
+                    y=1,
+                    xanchor="left",
+                    x=1.02
+                ),
+                hovermode='x unified'
+            )
+            # Adjust x-axis to show labels at an angle and skip some for clarity
+            fig.update_xaxes(
+                tickangle=-45,
+                nticks=20  # Limit number of ticks shown
+            )
+        
+        # Create unique key
+        section_name = next(iter(section_data.values())).get('name', 'unknown')
+        safe_section = section_name.replace(' ', '_').replace('/', '_')
+        safe_subcat = subcat_name.replace(' ', '_').replace('/', '_')
+        
+        st.plotly_chart(fig, use_container_width=True, key=f"items_comparison_{safe_section}_{safe_subcat}")
+        
+        # Show different tips based on chart type
+        if chart_type == "📊 Barras Agrupadas":
+            st.caption("💡 **Dica:** O gráfico mostra a média mensal de cada item. Use o seletor abaixo para ver meses específicos.")
+        elif chart_type == "📚 Barras Empilhadas":
+            st.caption("💡 **Dica:** Veja a composição total das despesas ao longo do tempo. As barras mostram como cada item contribui para o total.")
+        else:
+            st.caption("💡 **Dica:** Linhas sólidas = 2023, Linhas tracejadas = 2024. Use a legenda para mostrar/ocultar itens.")
+        
+        # Show top items summary only if not grouped bars (since it shows averages separately)
+        if chart_type != "📊 Barras Agrupadas":
+            # Show top items by total value
+            items_totals = []
+            for item_name in sorted(all_items):
+                if item_name in items_data:
+                    total = 0
+                    for year_data in items_data[item_name].values():
+                        total += sum(year_data.values())
+                    if total > 0:
+                        items_totals.append((item_name, total))
+            
+            if items_totals:
+                items_totals.sort(key=lambda x: x[1], reverse=True)
+                
+                # Show top 3 items
+                st.markdown("**🏆 Top 3 Itens por Valor Total:**")
+                for i, (item, total) in enumerate(items_totals[:3]):
+                    medal = ["🥇", "🥈", "🥉"][i]
+                    st.caption(f"{medal} {item}: R$ {total:,.0f}")
+    else:
+        st.info("Sem dados suficientes para criar o gráfico de comparação")
+
+
+def _render_subcategory_insights(section_data: Dict, selected_years: List[int], subcat_name: str):
+    """
+    Render advanced insights for subcategory analysis
+    """
+    months = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ']
+    
+    # Collect all data for analysis
+    all_data = {}
+    for year in selected_years:
+        if year in section_data:
+            subcats = section_data[year].get('subcategories', [])
+            subcat = next((s for s in subcats if s['name'] == subcat_name), None)
+            if subcat:
+                all_data[year] = subcat
+    
+    if not all_data:
+        return
+    
+    st.markdown("---")
+    st.markdown("**🧠 Insights Inteligentes:**")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.markdown("**📊 Análise de Sazonalidade:**")
+        
+        # Analyze seasonal patterns
+        monthly_totals = {month: 0 for month in months}
+        month_counts = {month: 0 for month in months}
+        
+        for year_data in all_data.values():
+            monthly = year_data.get('monthly', {})
+            for month, value in monthly.items():
+                if value > 0:
+                    monthly_totals[month] = monthly_totals.get(month, 0) + value
+                    month_counts[month] = month_counts.get(month, 0) + 1
+        
+        # Calculate averages
+        monthly_avg = {}
+        for month in months:
+            if month_counts.get(month, 0) > 0:
+                monthly_avg[month] = monthly_totals[month] / month_counts[month]
+        
+        if monthly_avg:
+            # Find peak and low seasons
+            sorted_months = sorted(monthly_avg.items(), key=lambda x: x[1], reverse=True)
+            
+            if len(sorted_months) >= 3:
+                st.success(f"📈 Pico: {sorted_months[0][0]} (R$ {sorted_months[0][1]:,.0f})")
+                st.error(f"📉 Baixa: {sorted_months[-1][0]} (R$ {sorted_months[-1][1]:,.0f})")
+                
+                # Calculate seasonality index
+                avg_value = sum(monthly_avg.values()) / len(monthly_avg)
+                max_deviation = max(abs(v - avg_value) for v in monthly_avg.values())
+                seasonality_index = (max_deviation / avg_value * 100) if avg_value > 0 else 0
+                
+                if seasonality_index > 50:
+                    st.warning(f"⚠️ Alta sazonalidade: {seasonality_index:.0f}%")
+                else:
+                    st.info(f"✅ Baixa sazonalidade: {seasonality_index:.0f}%")
+    
+    with col2:
+        st.markdown("**💡 Otimização Sugerida:**")
+        
+        # Find optimization opportunities
+        items_analysis = {}
+        for year_data in all_data.values():
+            items = year_data.get('items', [])
+            for item in items:
+                item_name = item.get('name')
+                if item_name:
+                    if item_name not in items_analysis:
+                        items_analysis[item_name] = []
+                    items_analysis[item_name].append(item.get('value', 0))
+        
+        # Find items with high variance
+        optimization_suggestions = []
+        for item_name, values in items_analysis.items():
+            if len(values) > 1 and max(values) > 0:
+                variance_ratio = (max(values) - min(values)) / max(values)
+                if variance_ratio > 0.5:
+                    optimization_suggestions.append({
+                        'item': item_name,
+                        'potential_saving': max(values) - min(values),
+                        'variance': variance_ratio * 100
+                    })
+        
+        if optimization_suggestions:
+            sorted_suggestions = sorted(optimization_suggestions, key=lambda x: x['potential_saving'], reverse=True)
+            for suggestion in sorted_suggestions[:2]:
+                st.info(f"💰 {suggestion['item']}")
+                st.caption(f"Economia potencial: R$ {suggestion['potential_saving']:,.0f}")
+        else:
+            st.success("✅ Gastos consistentes")
+    
+    with col3:
+        st.markdown("**🎯 Previsão de Tendência:**")
+        
+        # Simple trend prediction
+        if len(selected_years) >= 2:
+            yearly_totals = []
+            for year in sorted(selected_years):
+                if year in all_data:
+                    yearly_totals.append(all_data[year].get('value', 0))
+            
+            if len(yearly_totals) >= 2:
+                # Calculate average growth rate
+                growth_rates = []
+                for i in range(1, len(yearly_totals)):
+                    if yearly_totals[i-1] > 0:
+                        growth = ((yearly_totals[i] - yearly_totals[i-1]) / yearly_totals[i-1]) * 100
+                        growth_rates.append(growth)
+                
+                if growth_rates:
+                    avg_growth = sum(growth_rates) / len(growth_rates)
+                    next_year = sorted(selected_years)[-1] + 1
+                    projected_value = yearly_totals[-1] * (1 + avg_growth/100)
+                    
+                    st.metric(
+                        f"Projeção {next_year}",
+                        f"R$ {projected_value:,.0f}",
+                        f"{avg_growth:+.1f}% a.a."
+                    )
+                    
+                    if avg_growth > 20:
+                        st.warning("⚠️ Crescimento acelerado - revisar orçamento")
+                    elif avg_growth < -10:
+                        st.success("✅ Redução significativa de custos")
 
 
 def _render_item_period_comparison(subcat_data: Dict, selected_years: List[int], item_name: str, year_colors: Dict, time_period: str, section_data: Dict, subcat_name: str):
@@ -3780,7 +5469,12 @@ def _render_seasonal_month_comparison(expense_data: Dict, selected_years: List[i
                 fig.update_layout(
                     title=f"{section_name} - {selected_month}",
                     height=300,
-                    showlegend=False
+                    showlegend=False,
+                    xaxis=dict(
+                        tickmode='array',
+                        tickvals=[str(year) for year in years],
+                        ticktext=[str(year) for year in years]
+                    )
                 )
                 
                 st.plotly_chart(fig, use_container_width=True)
