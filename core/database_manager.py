@@ -612,7 +612,7 @@ class DatabaseManager:
             return default
     
     def clear_all_data(self) -> bool:
-        """Clear all data from database"""
+        """Clear all data from database and uploaded files"""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
@@ -623,6 +623,7 @@ class DatabaseManager:
                 cursor.execute("DELETE FROM user_preferences")
                 cursor.execute("DELETE FROM shared_financial_data")
                 cursor.execute("DELETE FROM upload_history")
+                cursor.execute("DELETE FROM uploaded_files")
                 
                 conn.commit()
                 return True

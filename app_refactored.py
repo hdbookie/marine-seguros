@@ -35,11 +35,14 @@ from utils.formatters import format_time_difference
 # Import tab modules
 from ui.tabs.upload_legacy_tab import render_upload_tab
 from ui.tabs.dashboard_legacy_tab import render_dashboard_tab
+from ui.tabs.enhanced_dashboard_tab import render_enhanced_dashboard_tab
 from ui.tabs.micro_analysis import render_micro_analysis_tab
-from ui.tabs.ai_insights_legacy_tab import render_ai_insights_tab
-from ui.tabs.ai_chat_legacy_tab import render_ai_chat_tab
+from ui.tabs.micro_analysis_v2 import render_micro_analysis_v2_tab
+from ui.tabs.ai_insights_v2_tab import render_ai_insights_v2_tab  # AI Insights
+from ui.tabs.ai_chat_v2_tab import render_ai_chat_v2_tab
 from ui.tabs.auth_management_tab_simple import render_auth_management_tab
 from ui.tabs.debug_extractors_tab import render_debug_extractors_tab
+from ui.tabs.forecast_tab import render_forecast_tab  # New forecast tab
 
 # Load environment variables
 load_dotenv()
@@ -226,7 +229,7 @@ if hasattr(st.session_state, 'extracted_data') and st.session_state.extracted_da
 tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
     "📁 Upload", 
     "📊 Dashboard Macro", 
-    "🔬 Análise Micro", 
+    "🆕 Micro V2",
     "🤖 AI Insights", 
     "💬 AI Chat",
     "🔐 Autenticação",
@@ -243,39 +246,33 @@ with tab1:
 with tab2:
     render_dashboard_tab(db, use_unified_extractor=True)
 
-# Tab 3: Detailed Breakdown
+# Tab 3: New Micro Analysis V2
 with tab3:
     if hasattr(st.session_state, 'unified_data') and st.session_state.unified_data is not None:
-        render_micro_analysis_tab(st.session_state.unified_data)
+        render_micro_analysis_v2_tab(st.session_state.unified_data)
     elif hasattr(st.session_state, 'extracted_data') and st.session_state.extracted_data is not None:
-        # Fallback for backward compatibility
-        render_micro_analysis_tab(st.session_state.extracted_data)
+        render_micro_analysis_v2_tab(st.session_state.extracted_data)
     else:
-        st.info("👆 Carregue arquivos na aba 'Upload' primeiro.")
+        st.info("👆 Carregue arquivos na aba 'Upload' primeiro para ver a nova análise hierárquica.")
 
 # Tab 4: AI Insights
 with tab4:
-    render_ai_insights_tab(db, gemini_api_key, language)
+    render_ai_insights_v2_tab(db, gemini_api_key, language)
 
 # Tab 5: AI Chat
 with tab5:
-    render_ai_chat_tab(gemini_api_key)
+    render_ai_chat_v2_tab(db, gemini_api_key, language)
 
 # Tab 6: Authentication Management
 with tab6:
     render_auth_management_tab()
 
-# Tab 7: Predictions (placeholder)
+# Tab 7: Predictions
 with tab7:
-    st.header("📈 Previsões Financeiras")
-    st.info("🚧 Esta funcionalidade está em desenvolvimento...")
-    st.markdown("""
-    Em breve você poderá:
-    - Prever receitas futuras
-    - Estimar custos projetados
-    - Simular cenários financeiros
-    - Análise de tendências com ML
-    """)
+    if hasattr(st.session_state, 'extracted_data') and st.session_state.extracted_data:
+        render_forecast_tab(db, st.session_state.extracted_data)
+    else:
+        st.info("👆 Carregue arquivos na aba 'Upload' primeiro para usar as previsões financeiras.")
 
 # Tab 8: Integration (placeholder)
 with tab8:

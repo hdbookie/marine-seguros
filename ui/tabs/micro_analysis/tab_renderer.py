@@ -288,7 +288,10 @@ def _aggregate_semester(monthly_df):
 def _render_tab_content(tab_key, df, flexible_data, group_df, major_groups, selected_years, view_type):
     """Render content for a specific tab"""
     if tab_key == 'overview':
-        # Overview tab - Interactive cost breakdown first
+        # Overview tab - P&L Evolution first
+        render_pnl_evolution(df, view_type)
+        
+        # Interactive cost breakdown
         st.markdown("---")
         render_interactive_cost_breakdown(df, flexible_data, full_width=True)
         

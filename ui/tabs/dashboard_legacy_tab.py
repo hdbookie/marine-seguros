@@ -54,7 +54,7 @@ def get_monthly_xaxis_config(display_df, x_col):
     return xaxis_config
 
 
-def render_dashboard_tab(db, use_unified_extractor=True):
+def render_dashboard_tab(db, use_unified_extractor=True, key_prefix=""):
     """Render the dashboard tab with financial visualizations"""
     
     st.header("Dashboard Financeiro")
@@ -170,7 +170,7 @@ def render_dashboard_tab(db, use_unified_extractor=True):
             view_type = st.selectbox(
                 "Visualização",
                 ["Anual", "Mensal", "Trimestral", "Trimestre Personalizado", "Semestral", "Personalizado"],
-                key="view_type"
+                key=f"{key_prefix}legacy_view_type"
             )
 
         with col_filter2:
@@ -724,7 +724,7 @@ def render_dashboard_tab(db, use_unified_extractor=True):
                     }
                     st.plotly_chart(fig_revenue, use_container_width=True, config=config)
                 else:
-                    st.plotly_chart(fig_revenue, use_container_width=True)
+                    st.plotly_chart(fig_revenue, use_container_width=True, key=f"{key_prefix}revenue_chart")
         else:
             if display_df.empty:
                 st.info("📊 Nenhum dado disponível para o período selecionado. Verifique os filtros.")
@@ -815,7 +815,7 @@ def render_dashboard_tab(db, use_unified_extractor=True):
                     margin=dict(t=80, b=100 if view_type == "Mensal" else 100),
                     showlegend=False
                 )
-                st.plotly_chart(fig_margin, use_container_width=True)
+                st.plotly_chart(fig_margin, use_container_width=True, key=f"{key_prefix}margin_chart")
 
         # New Financial Metrics Graphs
         st.subheader("📊 Análise de Custos e Margens")
@@ -997,7 +997,7 @@ def render_dashboard_tab(db, use_unified_extractor=True):
                     hoverinfo='skip'
                 ))
                 
-                st.plotly_chart(fig_var_costs, use_container_width=True)
+                st.plotly_chart(fig_var_costs, use_container_width=True, key=f"{key_prefix}var_costs_chart")
 
         # 2. Fixed Costs - Full width
         if not display_df.empty and 'fixed_costs' in display_df.columns:
@@ -1008,7 +1008,7 @@ def render_dashboard_tab(db, use_unified_extractor=True):
                 if view_type == "Mensal":
                     st.plotly_chart(fig_fixed, use_container_width=True, config=get_plotly_config())
                 else:
-                    st.plotly_chart(fig_fixed, use_container_width=True)
+                    st.plotly_chart(fig_fixed, use_container_width=True, key=f"{key_prefix}fixed_chart")
 
         # 3. Variable Costs - Full width (similar to Fixed Costs)
         if not display_df.empty and 'variable_costs' in display_df.columns:
@@ -1019,7 +1019,7 @@ def render_dashboard_tab(db, use_unified_extractor=True):
                 if view_type == "Mensal":
                     st.plotly_chart(fig_variable, use_container_width=True, config=get_plotly_config())
                 else:
-                    st.plotly_chart(fig_variable, use_container_width=True)
+                    st.plotly_chart(fig_variable, use_container_width=True, key=f"{key_prefix}variable_chart")
 
         # 4. Contribution Margin - Full width
         if not display_df.empty and 'contribution_margin' in display_df.columns:
@@ -1030,7 +1030,7 @@ def render_dashboard_tab(db, use_unified_extractor=True):
                 if view_type == "Mensal":
                     st.plotly_chart(fig_contrib, use_container_width=True, config=get_plotly_config())
                 else:
-                    st.plotly_chart(fig_contrib, use_container_width=True)
+                    st.plotly_chart(fig_contrib, use_container_width=True, key=f"{key_prefix}contrib_chart")
 
         # 4. Operational Costs - Full width  
         st.subheader("⚙️ Custos Operacionais")
@@ -1088,7 +1088,7 @@ def render_dashboard_tab(db, use_unified_extractor=True):
                 if view_type == "Mensal":
                     st.plotly_chart(fig_op_costs, use_container_width=True, config=get_plotly_config())
                 else:
-                    st.plotly_chart(fig_op_costs, use_container_width=True)
+                    st.plotly_chart(fig_op_costs, use_container_width=True, key=f"{key_prefix}op_costs_chart")
 
         # 4.5. Non-Operational Costs - Full width
         st.subheader("💸 Custos Não Operacionais")
@@ -1183,7 +1183,7 @@ def render_dashboard_tab(db, use_unified_extractor=True):
                     margin=dict(t=50, b=100 if view_type == "Mensal" else 100),
                     hovermode='x unified'
                 )
-                st.plotly_chart(fig_non_op_costs, use_container_width=True)
+                st.plotly_chart(fig_non_op_costs, use_container_width=True, key=f"{key_prefix}non_op_costs_chart")
 
         # 5. Result (Profit) - Full width
         st.subheader("💰 Resultado (Lucro Líquido)")
@@ -1204,7 +1204,7 @@ def render_dashboard_tab(db, use_unified_extractor=True):
                 if view_type == "Mensal":
                     st.plotly_chart(fig_result, use_container_width=True, config=get_plotly_config())
                 else:
-                    st.plotly_chart(fig_result, use_container_width=True)
+                    st.plotly_chart(fig_result, use_container_width=True, key=f"{key_prefix}result_chart")
 
         # Cost Structure Comparison
         st.subheader("📊 Estrutura de Custos")
@@ -1462,7 +1462,7 @@ def render_dashboard_tab(db, use_unified_extractor=True):
                 fig_cost_structure.update_xaxes(showline=True, linewidth=2, linecolor='#E5E7EB')
                 fig_cost_structure.update_yaxes(showline=True, linewidth=2, linecolor='#E5E7EB')
                 
-                st.plotly_chart(fig_cost_structure, use_container_width=True)
+                st.plotly_chart(fig_cost_structure, use_container_width=True, key=f"{key_prefix}cost_structure_chart")
 
 
         # Anomalies
