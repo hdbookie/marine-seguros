@@ -334,10 +334,7 @@ def render_enhanced_heatmaps(financial_data: Dict, selected_years: List[int]):
         "Tipo de Análise",
         [
             "🌡️ Intensidade de Gastos",
-            "📈 Taxa de Crescimento YoY", 
-            "🔍 Variação Mensal",
-            "⚖️ Análise de Eficiência",
-            "🎯 Concentração de Custos"
+            "📈 Taxa de Crescimento YoY"
         ]
     )
     
@@ -345,12 +342,6 @@ def render_enhanced_heatmaps(financial_data: Dict, selected_years: List[int]):
         _render_intensity_heatmap(financial_data, selected_years)
     elif heatmap_type == "📈 Taxa de Crescimento YoY":
         _render_growth_heatmap(financial_data, selected_years)
-    elif heatmap_type == "🔍 Variação Mensal":
-        _render_monthly_variation_heatmap(financial_data, selected_years)
-    elif heatmap_type == "⚖️ Análise de Eficiência":
-        _render_efficiency_heatmap(financial_data, selected_years)
-    elif heatmap_type == "🎯 Concentração de Custos":
-        _render_concentration_heatmap(financial_data, selected_years)
 
 
 def _render_intensity_heatmap(financial_data: Dict, selected_years: List[int]):
