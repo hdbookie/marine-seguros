@@ -80,12 +80,17 @@ class ChatInterface:
             # Create columns for question buttons
             cols = st.columns(2)
             
+            # Generate unique key using question hash
+            import hashlib
+            
             for idx, question in enumerate(st.session_state.suggested_questions[:4]):
                 col_idx = idx % 2
                 with cols[col_idx]:
+                    # Create unique key based on question content and index
+                    unique_key = hashlib.md5(f"{question}_{idx}_chat_v2".encode()).hexdigest()[:8]
                     if st.button(
                         question,
-                        key=f"v2_suggested_{idx}",  # Changed to avoid key conflicts
+                        key=f"v2_suggested_{unique_key}",
                         use_container_width=True,
                         help="Clique para fazer esta pergunta"
                     ):
@@ -128,12 +133,17 @@ class ChatInterface:
                 
                 # Add feedback buttons
                 col1, col2, col3 = st.columns([1, 1, 8])
+                msg_id = message.get('id', '')
+                # Use timestamp if id is empty to ensure uniqueness
+                if not msg_id:
+                    import time
+                    msg_id = str(int(time.time() * 1000))
                 with col1:
-                    if st.button("👍", key=f"v2_like_{message.get('id', '')}"):
-                        self._record_feedback(message.get('id'), 'positive')
+                    if st.button("👍", key=f"v2_like_{msg_id}"):
+                        self._record_feedback(msg_id, 'positive')
                 with col2:
-                    if st.button("👎", key=f"v2_dislike_{message.get('id', '')}"):
-                        self._record_feedback(message.get('id'), 'negative')
+                    if st.button("👎", key=f"v2_dislike_{msg_id}"):
+                        self._record_feedback(msg_id, 'negative')
     
     def _render_structured_response(self, content: Dict):
         """
