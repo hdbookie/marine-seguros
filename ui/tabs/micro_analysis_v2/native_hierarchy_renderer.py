@@ -5,6 +5,7 @@ Displays Excel data in its original 3-level structure
 
 import streamlit as st
 import pandas as pd
+import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 from typing import Dict, List, Optional, Any
@@ -4586,29 +4587,29 @@ def _render_month_to_month_analysis(expense_data: Dict, selected_years: List[int
     # Calculate month-to-month changes for each section
     st.subheader(f"📊 Variações Mensais em {analysis_year}")
     
-    # Handle different drill levels for single year
-    if drill_level == "📁 Subcategorias" and selected_entities:
-        # Render subcategory level for single year
-        for section in sections:
-            if section['name'] == selected_section:
+    # Handle different entity types for single year based on tree selection
+    if selected_entities and selected_entities.get('items'):
+        entity_type = selected_entities.get('type')
+        items = selected_entities.get('items', [])
+        
+        if entity_type == 'subcategories':
+            # Render subcategory level for single year
+            for section in sections:
                 for subcat in section.get('subcategories', []):
-                    if subcat['name'] in selected_entities:
+                    subcat_id = f"{section['name']}_{subcat['name']}"
+                    if subcat_id in items:
                         _render_single_year_entity(subcat, months, analysis_year, chart_type, f"📁 {subcat['name']}")
-                break
-        return
-    
-    elif drill_level == "📌 Itens Individuais" and selected_entities:
-        # Render item level for single year
-        for section in sections:
-            if section['name'] == selected_section:
+            return
+        
+        elif entity_type == 'items':
+            # Render item level for single year
+            for section in sections:
                 for subcat in section.get('subcategories', []):
-                    if subcat['name'] == selected_subcat:
-                        for item in subcat.get('items', []):
-                            if item['name'] in selected_entities:
-                                _render_single_year_entity(item, months, analysis_year, chart_type, f"📌 {item['name']}")
-                        break
-                break
-        return
+                    for item in subcat.get('items', []):
+                        item_id = f"{section['name']}_{subcat['name']}_{item['name']}"
+                        if item_id in items:
+                            _render_single_year_entity(item, months, analysis_year, chart_type, f"📌 {item['name']}")
+            return
     
     # Default: section level rendering
     # Special handling for heat map - render all sections together
