@@ -33,24 +33,19 @@ def render_native_hierarchy_tab(financial_data: Dict, full_financial_data: Dict 
     
     # First, render visualization type to determine if we need multi-select
     with col3:
-        # Visualization type selector
+        # Visualization type selector - only show implemented options
         visualization_type = st.selectbox(
             "🔧 Visualização",
             [
                 "📂 Estrutura Hierárquica",
                 "📊 Comparação Entre Anos",
                 "📈 Evolução Subcategorias",
-                "🌊 Análise Waterfall",
-                "📈 Tendências Temporais", 
-                "🎯 Análise de Contribuição",
-                "🔥 Mapas de Calor",
-                "🌅 Gráfico Sunburst",
-                "📋 Tabela Detalhada",
-                "💡 Insights Automáticos"
+                "🔍 Exploração Interativa",
+                "🌊 Análise Waterfall"
             ],
             index=0,
             key="viz_type_selector",
-            help="💡 Para visão mensal dentro de um ano: use 'Estrutura Hierárquica' + 'Mensal'. Para comparar meses entre anos: use 'Comparação Entre Anos'"
+            help="💡 Para visão mensal dentro de um ano: use 'Estrutura Hierárquica' + 'Mensal'. Para comparar meses entre anos: use 'Comparação Entre Anos'. Use 'Exploração Interativa' para navegar pelos níveis hierárquicos."
         )
     
     with col1:
@@ -144,6 +139,10 @@ def render_native_hierarchy_tab(financial_data: Dict, full_financial_data: Dict 
         # Render subcategory evolution across years
         _render_subcategory_evolution(multi_year_data, selected_years, time_period)
     
+    elif visualization_type == "🔍 Exploração Interativa":
+        # Render interactive drill-down visualization
+        _render_interactive_drilldown(period_data, selected_year, time_period)
+    
     elif visualization_type == "🌊 Análise Waterfall":
         if time_period == "📅 Anual":
             from .advanced_visualizations import render_waterfall_drilldown
@@ -162,63 +161,27 @@ def render_native_hierarchy_tab(financial_data: Dict, full_financial_data: Dict 
             st.markdown("### 📊 Composição por Categoria")
             _render_composition_chart(period_data)
     
-    elif visualization_type == "📈 Tendências Temporais":
-        if time_period != "📅 Anual":
-            # Show intra-year trends using period data
-            _render_period_trends(period_data, time_period, selected_year)
-        elif full_financial_data and len(full_financial_data) >= 2:
-            from .time_series_analysis import render_advanced_time_series_analysis
-            available_years = sorted(full_financial_data.keys())
-            render_advanced_time_series_analysis(full_financial_data, available_years)
-        else:
-            st.warning("⚠️ Análise temporal requer dados de múltiplos anos ou períodos intra-ano")
-            st.info("Mostrando visualizações alternativas...")
-            
-            # Show alternative visualizations
-            col1, col2 = st.columns(2)
-            with col1:
-                _render_sunburst(period_data)
-            with col2:
-                _render_treemap(period_data)
-    
-    elif visualization_type == "💡 Insights Automáticos":
-        if time_period != "📅 Anual":
-            # Show period-specific insights
-            _render_period_insights(period_data, time_period, selected_year)
-        elif full_financial_data and len(full_financial_data) >= 2:
-            from .insights_engine import render_ai_insights_dashboard
-            available_years = sorted(full_financial_data.keys())
-            render_ai_insights_dashboard(full_financial_data, available_years)
-        else:
-            st.warning("⚠️ Insights automáticos requerem dados de múltiplos anos ou análise de períodos")
-            st.info("Mostrando análise básica para o ano atual...")
-            
-            # Show basic single-year insights
-            _render_basic_year_insights(period_data, selected_year)
-    
-    elif visualization_type == "🎯 Análise de Contribuição":
-        _render_contribution_analysis(period_data, time_period, selected_year)
-    
-    elif visualization_type == "🔥 Mapas de Calor":
-        if full_financial_data and len(full_financial_data) >= 2:
-            _render_heatmap_analysis(full_financial_data, time_period)
-        else:
-            st.warning("⚠️ Mapas de calor requerem dados de múltiplos anos para comparação")
-    
-    elif visualization_type == "🌅 Gráfico Sunburst":
-        _render_sunburst(period_data)
-    
-    elif visualization_type == "📋 Tabela Detalhada":
-        _render_detailed_table(period_data)
+    else:
+        # Fallback for any unhandled visualization type
+        st.info("🚧 Esta visualização está em desenvolvimento.")
     
     # Calculations section removed for cleaner interface
 
 
-def _filter_expense_sections(sections: List[Dict]) -> List[Dict]:
+def _filter_expense_sections(sections: List[Dict], include_revenue: bool = False) -> List[Dict]:
     """
-    Filter out revenue categories to focus on costs/expenses only
+    Filter sections to optionally include or exclude revenue categories
+    
+    Args:
+        sections: List of section dictionaries
+        include_revenue: If True, include revenue categories; if False, filter them out
     """
-    revenue_categories = ['FATURAMENTO', 'RECEITA', 'RECEITAS', 'Outras receitas/creditos']
+    if include_revenue:
+        # Return all sections including revenue
+        return sections
+    
+    # Filter out revenue categories to focus on costs/expenses only
+    revenue_categories = ['FATURAMENTO']
     return [
         section for section in sections 
         if section.get('name', '').upper() not in [cat.upper() for cat in revenue_categories]
@@ -231,153 +194,179 @@ def _render_hierarchy_tree(sections: List[Dict], time_period: str, expand_all: b
     """
     st.markdown("### 📂 Estrutura Hierárquica")
     
-    # Filter out revenue categories to focus on costs/expenses
-    expense_sections = _filter_expense_sections(sections)
+    # Show all sections including revenue (Faturamento)
+    # We now include revenue as a major category alongside expenses
     
-    st.info(f"📊 Mostrando {len(expense_sections)} seções de custos")
+    # Separate revenue and expense sections for better organization
+    revenue_sections = [s for s in sections if s.get('name', '').upper() == 'FATURAMENTO']
+    expense_sections = [s for s in sections if s.get('name', '').upper() != 'FATURAMENTO']
     
+    # Count total sections
+    total_sections = len(revenue_sections) + len(expense_sections)
+    
+    if revenue_sections:
+        st.info(f"📊 Mostrando {total_sections} seções ({len(revenue_sections)} de receita e {len(expense_sections)} de custos)")
+    else:
+        st.info(f"📊 Mostrando {len(expense_sections)} seções de custos")
+    
+    # Show revenue sections first (if any)
+    for section in revenue_sections:
+        _render_section_tree(section, time_period, expand_all, is_revenue=True)
+    
+    # Then show expense sections
     for section in expense_sections:
-        # Calculate max monthly value across all items in this section for consistent scaling
-        section_max_monthly = 0
-        if time_period == "📊 Mensal":
-            # Include section's own monthly data
-            section_monthly = section.get('monthly', {})
-            if section_monthly:
-                section_max = max(section_monthly.values()) if section_monthly.values() else 0
-                section_max_monthly = max(section_max_monthly, section_max)
+        _render_section_tree(section, time_period, expand_all, is_revenue=False)
+
+
+def _render_section_tree(section: Dict, time_period: str, expand_all: bool, is_revenue: bool = False):
+    """
+    Render a single section of the hierarchy tree
+    """
+    # Add revenue icon if this is a revenue section
+    section_icon = "💰 " if is_revenue else ""
+    
+    # Calculate max monthly value across all items in this section for consistent scaling
+    section_max_monthly = 0
+    if time_period == "📊 Mensal":
+        # Include section's own monthly data
+        section_monthly = section.get('monthly', {})
+        if section_monthly:
+            section_max = max(section_monthly.values()) if section_monthly.values() else 0
+            section_max_monthly = max(section_max_monthly, section_max)
+        
+        # Check all subcategories and items
+        for subcat in section.get('subcategories', []):
+            # Check subcategory monthly values
+            subcat_monthly = subcat.get('monthly', {})
+            if subcat_monthly:
+                subcat_max = max(subcat_monthly.values()) if subcat_monthly.values() else 0
+                section_max_monthly = max(section_max_monthly, subcat_max)
             
-            # Check all subcategories and items
-            for subcat in section.get('subcategories', []):
-                # Check subcategory monthly values
+            # Check item monthly values
+            for item in subcat.get('items', []):
+                item_monthly = item.get('monthly', {})
+                if item_monthly:
+                    item_max = max(item_monthly.values()) if item_monthly.values() else 0
+                    section_max_monthly = max(section_max_monthly, item_max)
+    
+    # Determine chart type for this section
+    if time_period == "📊 Mensal" and section_max_monthly > 0:
+        # For monthly view with data, show chart type selector
+        chart_type_key = f"chart_type_{section['name']}"
+    else:
+        # Default chart type for non-monthly views or empty data
+        chart_type_key = None
+        
+    # Default chart type
+    chart_type = "📊 Barras" if time_period != "📊 Mensal" else "📈 Linha"
+    
+    # Level 1: Main Section - Add revenue icon if applicable
+    section_name = f"{section_icon}{section['name']}"
+    with st.expander(
+        f"**{section_name}** - {format_currency(section.get('value', 0))}",
+        expanded=expand_all
+    ):
+        # Show period breakdown if not annual
+        if time_period != "📅 Anual" and section.get('period_breakdown'):
+            _render_period_breakdown(section['period_breakdown'], section['name'], time_period, chart_type)
+        
+        # Show scale indicator and chart type selector for monthly view
+        if time_period == "📊 Mensal" and section_max_monthly > 0:
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.caption(f"📏 Escala dos gráficos mensais: R$ 0 - {format_currency(section_max_monthly)}")
+            with col2:
+                chart_type = st.radio(
+                    "Tipo",
+                    ["📈 Linha", "📊 Barras"],
+                    horizontal=True,
+                    key=chart_type_key
+                )
+        
+        # Group subcategories by type (parent vs standalone)
+        parent_subcats = []
+        standalone_subcats = []
+        
+        for subcat in section.get('subcategories', []):
+            has_items = len(subcat.get('items', [])) > 0
+            if has_items:
+                parent_subcats.append(subcat)
+            else:
+                standalone_subcats.append(subcat)
+        
+        # First render parent subcategories with their children
+        for i, subcat in enumerate(parent_subcats):
+            # Calculate max monthly value for this specific subcategory
+            subcat_max_monthly = 0
+            if time_period == "📊 Mensal":
+                # Check subcategory's own monthly values
                 subcat_monthly = subcat.get('monthly', {})
                 if subcat_monthly:
                     subcat_max = max(subcat_monthly.values()) if subcat_monthly.values() else 0
-                    section_max_monthly = max(section_max_monthly, subcat_max)
+                    subcat_max_monthly = max(subcat_max_monthly, subcat_max)
                 
-                # Check item monthly values
+                # Check all items within this subcategory
                 for item in subcat.get('items', []):
                     item_monthly = item.get('monthly', {})
                     if item_monthly:
                         item_max = max(item_monthly.values()) if item_monthly.values() else 0
-                        section_max_monthly = max(section_max_monthly, item_max)
-        
-        # Determine chart type for this section
-        if time_period == "📊 Mensal" and section_max_monthly > 0:
-            # For monthly view with data, show chart type selector
-            chart_type_key = f"chart_type_{section['name']}"
-        else:
-            # Default chart type for non-monthly views or empty data
-            chart_type_key = None
+                        subcat_max_monthly = max(subcat_max_monthly, item_max)
             
-        # Default chart type
-        chart_type = "📊 Barras" if time_period != "📊 Mensal" else "📈 Linha"
-        
-        # Level 1: Main Section
-        with st.expander(
-            f"**{section['name']}** - {format_currency(section.get('value', 0))}",
-            expanded=expand_all
-        ):
-            # Show period breakdown if not annual
-            if time_period != "📅 Anual" and section.get('period_breakdown'):
-                _render_period_breakdown(section['period_breakdown'], section['name'], time_period, chart_type)
+            # Parent header with proper tree symbol
+            is_last_parent = (i == len(parent_subcats) - 1) and len(standalone_subcats) == 0
+            parent_symbol = "└──" if is_last_parent else "├──"
             
-            # Show scale indicator and chart type selector for monthly view
-            if time_period == "📊 Mensal" and section_max_monthly > 0:
-                col1, col2 = st.columns([3, 1])
-                with col1:
-                    st.caption(f"📏 Escala dos gráficos mensais: R$ 0 - {format_currency(section_max_monthly)}")
-                with col2:
-                    chart_type = st.radio(
-                        "Tipo",
-                        ["📈 Linha", "📊 Barras"],
-                        horizontal=True,
-                        key=chart_type_key
-                    )
+            st.markdown(f"\n**{parent_symbol} {subcat['name']}** - {format_currency(subcat.get('value', 0))}")
             
-            # Group subcategories by type (parent vs standalone)
-            parent_subcats = []
-            standalone_subcats = []
+            # Show sum verification
+            items_sum = sum(item.get('value', 0) for item in subcat.get('items', []))
+            if abs(subcat.get('value', 0) - items_sum) < 100:
+                st.caption(f"    ✓ Soma dos filhos: {format_currency(items_sum)}")
             
-            for subcat in section.get('subcategories', []):
-                has_items = len(subcat.get('items', [])) > 0
-                if has_items:
-                    parent_subcats.append(subcat)
+            # Show subcategory-specific scale indicator for monthly view
+            if time_period == "📊 Mensal" and subcat_max_monthly > 0:
+                st.caption(f"    📏 Escala desta categoria: R$ 0 - {format_currency(subcat_max_monthly)}")
+            
+            # Show period breakdown for subcategory if available
+            if time_period != "📅 Anual" and subcat.get('period_breakdown'):
+                _render_period_sparkline(subcat['period_breakdown'], time_period, chart_type)
+            elif time_period == "📊 Mensal" and subcat.get('monthly') and not subcat.get('items'):
+                # Show subcategory monthly sparkline if it has no children
+                _render_item_monthly_sparkline(subcat['monthly'], subcat_max_monthly, chart_type)
+            
+            # Render children with proper indentation
+            items = subcat.get('items', [])
+            for j, item in enumerate(items):
+                # Determine tree symbols for children
+                is_last_child = j == len(items) - 1
+                
+                if is_last_parent:
+                    # This is the last parent, use clean indentation
+                    child_symbol = "    └──" if is_last_child else "    ├──"
                 else:
-                    standalone_subcats.append(subcat)
+                    # This parent has siblings, use continued indentation
+                    child_symbol = "│   └──" if is_last_child else "│   ├──"
+                
+                st.markdown(f"{child_symbol} {item['name']} - {format_currency(item.get('value', 0))}")
+                
+                # Show monthly sparkline for item if in monthly view and data exists
+                if time_period == "📊 Mensal" and item.get('monthly'):
+                    # Use individual item's own scale for better visibility of trends
+                    item_monthly = item.get('monthly', {})
+                    item_max = max(item_monthly.values()) if item_monthly.values() else 0
+                    _render_item_monthly_sparkline(item['monthly'], item_max, chart_type)
+        
+        # Then render standalone subcategories
+        for i, subcat in enumerate(standalone_subcats):
+            is_last = i == len(standalone_subcats) - 1
+            symbol = "└──" if is_last else "├──"
+            st.markdown(f"{symbol} {subcat['name']} - {format_currency(subcat.get('value', 0))}")
             
-            # First render parent subcategories with their children
-            for i, subcat in enumerate(parent_subcats):
-                # Calculate max monthly value for this specific subcategory
-                subcat_max_monthly = 0
-                if time_period == "📊 Mensal":
-                    # Check subcategory's own monthly values
-                    subcat_monthly = subcat.get('monthly', {})
-                    if subcat_monthly:
-                        subcat_max = max(subcat_monthly.values()) if subcat_monthly.values() else 0
-                        subcat_max_monthly = max(subcat_max_monthly, subcat_max)
-                    
-                    # Check all items within this subcategory
-                    for item in subcat.get('items', []):
-                        item_monthly = item.get('monthly', {})
-                        if item_monthly:
-                            item_max = max(item_monthly.values()) if item_monthly.values() else 0
-                            subcat_max_monthly = max(subcat_max_monthly, item_max)
-                
-                # Parent header with proper tree symbol
-                is_last_parent = (i == len(parent_subcats) - 1) and len(standalone_subcats) == 0
-                parent_symbol = "└──" if is_last_parent else "├──"
-                
-                st.markdown(f"\n**{parent_symbol} {subcat['name']}** - {format_currency(subcat.get('value', 0))}")
-                
-                # Show sum verification
-                items_sum = sum(item.get('value', 0) for item in subcat.get('items', []))
-                if abs(subcat.get('value', 0) - items_sum) < 100:
-                    st.caption(f"    ✓ Soma dos filhos: {format_currency(items_sum)}")
-                
-                # Show subcategory-specific scale indicator for monthly view
-                if time_period == "📊 Mensal" and subcat_max_monthly > 0:
-                    st.caption(f"    📏 Escala desta categoria: R$ 0 - {format_currency(subcat_max_monthly)}")
-                
-                # Show period breakdown for subcategory if available
-                if time_period != "📅 Anual" and subcat.get('period_breakdown'):
-                    _render_period_sparkline(subcat['period_breakdown'], time_period, chart_type)
-                elif time_period == "📊 Mensal" and subcat.get('monthly') and not subcat.get('items'):
-                    # Show subcategory monthly sparkline if it has no children
-                    _render_item_monthly_sparkline(subcat['monthly'], subcat_max_monthly, chart_type)
-                
-                # Render children with proper indentation
-                items = subcat.get('items', [])
-                for j, item in enumerate(items):
-                    # Determine tree symbols for children
-                    is_last_child = j == len(items) - 1
-                    
-                    if is_last_parent:
-                        # This is the last parent, use clean indentation
-                        child_symbol = "    └──" if is_last_child else "    ├──"
-                    else:
-                        # This parent has siblings, use continued indentation
-                        child_symbol = "│   └──" if is_last_child else "│   ├──"
-                    
-                    st.markdown(f"{child_symbol} {item['name']} - {format_currency(item.get('value', 0))}")
-                    
-                    # Show monthly sparkline for item if in monthly view and data exists
-                    if time_period == "📊 Mensal" and item.get('monthly'):
-                        # Use individual item's own scale for better visibility of trends
-                        item_monthly = item.get('monthly', {})
-                        item_max = max(item_monthly.values()) if item_monthly.values() else 0
-                        _render_item_monthly_sparkline(item['monthly'], item_max, chart_type)
-            
-            # Then render standalone subcategories
-            for i, subcat in enumerate(standalone_subcats):
-                is_last = i == len(standalone_subcats) - 1
-                symbol = "└──" if is_last else "├──"
-                st.markdown(f"{symbol} {subcat['name']} - {format_currency(subcat.get('value', 0))}")
-                
-                # Show period breakdown or monthly sparkline
-                if time_period == "📊 Mensal" and subcat.get('monthly'):
-                    _render_item_monthly_sparkline(subcat['monthly'], section_max_monthly, chart_type)
-                elif time_period != "📅 Anual" and subcat.get('period_breakdown'):
-                    _render_period_sparkline(subcat['period_breakdown'], time_period, chart_type)
+            # Show period breakdown or monthly sparkline
+            if time_period == "📊 Mensal" and subcat.get('monthly'):
+                _render_item_monthly_sparkline(subcat['monthly'], section_max_monthly, chart_type)
+            elif time_period != "📅 Anual" and subcat.get('period_breakdown'):
+                _render_period_sparkline(subcat['period_breakdown'], time_period, chart_type)
 
 
 def _get_unified_chart_styling(level: str, chart_type: str = "📈 Linha", max_value: float = None):
@@ -2293,10 +2282,10 @@ def _render_annual_section_comparison(section_data: Dict, selected_years: List[i
 
 def _render_subcategory_evolution(multi_year_data: Dict, selected_years: List[int], time_period: str):
     """
-    Render evolution of all subcategories across years in a single comprehensive graph
-    Including Faturamento (Revenue) for comparison
+    Render evolution of main sections across years
+    Including Faturamento, Custos Variáveis, Custos Fixos, and Custos Não Operacionais
     """
-    st.header("📈 Evolução das Subcategorias vs Faturamento")
+    st.header("📈 Evolução das Categorias Principais")
     
     # Show recommendation based on data
     with st.expander("💡 Guia de Visualizações", expanded=False):
@@ -2320,8 +2309,6 @@ def _render_subcategory_evolution(multi_year_data: Dict, selected_years: List[in
         💡 **Dica**: Para melhor visualização dos custos, use "**Focar em Custos**" ou "**Mini Gráficos**".
         """)
     
-    st.info("💡 Despesas pontuais (reformas, obras, aquisições) são filtradas automaticamente para melhor visualização das tendências recorrentes.")
-    
     # Get all sections including revenue
     all_data = {}
     for year, data in multi_year_data.items():
@@ -2332,56 +2319,48 @@ def _render_subcategory_evolution(multi_year_data: Dict, selected_years: List[in
         st.warning("Nenhum dado encontrado para análise.")
         return
     
-    # List of one-time expense keywords to filter out
-    one_time_keywords = [
-        'reforma', 'reformas', 'obras', 'construção', 'aquisição',
-        'compra de imóvel', 'compra de equipamento', 'mudança',
-        'instalação inicial', 'setup', 'implantação'
-    ]
-    
     # Collect all unique subcategories and revenue
     all_subcategories = {}
     
     # First, add Faturamento (Revenue) as the primary line
+    # ONLY accept FATURAMENTO - completely ignore RECEITA
     for year in selected_years:
         if year in all_data:
             for section in all_data[year]:
-                section_name = section.get('name', '')
-                # Check for revenue sections
-                if section_name.upper() in ['FATURAMENTO', 'RECEITA', 'RECEITAS']:
+                section_name = section.get('name', '').upper().strip()
+                # STRICTLY only FATURAMENTO - no RECEITA, no other revenue types
+                if section_name == 'FATURAMENTO':
                     if 'FATURAMENTO' not in all_subcategories:
                         all_subcategories['FATURAMENTO'] = {}
                     all_subcategories['FATURAMENTO'][year] = section.get('value', 0)
     
-    # Then collect expense subcategories
+    # Then collect ONLY the 3 main expense sections - no other sections
+    # We want EXACTLY these 3: Custos Variáveis, Custos Fixos, Custos Não Operacionais
+    main_expense_sections = ['CUSTOS VARIÁVEIS', 'CUSTOS VARIAVEIS', 'CUSTOS FIXOS', 'CUSTOS NÃO OPERACIONAIS', 'CUSTOS NAO OPERACIONAIS']
+    
     for year in selected_years:
         if year in all_data:
-            # Filter to expense sections only for subcategories
-            expense_sections = _filter_expense_sections(all_data[year])
-            for section in expense_sections:
-                section_name = section.get('name', '')
-                subcats = section.get('subcategories', [])
-                for subcat in subcats:
-                    subcat_name = subcat.get('name', '')
+            for section in all_data[year]:
+                section_name = section.get('name', '').upper().strip()
+                
+                # STRICT filtering: ONLY the main cost sections, nothing else
+                # Also explicitly exclude RECEITA to make sure it doesn't get through
+                if section_name in main_expense_sections and section_name != 'RECEITA':
+                    # Use the section name directly
+                    display_name = section_name.replace('VARIAVEIS', 'VARIÁVEIS').replace('NAO', 'NÃO')
                     
-                    # Filter out one-time expenses
-                    is_one_time = any(keyword in subcat_name.lower() for keyword in one_time_keywords)
-                    if is_one_time:
-                        continue  # Skip one-time expenses
-                    
-                    # Use just subcategory name without section prefix for cleaner display
-                    if subcat_name not in all_subcategories:
-                        all_subcategories[subcat_name] = {}
-                    all_subcategories[subcat_name][year] = subcat.get('value', 0)
+                    if display_name not in all_subcategories:
+                        all_subcategories[display_name] = {}
+                    all_subcategories[display_name][year] = section.get('value', 0)
     
     if not all_subcategories:
         st.info("Nenhuma subcategoria encontrada nos dados.")
         return
     
-    # Separate Faturamento from other subcategories
+    # Separate Faturamento from other main sections
     faturamento_data = all_subcategories.pop('FATURAMENTO', {})
     
-    # Sort remaining subcategories by total value across all years
+    # Sort main cost sections by total value across all years
     sorted_subcats = sorted(
         all_subcategories.items(),
         key=lambda x: sum(x[1].values()),
@@ -2400,20 +2379,19 @@ def _render_subcategory_evolution(multi_year_data: Dict, selected_years: List[in
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        # Limit to top N subcategories for clarity
-        max_subcategories = st.slider(
-            "Número de subcategorias de custo a mostrar",
-            min_value=5,
-            max_value=min(20, len(sorted_subcats)),
-            value=min(10, len(sorted_subcats)),
-            key="subcat_evolution_limit"
-        )
+        # Show all main sections (there are only 3-4 of them)
+        max_subcategories = len(sorted_subcats)
+        st.info(f"📊 Mostrando as {len(sorted_subcats)} categorias principais + Faturamento")
     
     with col2:
         # Scaling option
         scale_option = st.selectbox(
             "Tipo de Visualização",
             [
+                "Auto Scale (Recomendado)",
+                "Barras Lado a Lado",
+                "Barras Agrupadas",
+                "Barras Empilhadas",
                 "Focar em Custos",
                 "Área Empilhada",
                 "% Composição",
@@ -2440,7 +2418,70 @@ def _render_subcategory_evolution(multi_year_data: Dict, selected_years: List[in
     years = sorted(selected_years)
     
     # Handle different visualization types
-    if scale_option == "Focar em Custos":
+    if scale_option == "Auto Scale (Recomendado)":
+        # Analyze data to automatically select best visualization
+        # Calculate the scale difference between revenue and expenses
+        max_revenue = max([faturamento_data.get(year, 0) for year in years]) if faturamento_data else 0
+        max_expense = 0
+        for subcat_name, year_values in sorted_subcats[:max_subcategories]:
+            for year in years:
+                value = year_values.get(year, 0)
+                if value > max_expense:
+                    max_expense = value
+        
+        # Determine the scale ratio
+        if max_revenue > 0 and max_expense > 0:
+            scale_ratio = max_revenue / max_expense
+            
+            # Choose visualization based on scale difference
+            if scale_ratio > 20:
+                # Revenue is much larger than expenses (20x or more)
+                # Use separate charts or grouped bars for best visibility
+                if len(years) <= 3:
+                    scale_option = "Barras Agrupadas"
+                    st.info("📊 Auto Scale: Usando 'Barras Agrupadas' - ideal para comparação com poucos anos e grande diferença de escala")
+                else:
+                    scale_option = "Separar Gráficos"
+                    st.info("🔍 Auto Scale: Usando 'Separar Gráficos' devido à grande diferença de escala entre Faturamento e Despesas")
+            elif scale_ratio > 5:
+                # Revenue is significantly larger (5x-20x)
+                # Use dual axis or grouped bars for comparison
+                if len(years) <= 2:
+                    scale_option = "Barras Agrupadas"
+                    st.info("📊 Auto Scale: Usando 'Barras Agrupadas' para melhor comparação visual")
+                else:
+                    scale_option = "Dual Axis (Faturamento/Custos)"
+                    st.info("🔍 Auto Scale: Usando 'Dual Axis' para melhor comparação entre Faturamento e Despesas")
+            elif show_faturamento and scale_ratio < 0.5:
+                # Expenses are larger than revenue - focus on expenses
+                scale_option = "Focar em Custos"
+                st.info("🔍 Auto Scale: Focando em Custos pois as despesas são maiores que o faturamento")
+            else:
+                # Similar scales, use linear for direct comparison
+                scale_option = "Linear"
+                st.info("🔍 Auto Scale: Usando visualização linear padrão")
+        elif max_expense > 0:
+            # No revenue data, focus on expenses
+            scale_option = "Focar em Custos"
+            st.info("🔍 Auto Scale: Focando em Custos (sem dados de faturamento)")
+        else:
+            # Default to linear if no data
+            scale_option = "Linear"
+    
+    # Now handle the actual visualization types
+    if scale_option == "Barras Lado a Lado":
+        # Side by side bars for better comparison
+        fig = go.Figure()
+        
+    elif scale_option == "Barras Agrupadas":
+        # Grouped bar chart
+        fig = go.Figure()
+        
+    elif scale_option == "Barras Empilhadas":
+        # Stacked bar chart  
+        fig = go.Figure()
+        
+    elif scale_option == "Focar em Custos":
         # Focus only on expenses, no revenue
         fig = go.Figure()
         
@@ -2506,7 +2547,7 @@ def _render_subcategory_evolution(multi_year_data: Dict, selected_years: List[in
         base_year = years[0]
         
     # Add Faturamento as the primary line (if exists and enabled)
-    if scale_option != "Separar Gráficos" and faturamento_data and show_faturamento:
+    if scale_option not in ["Separar Gráficos", "Barras Lado a Lado"] and faturamento_data and show_faturamento:
         values = [faturamento_data.get(year, 0) for year in years]
         
         # Adjust values based on visualization type
@@ -2562,7 +2603,253 @@ def _render_subcategory_evolution(multi_year_data: Dict, selected_years: List[in
             ))
     
     # Add traces for each subcategory based on visualization type
-    if scale_option == "Área Empilhada":
+    if scale_option == "Barras Lado a Lado":
+        # Add subcategory selection
+        st.markdown("#### 📋 Selecione as subcategorias para comparar:")
+        
+        # Add display options
+        display_col1, display_col2, display_col3 = st.columns(3)
+        with display_col1:
+            show_values = st.checkbox("Mostrar valores", value=True, help="Exibir valores e percentuais nas barras")
+        with display_col2:
+            min_value_for_text = st.number_input(
+                "Valor mínimo para exibir texto (R$)", 
+                min_value=0, 
+                max_value=100000, 
+                value=50000, 
+                step=10000,
+                help="Apenas mostra texto em barras com valores acima deste limite"
+            )
+        with display_col3:
+            horizontal_bars = st.checkbox(
+                "Barras horizontais", 
+                value=False, 
+                help="Exibir barras na horizontal (melhor para muitas categorias)"
+            )
+        
+        # Create columns for checkboxes
+        n_cols = 4
+        cols = st.columns(n_cols)
+        
+        # Get all subcategory names
+        all_subcat_names = [name for name, _ in sorted_subcats[:max_subcategories]]
+        
+        # Default selection - top 10 or all if less than 10
+        default_selection = all_subcat_names[:min(10, len(all_subcat_names))]
+        
+        # Add "Select All/None" buttons
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            if st.button("Selecionar Todas"):
+                st.session_state['selected_subcats'] = all_subcat_names
+                st.rerun()
+        with col2:
+            if st.button("Limpar Seleção"):
+                st.session_state['selected_subcats'] = []
+                st.rerun()
+        with col3:
+            if st.button("Top 10"):
+                st.session_state['selected_subcats'] = default_selection
+                st.rerun()
+        
+        # Initialize session state if not exists
+        if 'selected_subcats' not in st.session_state:
+            st.session_state['selected_subcats'] = default_selection
+        
+        # Create checkboxes for each subcategory
+        selected_subcats = []
+        for idx, subcat_name in enumerate(all_subcat_names):
+            col_idx = idx % n_cols
+            with cols[col_idx]:
+                # Truncate long names for display
+                display_name = subcat_name[:25] + "..." if len(subcat_name) > 25 else subcat_name
+                if st.checkbox(
+                    display_name,
+                    value=subcat_name in st.session_state.get('selected_subcats', default_selection),
+                    key=f"subcat_{idx}",
+                    help=subcat_name  # Show full name on hover
+                ):
+                    selected_subcats.append(subcat_name)
+        
+        # Filter sorted_subcats to only selected ones
+        filtered_subcats = [(name, values) for name, values in sorted_subcats[:max_subcategories] if name in selected_subcats]
+        
+        if not filtered_subcats:
+            st.warning("⚠️ Selecione pelo menos uma subcategoria para visualizar.")
+            return
+        
+        st.info(f"📊 Mostrando {len(filtered_subcats)} subcategorias selecionadas")
+        
+        # Side by side comparison - focus on expense subcategories only for better visibility
+        x_labels = []
+        
+        # Only add selected expense subcategories
+        for subcat_name, _ in filtered_subcats:
+            x_labels.append(subcat_name)
+        
+        # Get number of categories for sizing
+        num_categories = len(filtered_subcats)
+        
+        # Add a trace for each year
+        for year_idx, year in enumerate(years):
+            y_values = []
+            hover_texts = []
+            text_labels = []
+            
+            # Get revenue for this year for percentage calculations
+            revenue_value = faturamento_data.get(year, 1) if faturamento_data else 1
+            
+            # Add subcategory values
+            for subcat_name, year_values in filtered_subcats:
+                value = year_values.get(year, 0)
+                y_values.append(value)
+                
+                # Calculate % of revenue
+                percent_of_revenue = (value / revenue_value * 100) if revenue_value > 0 else 0
+                
+                # Calculate year-over-year variation
+                prev_year = years[year_idx - 1] if year_idx > 0 else None
+                variation_text = ""
+                if prev_year and prev_year in year_values:
+                    prev_value = year_values.get(prev_year, 0)
+                    if prev_value > 0:
+                        variation = ((value - prev_value) / prev_value) * 100
+                        variation_text = f"<br><b>Variação YoY:</b> {variation:+.1f}%"
+                    elif value > 0:
+                        variation_text = "<br><b>Variação YoY:</b> Novo"
+                
+                hover_text = f"<b>{subcat_name}</b><br>"
+                hover_text += f"<b>{year}:</b> R$ {value:,.0f}<br>"
+                hover_text += f"<b>% da Receita:</b> {percent_of_revenue:.2f}%"
+                hover_text += variation_text
+                
+                hover_texts.append(hover_text)
+                
+                # Create text label showing value and % of revenue
+                # Only show text for values above threshold and if enabled
+                if show_values and value > min_value_for_text:
+                    if value > 100000:
+                        text_labels.append(f"{format_currency(value)}<br>{percent_of_revenue:.1f}%")
+                    else:
+                        text_labels.append(f"R$ {value/1000:.0f}K<br>{percent_of_revenue:.1f}%")
+                else:
+                    text_labels.append("")  # Empty text for small values or if disabled
+            
+            # Create bar trace for this year with better colors
+            year_colors = {
+                0: '#52c41a',  # Green for 2023
+                1: '#1890ff',  # Blue for 2024  
+                2: '#722ed1',  # Purple for 2025
+                3: '#ff4d4f'   # Red for 2026
+            }
+            
+            # Determine text position based on value size
+            text_positions = []
+            for v in y_values:
+                if v > 100000:
+                    text_positions.append('outside')
+                else:
+                    text_positions.append('inside')  # Inside for smaller values
+            
+            if horizontal_bars:
+                # Horizontal bar chart
+                fig.add_trace(go.Bar(
+                    y=x_labels,  # Categories on y-axis
+                    x=y_values,  # Values on x-axis
+                    name=str(year),
+                    orientation='h',
+                    marker_color=year_colors.get(year_idx, '#95a5a6'),
+                    hovertemplate='%{customdata}<extra></extra>',
+                    customdata=hover_texts,
+                    text=text_labels,
+                    textposition='outside',
+                    textfont=dict(
+                        size=10 if num_categories > 10 else 11,
+                        color='rgba(0,0,0,0.7)'
+                    ),
+                    texttemplate='%{text}'
+                ))
+            else:
+                # Vertical bar chart (default)
+                fig.add_trace(go.Bar(
+                    x=x_labels,
+                    y=y_values,
+                    name=str(year),
+                    marker_color=year_colors.get(year_idx, '#95a5a6'),
+                    hovertemplate='%{customdata}<extra></extra>',
+                    customdata=hover_texts,
+                    text=text_labels,
+                    textposition='outside',
+                    textfont=dict(
+                        size=10 if num_categories > 10 else 11,
+                        color='rgba(0,0,0,0.7)'
+                    ),
+                    texttemplate='%{text}'
+                ))
+    
+    elif scale_option == "Barras Agrupadas":
+        # Grouped bar chart - subcategories side by side for each year
+        # Create x-axis categories combining year and subcategory
+        x_categories = []
+        y_values = []
+        bar_colors = []
+        hover_texts = []
+        
+        # First add Faturamento if enabled
+        if faturamento_data and show_faturamento:
+            for year in years:
+                x_categories.append(f"{year}<br>📊 Faturamento")
+                y_values.append(faturamento_data.get(year, 0))
+                bar_colors.append('#27ae60')
+                hover_texts.append(f"<b>FATURAMENTO</b><br>{year}: R$ {faturamento_data.get(year, 0):,.0f}")
+        
+        # Add each subcategory
+        for i, (subcat_name, year_values) in enumerate(sorted_subcats[:max_subcategories]):
+            for year in years:
+                x_categories.append(f"{year}<br>{subcat_name[:15]}...")
+                value = year_values.get(year, 0)
+                y_values.append(value)
+                bar_colors.append(colors[i % len(colors)])
+                hover_texts.append(f"<b>{subcat_name}</b><br>{year}: R$ {value:,.0f}")
+        
+        # Create single bar trace with all data
+        fig.add_trace(go.Bar(
+            x=x_categories,
+            y=y_values,
+            marker_color=bar_colors,
+            hovertemplate='%{customdata}<extra></extra>',
+            customdata=hover_texts,
+            showlegend=False
+        ))
+    
+    elif scale_option == "Barras Empilhadas":
+        # Stacked bar chart - expenses stacked on top of each other
+        for i, (subcat_name, year_values) in enumerate(sorted_subcats[:max_subcategories]):
+            values = [year_values.get(year, 0) for year in years]
+            if any(v > 0 for v in values):
+                fig.add_trace(go.Bar(
+                    x=[str(year) for year in years],
+                    y=values,
+                    name=subcat_name,
+                    marker_color=colors[i % len(colors)],
+                    hovertemplate=f'<b>{subcat_name}</b><br>%{{x}}: %{{y:,.0f}}<extra></extra>'
+                ))
+        
+        # Add Faturamento as a separate trace if enabled
+        if faturamento_data and show_faturamento:
+            values = [faturamento_data.get(year, 0) for year in years]
+            fig.add_trace(go.Bar(
+                x=[str(year) for year in years],
+                y=values,
+                name='📊 FATURAMENTO',
+                marker_color='#27ae60',
+                marker_pattern_shape='/',
+                text=[format_currency(v) for v in values],
+                textposition='outside',
+                hovertemplate='<b>FATURAMENTO</b><br>%{x}: %{y:,.0f}<extra></extra>'
+            ))
+    
+    elif scale_option == "Área Empilhada":
         # Create stacked area chart
         for i, (subcat_name, year_values) in enumerate(sorted_subcats[:max_subcategories]):
             values = [year_values.get(year, 0) for year in years]
@@ -2702,7 +2989,146 @@ def _render_subcategory_evolution(multi_year_data: Dict, selected_years: List[in
                     ))
     
     # Configure layout based on scaling option
-    if scale_option == "Mini Gráficos":
+    if scale_option == "Barras Lado a Lado":
+        # Layout for side by side bars - focus on expenses only
+        # Calculate dynamic width based on number of selected categories
+        num_categories = len(filtered_subcats) if 'filtered_subcats' in locals() else len(sorted_subcats[:max_subcategories])
+        # Adjust bar width based on number of categories
+        if num_categories > 15:
+            bar_width = 100  # Slightly narrower for many categories
+        elif num_categories > 10:
+            bar_width = 120  # Standard width
+        else:
+            bar_width = 150  # Wider bars for fewer categories
+        min_width = 1000
+        chart_width = max(min_width, num_categories * bar_width)
+        
+        # Update layout based on orientation
+        if horizontal_bars:
+            # Horizontal layout - better for many categories
+            chart_height = max(600, num_categories * 80)  # Dynamic height based on categories
+            fig.update_layout(
+                title=f"Comparação de Subcategorias de Custos - {min(years)}-{max(years)}",
+                yaxis_title="Subcategorias",
+                yaxis=dict(
+                    tickfont=dict(size=12),
+                    automargin=True  # Auto adjust margin for long labels
+                ),
+                xaxis_title="Valor (R$)",
+                xaxis=dict(
+                    tickformat=",.0f",
+                    tickfont=dict(size=12)
+                ),
+                barmode='group',
+                bargap=0.2,
+                bargroupgap=0.1,
+                hovermode='y unified',
+                height=chart_height,
+                showlegend=True,
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="right",
+                    x=1,
+                    title="Anos",
+                    font=dict(size=12)
+                ),
+                font=dict(size=12)
+            )
+        else:
+            # Vertical layout (default)
+            fig.update_layout(
+                title=f"Comparação de Subcategorias de Custos - {min(years)}-{max(years)}",
+                xaxis_title="Subcategorias",
+                xaxis=dict(
+                    tickangle=-45,
+                    tickfont=dict(size=14 if num_categories <= 10 else 12)
+                ),
+                yaxis_title="Valor (R$)",
+                yaxis=dict(
+                    tickformat=",.0f",
+                    tickfont=dict(size=12)
+                ),
+                barmode='group',
+                bargap=0.2,  # More space between category groups
+                bargroupgap=0.1,  # More space between bars in same group
+                hovermode='x unified',
+                height=800,  # Taller chart for better label visibility
+                width=chart_width,
+                showlegend=True,
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="right",
+                    x=1,
+                    title="Anos",
+                    font=dict(size=12)
+                ),
+                font=dict(size=12)
+            )
+        
+        if show_faturamento and faturamento_data:
+            # Show Faturamento info separately
+            faturamento_2024 = faturamento_data.get(years[0], 0) if len(years) > 0 else 0
+            faturamento_2025 = faturamento_data.get(years[-1], 0) if len(years) > 0 else 0
+            faturamento_var = ((faturamento_2025 - faturamento_2024) / faturamento_2024 * 100) if faturamento_2024 > 0 else 0
+            st.info(f"📊 Faturamento: {years[0] if len(years) > 0 else ''}: {format_currency(faturamento_2024)} | {years[-1] if len(years) > 0 else ''}: {format_currency(faturamento_2025)} | Variação: {faturamento_var:+.1f}%")
+    
+    elif scale_option == "Barras Agrupadas":
+        # Layout for grouped bars
+        fig.update_layout(
+            title=f"{'Faturamento vs ' if show_faturamento else ''}Top {max_subcategories} Subcategorias - {min(years)}-{max(years)}",
+            xaxis_title="Ano",
+            xaxis=dict(
+                tickmode='array',
+                tickvals=[str(year) for year in years],
+                ticktext=[str(year) for year in years]
+            ),
+            yaxis_title="Valor (R$)",
+            yaxis=dict(tickformat=",.0f"),
+            barmode='group',
+            bargap=0.15,
+            bargroupgap=0.1,
+            hovermode='x unified',
+            height=600,
+            showlegend=True,
+            legend=dict(
+                orientation="v",
+                yanchor="top",
+                y=1,
+                xanchor="left",
+                x=1.02
+            )
+        )
+    
+    elif scale_option == "Barras Empilhadas":
+        # Layout for stacked bars
+        fig.update_layout(
+            title=f"Composição de Custos{'+ Faturamento' if show_faturamento else ''} - {min(years)}-{max(years)}",
+            xaxis_title="Ano",
+            xaxis=dict(
+                tickmode='array',
+                tickvals=[str(year) for year in years],
+                ticktext=[str(year) for year in years]
+            ),
+            yaxis_title="Valor (R$)",
+            yaxis=dict(tickformat=",.0f"),
+            barmode='stack',
+            hovermode='x unified',
+            height=600,
+            showlegend=True,
+            legend=dict(
+                orientation="v",
+                yanchor="top",
+                y=1,
+                xanchor="left",
+                x=1.02
+            )
+        )
+    
+    elif scale_option == "Mini Gráficos":
         # Layout for small multiples
         fig.update_xaxes(
             tickmode='array',
@@ -2854,7 +3280,12 @@ def _render_subcategory_evolution(multi_year_data: Dict, selected_years: List[in
         
         fig.update_layout(**layout_config)
     
-    st.plotly_chart(fig, use_container_width=True)
+    # Display chart with special handling for wide "Barras Lado a Lado" charts
+    if scale_option == "Barras Lado a Lado":
+        # Use full width for scrollable chart
+        st.plotly_chart(fig, use_container_width=False)
+    else:
+        st.plotly_chart(fig, use_container_width=True)
     
     # Show summary statistics
     st.markdown("### 📊 Análise de Crescimento")
@@ -6124,3 +6555,434 @@ def _render_tree_item_multi_year_lines(expense_data: Dict, selected_years: List[
         with st.expander(f"📌 **{item_name}** ({section_name} > {subcat_name}) - Comparação Multi-Anual", expanded=True):
             _render_multi_year_line_chart(item_year_data, months, item_name, selected_years,
                                          show_percentage="com %" in chart_type)
+
+def _render_interactive_drilldown(period_data: Dict, selected_year: int, time_period: str):
+    """
+    Render interactive drill-down visualization for hierarchical cost exploration
+    Users can click through: Main Categories -> Subcategories -> Individual Items
+    """
+    st.header("🔍 Exploração Interativa dos Custos")
+    st.markdown("📋 Navegue pelos níveis hierárquicos clicando nas categorias para explorar em detalhes.")
+    
+    # Initialize session state for navigation
+    if 'drilldown_path' not in st.session_state:
+        st.session_state.drilldown_path = []
+    
+    if 'current_level' not in st.session_state:
+        st.session_state.current_level = 'main'  # main, subcategory, items
+    
+    sections = period_data.get('sections', [])
+    if not sections:
+        st.warning("Nenhum dado disponível para exploração.")
+        return
+    
+    # Breadcrumb navigation with back button
+    breadcrumb_col1, breadcrumb_col2, breadcrumb_col3 = st.columns([3, 1, 1])
+    with breadcrumb_col1:
+        _render_breadcrumbs()
+    with breadcrumb_col2:
+        # Back button - only show if not at main level
+        if st.session_state.current_level != 'main' and len(st.session_state.drilldown_path) > 0:
+            if st.button("⬅️ Voltar", key="back_drilldown"):
+                # Go back one level
+                st.session_state.drilldown_path.pop()
+                if len(st.session_state.drilldown_path) == 0:
+                    st.session_state.current_level = 'main'
+                elif len(st.session_state.drilldown_path) == 1:
+                    st.session_state.current_level = 'subcategory'
+                st.rerun()
+    with breadcrumb_col3:
+        if st.button("🏠 Voltar ao Início", key="reset_drilldown"):
+            st.session_state.drilldown_path = []
+            st.session_state.current_level = 'main'
+            st.rerun()
+    
+    # Render current level
+    if st.session_state.current_level == 'main':
+        _render_main_categories(sections, time_period)
+    elif st.session_state.current_level == 'subcategory':
+        _render_subcategories(sections, time_period)
+    elif st.session_state.current_level == 'items':
+        _render_individual_items(sections, time_period)
+
+
+def _render_breadcrumbs():
+    """Render breadcrumb navigation with current path"""
+    if not st.session_state.drilldown_path:
+        st.markdown("📍 **Categorias Principais**")
+        return
+    
+    # Build breadcrumb text
+    breadcrumb = "📍 **Início**"
+    for i, step in enumerate(st.session_state.drilldown_path):
+        breadcrumb += f" › **{step}**"
+    st.markdown(breadcrumb)
+
+
+def _render_main_categories(sections: List[Dict], time_period: str):
+    """Render main expense categories for drilling down"""
+    st.subheader("📂 Selecione uma Categoria Principal")
+    
+    # Filter to expense sections only (exclude revenue)
+    expense_sections = _filter_expense_sections(sections, include_revenue=False)
+    
+    if not expense_sections:
+        st.info("Nenhuma categoria de despesa encontrada.")
+        return
+    
+    # Create cards for each main category
+    cols = st.columns(min(3, len(expense_sections)))
+    
+    for idx, section in enumerate(expense_sections):
+        col_idx = idx % 3
+        with cols[col_idx]:
+            section_name = section.get('name', 'Categoria')
+            section_value = section.get('value', 0)
+            subcats_count = len(section.get('subcategories', []))
+            
+            # Create an interactive card
+            with st.container():
+                st.markdown(f"""
+                <div style='border: 2px solid #ddd; border-radius: 10px; padding: 15px; margin: 10px 0; background: #f9f9f9;'>
+                    <h3 style='color: #2c3e50; margin: 0;'>{section_name}</h3>
+                    <p style='font-size: 24px; font-weight: bold; color: #e74c3c; margin: 10px 0;'>
+                        R$ {section_value:,.2f}
+                    </p>
+                    <p style='color: #7f8c8d; margin: 0;'>
+                        🏷️ {subcats_count} subcategorias
+                    </p>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                if st.button(f"🔍 Explorar {section_name}", key=f"explore_{idx}"):
+                    st.session_state.drilldown_path = [section_name]
+                    st.session_state.current_level = 'subcategory'
+                    st.rerun()
+
+
+def _render_subcategories(sections: List[Dict], time_period: str):
+    """Render subcategories for the selected main category"""
+    category_name = st.session_state.drilldown_path[0]
+    
+    # Find the selected category
+    selected_section = None
+    for section in sections:
+        if section.get('name') == category_name:
+            selected_section = section
+            break
+    
+    if not selected_section:
+        st.error(f"Categoria '{category_name}' não encontrada.")
+        return
+    
+    st.subheader(f"📁 Subcategorias de {category_name}")
+    
+    subcategories = selected_section.get('subcategories', [])
+    if not subcategories:
+        st.info("Nenhuma subcategoria encontrada.")
+        return
+    
+    # Find revenue (Faturamento) for percentage calculation
+    revenue_value = 0
+    for section in sections:
+        section_name = section.get('name', '').upper()
+        if section_name == 'FATURAMENTO':
+            revenue_value = section.get('value', 0)
+            break
+    
+    # Add toggle for showing as percentage of revenue
+    col1, col2 = st.columns([1, 3])
+    with col1:
+        show_percentage = st.checkbox(
+            "📊 Mostrar como % do Faturamento", 
+            value=False,
+            help="Mostra cada subcategoria como percentual do faturamento total"
+        )
+    
+    # Create a chart showing all subcategories
+    subcat_names = []
+    subcat_values = []
+    subcat_percentages = []
+    
+    for subcat in subcategories:
+        subcat_names.append(subcat.get('name', 'Subcategoria'))
+        value = subcat.get('value', 0)
+        subcat_values.append(value)
+        
+        # Calculate percentage of revenue
+        if revenue_value > 0:
+            percentage = (value / revenue_value) * 100
+        else:
+            percentage = 0
+        subcat_percentages.append(percentage)
+    
+    # Create bar chart
+    fig = go.Figure()
+    
+    if show_percentage and revenue_value > 0:
+        # Show as percentage
+        fig.add_trace(go.Bar(
+            x=subcat_names,
+            y=subcat_percentages,
+            name=f"{category_name} (% do Faturamento)",
+            marker_color='#e74c3c',
+            text=[f'{pct:.1f}%' for pct in subcat_percentages],
+            textposition='outside',
+            customdata=[[val, pct] for val, pct in zip(subcat_values, subcat_percentages)],
+            hovertemplate='<b>%{x}</b><br>' +
+                         'Valor: R$ %{customdata[0]:,.2f}<br>' +
+                         '% do Faturamento: %{customdata[1]:.2f}%<br>' +
+                         '<extra></extra>'
+        ))
+        
+        fig.update_layout(
+            title=f"Subcategorias de {category_name} (% do Faturamento: R$ {revenue_value:,.0f})",
+            xaxis_title="Subcategorias",
+            yaxis_title="% do Faturamento",
+            height=400,
+            showlegend=False
+        )
+    else:
+        # Show as absolute values with percentage in hover
+        fig.add_trace(go.Bar(
+            x=subcat_names,
+            y=subcat_values,
+            name=category_name,
+            marker_color='#3498db',
+            text=[f'R$ {val:,.0f}' for val in subcat_values],
+            textposition='outside',
+            customdata=subcat_percentages if revenue_value > 0 else None,
+            hovertemplate='<b>%{x}</b><br>' +
+                         'Valor: R$ %{y:,.2f}<br>' +
+                         (f'% do Faturamento: %{{customdata:.2f}}%<br>' if revenue_value > 0 else '') +
+                         '<extra></extra>'
+        ))
+        
+        fig.update_layout(
+            title=f"Subcategorias de {category_name}",
+            xaxis_title="Subcategorias",
+            yaxis_title="Valor (R$)",
+            height=400,
+            showlegend=False
+        )
+    
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Create clickable cards for each subcategory
+    st.subheader("🔍 Selecione uma Subcategoria para Ver Detalhes")
+    
+    cols = st.columns(min(3, len(subcategories)))
+    for idx, subcat in enumerate(subcategories):
+        col_idx = idx % 3
+        with cols[col_idx]:
+            subcat_name = subcat.get('name', 'Subcategoria')
+            subcat_value = subcat.get('value', 0)
+            items_count = len(subcat.get('items', []))
+            
+            # Calculate percentage for this subcategory
+            if revenue_value > 0:
+                subcat_percentage = (subcat_value / revenue_value) * 100
+            else:
+                subcat_percentage = 0
+            
+            with st.container():
+                percentage_text = f"<p style='color: #e74c3c; font-size: 16px; margin: 5px 0;'>📊 {subcat_percentage:.1f}% do Faturamento</p>" if revenue_value > 0 else ""
+                
+                st.markdown(f"""
+                <div style='border: 2px solid #ddd; border-radius: 10px; padding: 15px; margin: 10px 0; background: #f0f8ff;'>
+                    <h4 style='color: #2c3e50; margin: 0;'>{subcat_name}</h4>
+                    <p style='font-size: 20px; font-weight: bold; color: #3498db; margin: 10px 0;'>
+                        R$ {subcat_value:,.2f}
+                    </p>
+                    {percentage_text}
+                    <p style='color: #7f8c8d; margin: 0;'>
+                        📋 {items_count} itens
+                    </p>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                if st.button(f"📋 Ver Itens de {subcat_name}", key=f"items_{idx}"):
+                    st.session_state.drilldown_path = [category_name, subcat_name]
+                    st.session_state.current_level = 'items'
+                    st.rerun()
+
+
+def _render_individual_items(sections: List[Dict], time_period: str):
+    """Render individual items for the selected subcategory"""
+    category_name = st.session_state.drilldown_path[0]
+    subcategory_name = st.session_state.drilldown_path[1]
+    
+    # Find the selected subcategory
+    selected_subcategory = None
+    for section in sections:
+        if section.get('name') == category_name:
+            for subcat in section.get('subcategories', []):
+                if subcat.get('name') == subcategory_name:
+                    selected_subcategory = subcat
+                    break
+            break
+    
+    if not selected_subcategory:
+        st.error(f"Subcategoria '{subcategory_name}' não encontrada.")
+        return
+    
+    st.subheader(f"📋 Itens Individuais: {category_name} › {subcategory_name}")
+    
+    items = selected_subcategory.get('items', [])
+    if not items:
+        st.info("Nenhum item individual encontrado.")
+        return
+    
+    # Find revenue (Faturamento) for percentage calculation
+    revenue_value = 0
+    for section in sections:
+        section_name = section.get('name', '').upper()
+        if section_name == 'FATURAMENTO':
+            revenue_value = section.get('value', 0)
+            break
+    
+    # Add toggle for showing as percentage of revenue
+    col1, col2 = st.columns([1, 3])
+    with col1:
+        show_percentage = st.checkbox(
+            "📊 Mostrar como % do Faturamento", 
+            value=False,
+            key="items_percentage_toggle",
+            help="Mostra cada item como percentual do faturamento total"
+        )
+    
+    # Create detailed table and chart for individual items
+    items_data = []
+    for item in items:
+        item_name = item.get('name', 'Item')
+        item_value = item.get('value', 0)
+        monthly_data = item.get('monthly', {})
+        
+        # Calculate percentage of revenue
+        if revenue_value > 0:
+            item_percentage = (item_value / revenue_value) * 100
+        else:
+            item_percentage = 0
+        
+        items_data.append({
+            'Item': item_name,
+            'Valor Anual': item_value,
+            'Percentual': item_percentage,
+            'Dados Mensais': len(monthly_data) > 0
+        })
+    
+    # Sort by value
+    items_data.sort(key=lambda x: x['Valor Anual'], reverse=True)
+    
+    # Show top items in a chart
+    if len(items_data) > 1:
+        top_items = items_data[:min(10, len(items_data))]  # Top 10
+        
+        fig = go.Figure()
+        
+        if show_percentage and revenue_value > 0:
+            # Show as percentage
+            fig.add_trace(go.Bar(
+                x=[item['Item'] for item in top_items],
+                y=[item['Percentual'] for item in top_items],
+                name=f"{subcategory_name} (% do Faturamento)",
+                marker_color='#e74c3c',
+                text=[f'{item["Percentual"]:.2f}%' for item in top_items],
+                textposition='outside',
+                customdata=[[item['Valor Anual'], item['Percentual']] for item in top_items],
+                hovertemplate='<b>%{x}</b><br>' +
+                             'Valor: R$ %{customdata[0]:,.2f}<br>' +
+                             '% do Faturamento: %{customdata[1]:.3f}%<br>' +
+                             '<extra></extra>'
+            ))
+            
+            fig.update_layout(
+                title=f"Principais Itens: {subcategory_name} (% do Faturamento: R$ {revenue_value:,.0f})",
+                xaxis_title="Itens",
+                yaxis_title="% do Faturamento",
+                height=400,
+                showlegend=False,
+                xaxis_tickangle=-45
+            )
+        else:
+            # Show as absolute values with percentage in hover
+            fig.add_trace(go.Bar(
+                x=[item['Item'] for item in top_items],
+                y=[item['Valor Anual'] for item in top_items],
+                name=subcategory_name,
+                marker_color='#e74c3c',
+                text=[f'R$ {item["Valor Anual"]:,.0f}' for item in top_items],
+                textposition='outside',
+                customdata=[item['Percentual'] for item in top_items] if revenue_value > 0 else None,
+                hovertemplate='<b>%{x}</b><br>' +
+                             'Valor: R$ %{y:,.2f}<br>' +
+                             (f'% do Faturamento: %{{customdata:.3f}}%<br>' if revenue_value > 0 else '') +
+                             '<extra></extra>'
+            ))
+            
+            fig.update_layout(
+                title=f"Principais Itens: {subcategory_name}",
+                xaxis_title="Itens",
+                yaxis_title="Valor (R$)",
+                height=400,
+                showlegend=False,
+                xaxis_tickangle=-45
+            )
+        
+        st.plotly_chart(fig, use_container_width=True)
+    
+    # Show detailed table
+    st.subheader("📊 Detalhamento dos Itens")
+    
+    # Convert to DataFrame for display
+    df_items = pd.DataFrame(items_data)
+    df_items['Valor Anual'] = df_items['Valor Anual'].apply(lambda x: f"R$ {x:,.2f}")
+    
+    # Add percentage column if revenue is available
+    if revenue_value > 0:
+        df_items['% do Faturamento'] = df_items['Percentual'].apply(lambda x: f"{x:.2f}%")
+    
+    df_items['Dados Mensais'] = df_items['Dados Mensais'].apply(lambda x: "✅ Sim" if x else "❌ Não")
+    
+    # Remove the raw Percentual column and reorder
+    display_columns = ['Item', 'Valor Anual']
+    if revenue_value > 0:
+        display_columns.append('% do Faturamento')
+    display_columns.append('Dados Mensais')
+    
+    st.dataframe(df_items[display_columns], use_container_width=True, hide_index=True)
+    
+    # Optional: Show monthly breakdown for items that have monthly data
+    monthly_items = [item for item in items if item.get('monthly')]
+    if monthly_items and time_period == "📊 Mensal":
+        st.subheader("📈 Evolução Mensal dos Principais Itens")
+        
+        # Create line chart for monthly data
+        fig = go.Figure()
+        
+        colors = ['#e74c3c', '#3498db', '#f39c12', '#9b59b6', '#1abc9c']
+        
+        for idx, item in enumerate(monthly_items[:5]):  # Top 5 items
+            monthly_data = item.get('monthly', {})
+            if monthly_data:
+                months = list(monthly_data.keys())
+                values = list(monthly_data.values())
+                
+                fig.add_trace(go.Scatter(
+                    x=months,
+                    y=values,
+                    mode='lines+markers',
+                    name=item.get('name', f'Item {idx+1}'),
+                    line=dict(color=colors[idx % len(colors)], width=3),
+                    marker=dict(size=8)
+                ))
+        
+        fig.update_layout(
+            title=f"Evolução Mensal - {subcategory_name}",
+            xaxis_title="Mês",
+            yaxis_title="Valor (R$)",
+            height=400,
+            hovermode='x unified'
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)

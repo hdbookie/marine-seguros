@@ -16,6 +16,8 @@ from utils.expense_hierarchy import ExpenseHierarchy
 from utils import format_currency
 from .native_hierarchy_renderer import render_native_hierarchy_tab
 from .visualizations import render_annual_comparison, render_cost_breakdown_by_year
+from .category_breakdown import render_category_breakdown
+from .selective_comparison import render_selective_comparison
 
 
 def render_micro_analysis_v2_tab(financial_data: Dict = None):
@@ -70,10 +72,13 @@ def render_micro_analysis_v2_tab(financial_data: Dict = None):
     # Simplified interface - controls moved to individual tabs
     # Remove duplicate filters and navigation for cleaner UX
     
-    # Create tabs for different views - simplified to essential tabs only
-    tab1, tab2 = st.tabs([
+    # Create tabs for different views - enhanced with new features
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "🏗️ Excel Nativa",
-        "💡 Insights"
+        "📊 Análise por Categoria",
+        "🔍 Comparação Seletiva",
+        "💡 Insights",
+        "📈 Análise Temporal"
     ])
     
     with tab1:
@@ -84,12 +89,56 @@ def render_micro_analysis_v2_tab(financial_data: Dict = None):
             st.info("Estrutura nativa do Excel não disponível. Faça upload de arquivos Excel.")
     
     with tab2:
+        # Category breakdown with revenue percentage
+        if excel_hierarchy_data:
+            available_years = list(excel_hierarchy_data.keys())
+            selected_years = st.multiselect(
+                "Selecione os anos para análise",
+                available_years,
+                default=available_years[-2:] if len(available_years) >= 2 else available_years,
+                key="category_years"
+            )
+            if selected_years:
+                render_category_breakdown(excel_hierarchy_data, selected_years)
+        else:
+            st.info("Análise por categoria requer dados da estrutura nativa do Excel.")
+    
+    with tab3:
+        # Selective comparison
+        if excel_hierarchy_data:
+            available_years = list(excel_hierarchy_data.keys())
+            selected_years = st.multiselect(
+                "Selecione os anos para comparação",
+                available_years,
+                default=available_years[-2:] if len(available_years) >= 2 else available_years,
+                key="comparison_years"
+            )
+            if selected_years:
+                render_selective_comparison(excel_hierarchy_data, selected_years)
+        else:
+            st.info("Comparação seletiva requer dados da estrutura nativa do Excel.")
+    
+    with tab4:
         if excel_hierarchy_data:
             # Use aggregated data from Excel hierarchy for insights
             aggregated_data = _aggregate_selected_years(excel_hierarchy_data, list(excel_hierarchy_data.keys()))
             _render_insights(aggregated_data)
         else:
             st.info("Insights requerem dados da estrutura nativa do Excel.")
+    
+    with tab5:
+        if excel_hierarchy_data:
+            available_years = list(excel_hierarchy_data.keys())
+            selected_years = st.multiselect(
+                "Selecione os anos para análise temporal",
+                available_years,
+                default=available_years,
+                key="temporal_years"
+            )
+            if selected_years:
+                _render_temporal_analysis(excel_hierarchy_data, selected_years)
+        else:
+            st.info("Análise temporal requer dados da estrutura nativa do Excel.")
 
 
 def _render_breadcrumb_navigation():

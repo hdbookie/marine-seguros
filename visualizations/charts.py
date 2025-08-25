@@ -4,7 +4,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 import pandas as pd
 from utils.formatters import format_currency, format_percentage
-from typing import Dict, List
+from typing import Dict, List, Optional
 import numpy as np
 
 
@@ -3761,5 +3761,270 @@ def create_pnl_evolution_chart_custom(df, x_col='year', x_title='Ano'):
         )
     elif x_col == 'period':
         fig.update_xaxes(tickangle=-45)
+    
+    return fig
+
+
+def create_expense_revenue_percentage_chart(
+    expenses: Dict[str, float], 
+    revenue: float, 
+    title: str = "Despesas como % da Receita"
+) -> go.Figure:
+    """
+    Create a bar chart showing expenses as percentage of revenue
+    
+    Args:
+        expenses: Dictionary of expense categories and values
+        revenue: Total revenue value
+        title: Chart title
+    """
+    if revenue <= 0:
+        return go.Figure().add_annotation(
+            text="Receita não disponível para cálculo de percentuais",
+            xref="paper", yref="paper",
+            x=0.5, y=0.5, showarrow=False
+        )
+    
+    # Calculate percentages
+    categories = list(expenses.keys())
+    values = list(expenses.values())
+    percentages = [(v / revenue * 100) for v in values]
+    
+    # Sort by percentage
+    sorted_data = sorted(zip(categories, values, percentages), key=lambda x: x[2], reverse=True)
+    categories, values, percentages = zip(*sorted_data)
+    
+    fig = go.Figure()
+    
+    # Add bars
+    fig.add_trace(go.Bar(
+        x=categories,
+        y=percentages,
+        text=[f"{p:.1f}%<br>{format_currency(v)}" for v, p in zip(values, percentages)],
+        textposition='outside',
+        marker_color=['red' if p > 30 else 'orange' if p > 20 else 'green' for p in percentages],
+        hovertemplate='<b>%{x}</b><br>%{y:.1f}% da receita<br>Valor: %{customdata}<extra></extra>',
+        customdata=[format_currency(v) for v in values]
+    ))
+    
+    # Add reference line at 100%
+    fig.add_hline(y=100, line_dash="dash", line_color="red", 
+                  annotation_text="100% da Receita")
+    
+    fig.update_layout(
+        title=title,
+        xaxis_title="Categoria",
+        yaxis_title="% da Receita",
+        height=500,
+        showlegend=False,
+        yaxis=dict(range=[0, max(120, max(percentages) * 1.1)])
+    )
+    
+    return fig
+
+
+def create_category_comparison_sunburst(
+    categories_data: Dict[str, Dict[str, float]], 
+    revenue: Optional[float] = None
+) -> go.Figure:
+    """
+    Create a sunburst chart for hierarchical category comparison
+    
+    Args:
+        categories_data: Nested dictionary of categories and subcategories with values
+        revenue: Optional revenue for percentage calculations
+    """
+    labels = []
+    parents = []
+    values = []
+    colors = []
+    
+    # Add root
+    total = sum(cat_data.get('total', sum(cat_data.values()) if isinstance(cat_data, dict) else cat_data) 
+                for cat_data in categories_data.values())
+    labels.append("Total Custos")
+    parents.append("")
+    values.append(total)
+    colors.append("lightgray")
+    
+    # Color palette
+    color_palette = px.colors.qualitative.Set3
+    
+    # Add categories and subcategories
+    for i, (cat_name, cat_data) in enumerate(categories_data.items()):
+        if isinstance(cat_data, dict):
+            # Category with subcategories
+            cat_total = cat_data.get('total', sum(v for k, v in cat_data.items() if k != 'total'))
+            labels.append(cat_name)
+            parents.append("Total Custos")
+            values.append(cat_total)
+            colors.append(color_palette[i % len(color_palette)])
+            
+            # Add subcategories
+            for subcat_name, subcat_value in cat_data.items():
+                if subcat_name != 'total' and subcat_value > 0:
+                    labels.append(subcat_name)
+                    parents.append(cat_name)
+                    values.append(subcat_value)
+                    colors.append(color_palette[i % len(color_palette)])
+        else:
+            # Simple category
+            labels.append(cat_name)
+            parents.append("Total Custos")
+            values.append(cat_data)
+            colors.append(color_palette[i % len(color_palette)])
+    
+    # Create custom hover text
+    if revenue and revenue > 0:
+        customdata = [(v / revenue * 100) for v in values]
+        hovertemplate = '<b>%{label}</b><br>Valor: R$ %{value:,.0f}<br>%{percentParent} do pai<br>%{customdata:.1f}% da receita<extra></extra>'
+    else:
+        customdata = None
+        hovertemplate = '<b>%{label}</b><br>Valor: R$ %{value:,.0f}<br>%{percentParent} do pai<extra></extra>'
+    
+    fig = go.Figure(go.Sunburst(
+        labels=labels,
+        parents=parents,
+        values=values,
+        branchvalues="total",
+        marker=dict(colors=colors),
+        customdata=customdata,
+        hovertemplate=hovertemplate
+    ))
+    
+    fig.update_layout(
+        title="Hierarquia de Custos com Subcategorias",
+        height=600,
+        margin=dict(t=50, b=0, l=0, r=0)
+    )
+    
+    return fig
+
+
+def create_expense_selection_matrix(
+    items: List[Dict[str, any]], 
+    selected_ids: set,
+    revenue: Optional[float] = None
+) -> go.Figure:
+    """
+    Create a matrix/heatmap for expense selection visualization
+    
+    Args:
+        items: List of expense items with 'id', 'label', 'value', 'category'
+        selected_ids: Set of selected item IDs
+        revenue: Optional revenue for percentage calculations
+    """
+    # Group items by category
+    categories = {}
+    for item in items:
+        cat = item.get('category', 'Outros')
+        if cat not in categories:
+            categories[cat] = []
+        categories[cat].append(item)
+    
+    # Create matrix data
+    max_items = max(len(items) for items in categories.values())
+    matrix = []
+    hover_text = []
+    
+    for cat_name, cat_items in categories.items():
+        row = []
+        hover_row = []
+        for i in range(max_items):
+            if i < len(cat_items):
+                item = cat_items[i]
+                is_selected = item['id'] in selected_ids
+                value = item['value']
+                
+                # Color intensity based on value and selection
+                if is_selected:
+                    intensity = 0.5 + (value / max(i['value'] for i in items)) * 0.5
+                else:
+                    intensity = (value / max(i['value'] for i in items)) * 0.3
+                
+                row.append(intensity)
+                
+                # Hover text
+                hover_info = f"<b>{item['label']}</b><br>Valor: {format_currency(value)}"
+                if revenue and revenue > 0:
+                    hover_info += f"<br>{(value/revenue*100):.1f}% da receita"
+                hover_info += f"<br>{'✅ Selecionado' if is_selected else '⬜ Não selecionado'}"
+                hover_row.append(hover_info)
+            else:
+                row.append(0)
+                hover_row.append("")
+        
+        matrix.append(row)
+        hover_text.append(hover_row)
+    
+    fig = go.Figure(data=go.Heatmap(
+        z=matrix,
+        text=hover_text,
+        hovertemplate='%{text}<extra></extra>',
+        colorscale='RdYlGn',
+        showscale=True,
+        colorbar=dict(title="Intensidade")
+    ))
+    
+    fig.update_layout(
+        title="Matriz de Seleção de Despesas",
+        xaxis_title="Posição",
+        yaxis_title="Categoria",
+        yaxis=dict(ticktext=list(categories.keys()), tickvals=list(range(len(categories)))),
+        height=400 + len(categories) * 30
+    )
+    
+    return fig
+
+
+def create_comparative_waterfall(
+    base_value: float,
+    changes: Dict[str, float],
+    title: str = "Análise Waterfall de Mudanças"
+) -> go.Figure:
+    """
+    Create a waterfall chart showing changes from base value
+    
+    Args:
+        base_value: Starting value
+        changes: Dictionary of change categories and values
+        title: Chart title
+    """
+    # Prepare data
+    x = ["Base"] + list(changes.keys()) + ["Total"]
+    measure = ["absolute"] + ["relative"] * len(changes) + ["total"]
+    y = [base_value] + list(changes.values()) + [None]
+    
+    # Colors for positive and negative changes
+    marker_colors = ["lightgray"]
+    for change in changes.values():
+        marker_colors.append("green" if change >= 0 else "red")
+    marker_colors.append("blue")
+    
+    # Text labels
+    text = [format_currency(base_value)]
+    for change in changes.values():
+        text.append(f"{'+' if change >= 0 else ''}{format_currency(change)}")
+    total = base_value + sum(changes.values())
+    text.append(format_currency(total))
+    
+    fig = go.Figure(go.Waterfall(
+        x=x,
+        measure=measure,
+        y=y,
+        text=text,
+        textposition="outside",
+        connector={"line": {"color": "gray", "width": 2}},
+        increasing={"marker": {"color": "green"}},
+        decreasing={"marker": {"color": "red"}},
+        totals={"marker": {"color": "blue"}}
+    ))
+    
+    fig.update_layout(
+        title=title,
+        showlegend=False,
+        height=500,
+        xaxis_tickangle=-45
+    )
     
     return fig
